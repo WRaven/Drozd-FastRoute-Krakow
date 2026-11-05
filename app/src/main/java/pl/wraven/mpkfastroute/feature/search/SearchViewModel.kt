@@ -20,6 +20,8 @@ import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
+import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
 import pl.wraven.mpkfastroute.core.location.LocationPermissionRequiredException
 import pl.wraven.mpkfastroute.core.location.LocationUnavailableException
 import pl.wraven.mpkfastroute.core.settings.AppPreferences
@@ -33,6 +35,7 @@ data class SearchUiState(
     val homeStopId: String? = null,
     val workStopId: String? = null,
     val journey: CsaJourney? = null,
+    val liveDepartures: LiveDeparturesResult? = null,
     val isImporting: Boolean = false,
     val isSearching: Boolean = false,
     val progressMessage: String = "",
@@ -48,6 +51,7 @@ class SearchViewModel @Inject constructor(
     private val database: AppDatabase,
     private val gtfsZipParser: GtfsZipParser,
     private val routePlanner: RoutePlanner,
+    private val ttssDepartureRepository: TtssDepartureRepository,
     private val contextEngine: ContextEngine,
     private val appPreferences: AppPreferences,
     private val radioManager: RadioManager
@@ -63,7 +67,13 @@ class SearchViewModel @Inject constructor(
 
     fun setOriginQuery(query: String) {
         mutableUiState.update {
-            it.copy(originQuery = query, originStop = null, journey = null, statusMessage = null)
+            it.copy(
+                originQuery = query,
+                originStop = null,
+                journey = null,
+                liveDepartures = null,
+                statusMessage = null
+            )
         }
     }
 
@@ -80,7 +90,12 @@ class SearchViewModel @Inject constructor(
 
     fun selectOrigin(stop: StopEntity) {
         mutableUiState.update {
-            it.copy(originQuery = stop.stopName, originStop = stop, journey = null)
+            it.copy(
+                originQuery = stop.stopName,
+                originStop = stop,
+                journey = null,
+                liveDepartures = null
+            )
         }
     }
 
@@ -102,16 +117,24 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
             try {
-                val serviceTime = GtfsServiceClock.from(LocalDateTime.now())
+                val now = LocalDateTime.now()
+                val serviceTime = GtfsServiceClock.from(now)
                 val journey = routePlanner.findEarliestJourney(
                     originStopId = origin.stopId,
                     destinationStopId = destination.stopId,
                     serviceDate = serviceTime.serviceDate,
                     startTimeSeconds = serviceTime.timeSeconds
                 )
+                val liveDepartures = ttssDepartureRepository.getDepartures(
+                    stopId = origin.stopId,
+                    serviceDate = serviceTime.serviceDate,
+                    startTimeSeconds = serviceTime.timeSeconds,
+                    nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                )
                 mutableUiState.update {
                     it.copy(
                         journey = journey,
+                        liveDepartures = liveDepartures,
                         statusMessage = if (journey == null) {
                             "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
                         } else {
@@ -333,6 +356,7 @@ class SearchViewModel @Inject constructor(
                     originQuery = result.origin.stopName,
                     destinationQuery = result.destination.stopName,
                     journey = result.journey,
+                    liveDepartures = null,
                     statusMessage = null
                 )
             }

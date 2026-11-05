@@ -21,8 +21,8 @@ the architecture and phases in the project specification.
   routing, already-at-destination detection, and random destinations.
 - Compose now provides first-run GTFS import progress, stop search and route
   results, home/work/radio/random quick actions, and manual schedule refresh.
-- Showing TTSS predictions in the departure and route results is the remaining
-  live-data integration step.
+- TTSS predictions are matched to static departures at the selected origin;
+  unmatched or unavailable live data remains visibly static.
 
 ## Versioning and in-place updates
 

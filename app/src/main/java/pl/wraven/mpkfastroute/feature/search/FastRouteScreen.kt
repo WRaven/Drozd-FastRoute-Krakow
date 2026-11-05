@@ -307,6 +307,12 @@ private fun SearchContent(
                 destination = state.destinationStop
             )
         }
+        state.liveDepartures?.let { departures ->
+            LiveDeparturesSection(
+                stop = state.originStop,
+                departures = departures
+            )
+        }
     }
 }
 
@@ -385,6 +391,38 @@ private fun JourneyResult(
                     )
                 }
 
+                @Composable
+                private fun LiveDeparturesSection(
+                    stop: StopEntity?,
+                    departures: pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+                ) {
+                    if (departures.departures.isEmpty()) {
+                        return
+                    }
+
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Odjazdy z ${stop?.stopName.orEmpty()}",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                        departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
+                            val liveIndicator = if (departure.isLive) " · LIVE" else ""
+                            Text(
+                                "${departure.routeShortName} → ${departure.direction}: " +
+                                    "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
+                                color = if (departure.isLive) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
+                        }
+                    }
+                }
+
                 is JourneyStep.Walk -> {
                     val footpath = step.footpath
                     Text(
@@ -439,3 +477,4 @@ private fun formatGtfsTime(seconds: Int): String {
 }
 
 private const val MAX_STOP_SUGGESTIONS = 6
+private const val MAX_DISPLAYED_DEPARTURES = 12

@@ -91,6 +91,13 @@ data class GtfsConnectionRow(
     val serviceId: String
 )
 
+data class GtfsDepartureRow(
+    val routeShortName: String,
+    val direction: String?,
+    val departureTime: Int,
+    val serviceId: String
+)
+
 @Dao
 interface StopTimeDao {
     @Query(
@@ -127,6 +134,26 @@ interface StopTimeDao {
         """
     )
     suspend fun getConnectionsBetween(startTime: Int, endTime: Int): List<GtfsConnectionRow>
+
+    @Query(
+        """
+        SELECT route.routeShortName AS routeShortName,
+               trip.tripHeadsign AS direction,
+               stopTime.departureTime AS departureTime,
+               trip.serviceId AS serviceId
+        FROM stop_times AS stopTime
+        JOIN trips AS trip ON trip.tripId = stopTime.tripId
+        JOIN routes AS route ON route.routeId = trip.routeId
+        WHERE stopTime.stopId = :stopId
+          AND stopTime.departureTime BETWEEN :startTime AND :endTime
+        ORDER BY stopTime.departureTime, route.routeShortName, trip.tripId
+        """
+    )
+    suspend fun getDeparturesAtStopBetween(
+        stopId: String,
+        startTime: Int,
+        endTime: Int
+    ): List<GtfsDepartureRow>
 
     @Query("SELECT * FROM stop_times WHERE tripId = :tripId ORDER BY stopSequence")
     suspend fun getForTrip(tripId: String): List<StopTimeEntity>
