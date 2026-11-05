@@ -4,6 +4,17 @@ Android app for searching Kraków public-transport connections, showing live
 departure information, and playing radio streams. The implementation follows
 the architecture and phases in the project specification.
 
+## Implementation status
+
+- The Room v2 database stores GTFS stops, routes, trips, stop times, service
+  calendars, and date exceptions. The importer downloads the official Kraków
+  feed and replaces its data transactionally in batches.
+- The route planner filters services for the requested date, scans departures
+  within a two-hour window, applies a three-minute transfer penalty, and
+  includes walking transfers between stops within 150 meters.
+- TTSS live departures, radio playback, GPS quick actions, onboarding, and the
+  complete Compose search interface are still to be implemented.
+
 ## Versioning and in-place updates
 
 - Releases use semantic version tags: `vMAJOR.MINOR.PATCH` (for example,
