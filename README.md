@@ -4,14 +4,42 @@ Android app for searching Kraków public-transport connections, showing live
 departure information, and playing radio streams. The implementation follows
 the architecture and phases in the project specification.
 
-## Create the public GitHub repository
+## Versioning and in-place updates
 
-After authenticating GitHub CLI, create and publish this local repository:
+- Releases use semantic version tags: `vMAJOR.MINOR.PATCH` (for example,
+  `v1.2.0`). The tag becomes the Android `versionName`.
+- GitHub Actions assigns the workflow run number as Android `versionCode`.
+  The Gradle configuration added in Phase 1 must read `APP_VERSION_NAME` and
+  `APP_VERSION_CODE` from the release workflow.
+- All releases must keep the same Android `applicationId` and be signed with
+  the same release key. Changing either prevents Android from installing an
+  APK over the existing app.
+- The release workflow deliberately fails unless the four signing secrets
+  below are configured. It never silently publishes an unsigned or differently
+  signed APK.
+
+Before the first release, create and securely back up one Android release
+keystore. Configure these GitHub Actions repository secrets without sharing
+their values in chat or committing them to the repository:
+
+| Secret | Value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | Base64 encoding of the keystore file |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_ALIAS` | Signing key alias |
+| `ANDROID_KEY_PASSWORD` | Signing key password |
+
+Keep the keystore and passwords safe and unchanged for future releases. If the
+release key is lost, Android cannot install a differently signed APK as an
+update.
+
+After Phase 1 adds the Gradle Android project, publish a version by tagging a
+commit and pushing the tag:
 
 ```powershell
-gh auth login --hostname github.com --web
-gh repo create WRaven/MPK-Krakow-FastRoute --public --source=. --remote=origin --push
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
 ```
 
-The Android Gradle project and `gradlew` are added in Phase 1. The tag-triggered
-APK release workflow becomes runnable once that phase is in place.
+The workflow builds a signed, versioned APK, attaches it to the matching
+GitHub Release, and keeps a downloadable Actions artifact.
