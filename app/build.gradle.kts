@@ -63,13 +63,13 @@ if (hasReleaseSigning && !file(signingValues[0]!!).isFile) {
 android {
     namespace = "pl.wraven.mpkfastroute"
     compileSdk {
-        version = release(37)
+        version = release(36)
     }
 
     defaultConfig {
         applicationId = "pl.wraven.mpkfastroute"
         minSdk = 26
-        targetSdk = 37
+        targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
 
