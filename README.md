@@ -19,8 +19,10 @@ the architecture and phases in the project specification.
   playback controls, and persist the last selected station.
 - Home/work stop preferences and a GPS context engine support nearest-stop
   routing, already-at-destination detection, and random destinations.
-- GPS quick actions, onboarding, and the Compose search interface that wires
-  these components together are still to be implemented.
+- Compose now provides first-run GTFS import progress, stop search and route
+  results, home/work/radio/random quick actions, and manual schedule refresh.
+- Showing TTSS predictions in the departure and route results is the remaining
+  live-data integration step.
 
 ## Versioning and in-place updates
 

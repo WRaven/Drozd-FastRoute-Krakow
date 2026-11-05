@@ -9,6 +9,7 @@ import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.location.CurrentLocationProvider
 import pl.wraven.mpkfastroute.core.settings.AppPreferences
 
@@ -78,20 +79,12 @@ class ContextEngine @Inject constructor(
         destination: StopEntity,
         searchWindowSeconds: Int
     ): QuickActionResult {
-        val now = LocalDateTime.now()
-        val afterMidnightServiceDay = now.hour < SERVICE_DAY_CUTOFF_HOUR
-        val serviceDate = if (afterMidnightServiceDay) {
-            now.toLocalDate().minusDays(1)
-        } else {
-            now.toLocalDate()
-        }
-        val startTimeSeconds = now.toLocalTime().toSecondOfDay() +
-            if (afterMidnightServiceDay) SECONDS_PER_DAY else 0
+        val serviceTime = GtfsServiceClock.from(LocalDateTime.now())
         val journey = routePlanner.findEarliestJourney(
             originStopId = origin.stopId,
             destinationStopId = destination.stopId,
-            serviceDate = serviceDate,
-            startTimeSeconds = startTimeSeconds,
+            serviceDate = serviceTime.serviceDate,
+            startTimeSeconds = serviceTime.timeSeconds,
             searchWindowSeconds = searchWindowSeconds
         ) ?: return QuickActionResult.NoJourneyFound
 
@@ -110,7 +103,5 @@ class ContextEngine @Inject constructor(
         const val RANDOM_DESTINATION_MIN_DISTANCE_METERS = 3_000.0
         const val RANDOM_SEARCH_WINDOW_SECONDS = 60 * 60
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
-        const val SERVICE_DAY_CUTOFF_HOUR = 3
-        const val SECONDS_PER_DAY = 24 * 60 * 60
     }
 }
