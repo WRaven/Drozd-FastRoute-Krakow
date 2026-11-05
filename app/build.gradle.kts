@@ -8,6 +8,10 @@ plugins {
     alias(libs.plugins.hilt.android)
 }
 
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 val gitDescription = providers.exec {
     commandLine("git", "describe", "--tags", "--always")
 }.standardOutput.asText.get().trim()
