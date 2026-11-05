@@ -17,6 +17,8 @@ the architecture and phases in the project specification.
   marked static estimates when live data is unavailable.
 - Radio streams run in a MediaSession foreground service, support system
   playback controls, and persist the last selected station.
+- Home/work stop preferences and a GPS context engine support nearest-stop
+  routing, already-at-destination detection, and random destinations.
 - GPS quick actions, onboarding, and the Compose search interface that wires
   these components together are still to be implemented.
 

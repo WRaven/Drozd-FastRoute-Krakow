@@ -143,6 +143,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coroutines.android)
+    implementation(libs.coroutines.play.services)
 
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

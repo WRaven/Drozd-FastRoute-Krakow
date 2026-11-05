@@ -67,11 +67,22 @@ class FootpathGenerator @Inject constructor() {
 }
 
 object Haversine {
-    fun distanceMeters(first: StopEntity, second: StopEntity): Double {
-        val latitudeDifference = Math.toRadians(second.stopLat - first.stopLat)
-        val longitudeDifference = Math.toRadians(second.stopLon - first.stopLon)
-        val firstLatitude = Math.toRadians(first.stopLat)
-        val secondLatitude = Math.toRadians(second.stopLat)
+    fun distanceMeters(first: StopEntity, second: StopEntity): Double =
+        distanceMeters(first.stopLat, first.stopLon, second.stopLat, second.stopLon)
+
+    fun distanceMeters(latitude: Double, longitude: Double, stop: StopEntity): Double =
+        distanceMeters(latitude, longitude, stop.stopLat, stop.stopLon)
+
+    private fun distanceMeters(
+        firstLatitudeDegrees: Double,
+        firstLongitudeDegrees: Double,
+        secondLatitudeDegrees: Double,
+        secondLongitudeDegrees: Double
+    ): Double {
+        val latitudeDifference = Math.toRadians(secondLatitudeDegrees - firstLatitudeDegrees)
+        val longitudeDifference = Math.toRadians(secondLongitudeDegrees - firstLongitudeDegrees)
+        val firstLatitude = Math.toRadians(firstLatitudeDegrees)
+        val secondLatitude = Math.toRadians(secondLatitudeDegrees)
         val haversine = sin(latitudeDifference / 2) * sin(latitudeDifference / 2) +
             cos(firstLatitude) * cos(secondLatitude) *
             sin(longitudeDifference / 2) * sin(longitudeDifference / 2)

@@ -15,10 +15,14 @@ class RoutePlanner @Inject constructor(
         originStopId: String,
         destinationStopId: String,
         serviceDate: LocalDate,
-        startTimeSeconds: Int
+        startTimeSeconds: Int,
+        searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS
     ): CsaJourney? {
         require(startTimeSeconds >= 0) { "Start time must not be negative." }
-        val endTimeSeconds = Math.addExact(startTimeSeconds, SEARCH_WINDOW_SECONDS)
+        require(searchWindowSeconds in 1..MAX_SEARCH_WINDOW_SECONDS) {
+            "Search window must be between 1 second and 2 hours."
+        }
+        val endTimeSeconds = Math.addExact(startTimeSeconds, searchWindowSeconds)
         val serviceDateString = serviceDate.format(DateTimeFormatter.BASIC_ISO_DATE)
         val calendarDao = database.serviceCalendarDao()
         val activeServiceIds = ServiceCalendarResolver.activeServiceIds(
@@ -60,6 +64,7 @@ class RoutePlanner @Inject constructor(
     }
 
     private companion object {
-        const val SEARCH_WINDOW_SECONDS = 2 * 60 * 60
+        const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
+        const val MAX_SEARCH_WINDOW_SECONDS = DEFAULT_SEARCH_WINDOW_SECONDS
     }
 }
