@@ -21,10 +21,11 @@ the architecture and phases in the project specification.
 - Home/work addresses are stored as coordinates; the GPS context engine finds
   nearby stops for quick routing, already-at-destination detection, and random
   destinations. Existing saved stop IDs remain supported.
-- Compose provides first-run GTFS import progress, a current-location origin,
-  address search with nearby stop selection, grouped stop names with explicit
-  platform selection, home/work/radio/random quick actions, and manual
-  schedule refresh.
+- Compose provides first-run GTFS import progress, a current-location or
+  typed-address/name origin, address search with nearby stop selection, grouped
+  stop names, home/work/radio/random quick actions, and manual schedule refresh.
+- Stop codes remain available internally for TTSS mapping and stop matching,
+  but are not shown in user-facing stop labels.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 

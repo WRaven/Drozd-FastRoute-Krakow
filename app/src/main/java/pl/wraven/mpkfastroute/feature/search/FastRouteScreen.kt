@@ -130,6 +130,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onUseCurrentLocation = {
                     runWithLocationPermission(viewModel::useCurrentLocation)
                 },
+                onOriginQueryChange = viewModel::setOriginQuery,
+                onSelectOrigin = viewModel::selectOrigin,
+                onSearchOriginAddress = viewModel::searchOriginAddress,
+                onSelectOriginAddress = viewModel::selectOriginAddress,
                 onDestinationQueryChange = viewModel::setDestinationQuery,
                 onSelectDestination = viewModel::selectDestination,
                 onSearchAddress = viewModel::searchDestinationAddress,
@@ -218,6 +222,10 @@ private fun OnboardingContent(
 private fun SearchContent(
     state: SearchUiState,
     onUseCurrentLocation: () -> Unit,
+    onOriginQueryChange: (String) -> Unit,
+    onSelectOrigin: (StopEntity) -> Unit,
+    onSearchOriginAddress: () -> Unit,
+    onSelectOriginAddress: (GeoPlace) -> Unit,
     onDestinationQueryChange: (String) -> Unit,
     onSelectDestination: (StopEntity) -> Unit,
     onSearchAddress: () -> Unit,
@@ -289,14 +297,62 @@ private fun SearchContent(
         Button(onClick = onUseCurrentLocation, enabled = !state.isSearching) {
             Text("📍 Użyj mojej lokalizacji")
         }
+        Text("albo wpisz adres lub nazwę przystanku")
+        OutlinedTextField(
+            value = state.originQuery,
+            onValueChange = onOriginQueryChange,
+            label = { Text("Adres lub nazwa przystanku") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        TextButton(
+            onClick = onSearchOriginAddress,
+            enabled = !state.isSearching && state.originQuery.isNotBlank()
+        ) {
+            Text("Szukaj adresu początku")
+        }
+        state.originAddressCandidates.forEach { place ->
+            TextButton(
+                onClick = { onSelectOriginAddress(place) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(place.label)
+            }
+        }
+        if (state.originPlace == null && state.originAddressCandidates.isEmpty()) {
+            StopGroupPicker(
+                query = state.originQuery,
+                groups = stopGroups,
+                onSelectStop = onSelectOrigin
+            )
+        }
         state.originPlace?.let { place ->
-            Text("Lokalizacja: ${place.label}")
+            Text("Początek: ${place.label}")
+        }
+        if (state.originPlace != null && state.originStop == null &&
+            state.nearbyOriginStops.isNotEmpty()
+        ) {
+            Text("Wybierz przystanek początkowy:")
+            state.nearbyOriginStops.forEach { stop ->
+                val distanceMeters = Haversine.distanceMeters(
+                    state.originPlace.latitude,
+                    state.originPlace.longitude,
+                    stop.stopLat,
+                    stop.stopLon
+                )
+                TextButton(
+                    onClick = { onSelectOrigin(stop) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        "${StopNameGrouper.mainName(stop.stopName)} · " +
+                            "${distanceMeters.toInt()} m"
+                    )
+                }
+            }
         }
         state.originStop?.let { stop ->
-            Text(
-                "Najbliższy przystanek: ${StopNameGrouper.mainName(stop.stopName)}" +
-                    platformDescription(stop)
-            )
+            Text("Przystanek początkowy: ${StopNameGrouper.mainName(stop.stopName)}")
         }
 
         Text("Cel", style = MaterialTheme.typography.titleSmall)
@@ -339,14 +395,13 @@ private fun SearchContent(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text(
-                            "${StopNameGrouper.mainName(stop.stopName)}" +
-                                "${platformDescription(stop)} · " +
+                            "${StopNameGrouper.mainName(stop.stopName)} · " +
                                 "${distanceMeters.toInt()} m"
                         )
                     }
                 }
             }
-        } else {
+        } else if (state.addressCandidates.isEmpty()) {
             StopGroupPicker(
                 query = state.destinationQuery,
                 groups = stopGroups,
@@ -354,10 +409,7 @@ private fun SearchContent(
             )
         }
         state.destinationStop?.let { stop ->
-            Text(
-                "Wybrany przystanek: ${StopNameGrouper.mainName(stop.stopName)}" +
-                    platformDescription(stop)
-            )
+            Text("Przystanek docelowy: ${StopNameGrouper.mainName(stop.stopName)}")
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -429,9 +481,9 @@ private fun StopGroupPicker(
             ) {
                 Text(
                     if (group.stops.size == 1) {
-                        group.name + platformDescription(group.stops.single())
+                        group.name
                     } else {
-                        "${group.name} · wybierz peron (${group.stops.size})"
+                        "${group.name} · wybierz przystanek"
                     }
                 )
             }
@@ -443,7 +495,7 @@ private fun StopGroupPicker(
                             .fillMaxWidth()
                             .padding(start = 16.dp)
                     ) {
-                        Text("${group.name}${platformDescription(stop)}")
+                        Text(group.name)
                     }
                 }
             }
@@ -464,7 +516,8 @@ private fun JourneyResult(
     ) {
         Text("Wynik", style = MaterialTheme.typography.titleLarge)
         Text(
-            "${origin?.stopName.orEmpty()} → ${destination?.stopName.orEmpty()}",
+            "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
+                destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
             fontWeight = FontWeight.Medium
         )
         Text(
@@ -515,7 +568,7 @@ private fun LiveDeparturesSection(
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
         Text(
-            "Odjazdy z ${stop?.stopName.orEmpty()}",
+            "Odjazdy z ${stop?.stopName?.let(StopNameGrouper::mainName).orEmpty()}",
             style = MaterialTheme.typography.titleMedium
         )
         departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
@@ -567,11 +620,8 @@ private fun SettingsDialog(
 
 private fun stopName(stops: List<StopEntity>, stopId: String): String =
     stops.firstOrNull { it.stopId == stopId }?.let { stop ->
-        StopNameGrouper.mainName(stop.stopName) + platformDescription(stop)
-    } ?: stopId
-
-private fun platformDescription(stop: StopEntity): String =
-    StopNameGrouper.platformLabel(stop)?.let { " · słupek $it" }.orEmpty()
+        StopNameGrouper.mainName(stop.stopName)
+    } ?: "Nieznany przystanek"
 
 private fun formatGtfsTime(seconds: Int): String {
     val totalMinutes = seconds / 60

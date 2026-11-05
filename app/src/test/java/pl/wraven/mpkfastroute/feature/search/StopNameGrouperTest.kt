@@ -27,9 +27,16 @@ class StopNameGrouperTest {
         assertEquals("01", StopNameGrouper.platformLabel(firstPlatform))
     }
 
-    private fun stop(id: String, name: String) = StopEntity(
+    @Test
+    fun usesStopCodeAsInternalPlatformLabelWhenNameHasNoNumericSuffix() {
+        val stop = stop("stop-1", "Plac Inwalidów", "117-04")
+
+        assertEquals("117-04", StopNameGrouper.platformLabel(stop))
+    }
+
+    private fun stop(id: String, name: String, code: String? = null) = StopEntity(
         stopId = id,
-        stopCode = null,
+        stopCode = code,
         stopName = name,
         stopLat = 50.0,
         stopLon = 19.0

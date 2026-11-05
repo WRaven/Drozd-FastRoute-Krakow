@@ -33,10 +33,13 @@ import pl.wraven.mpkfastroute.core.settings.AppPreferences
 
 data class SearchUiState(
     val stops: List<StopEntity> = emptyList(),
+    val originQuery: String = "",
     val destinationQuery: String = "",
     val originPlace: GeoPlace? = null,
     val destinationPlace: GeoPlace? = null,
+    val originAddressCandidates: List<GeoPlace> = emptyList(),
     val addressCandidates: List<GeoPlace> = emptyList(),
+    val nearbyOriginStops: List<StopEntity> = emptyList(),
     val nearbyDestinationStops: List<StopEntity> = emptyList(),
     val originStop: StopEntity? = null,
     val destinationStop: StopEntity? = null,
@@ -97,6 +100,43 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    fun setOriginQuery(query: String) {
+        mutableUiState.update {
+            it.copy(
+                originQuery = query,
+                originPlace = null,
+                originStop = null,
+                originAddressCandidates = emptyList(),
+                nearbyOriginStops = emptyList(),
+                journey = null,
+                liveDepartures = null,
+                statusMessage = null
+            )
+        }
+    }
+
+    fun selectOrigin(stop: StopEntity) {
+        val state = mutableUiState.value
+        val place = state.originPlace?.takeIf {
+            state.nearbyOriginStops.any { candidate -> candidate.stopId == stop.stopId }
+        } ?: GeoPlace(
+            label = StopNameGrouper.mainName(stop.stopName),
+            latitude = stop.stopLat,
+            longitude = stop.stopLon
+        )
+        mutableUiState.update {
+            it.copy(
+                originQuery = place.label,
+                originPlace = place,
+                originStop = stop,
+                originAddressCandidates = emptyList(),
+                nearbyOriginStops = emptyList(),
+                journey = null,
+                liveDepartures = null
+            )
+        }
+    }
+
     fun useCurrentLocation() {
         viewModelScope.launch {
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
@@ -104,8 +144,11 @@ class SearchViewModel @Inject constructor(
                 val origin = contextEngine.findCurrentOrigin()
                 mutableUiState.update {
                     it.copy(
+                        originQuery = "",
                         originPlace = origin.place,
                         originStop = origin.stop,
+                        originAddressCandidates = emptyList(),
+                        nearbyOriginStops = emptyList(),
                         journey = null,
                         liveDepartures = null
                     )
@@ -122,6 +165,73 @@ class SearchViewModel @Inject constructor(
                 showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
             } finally {
                 mutableUiState.update { it.copy(isSearching = false) }
+            }
+        }
+    }
+
+    fun searchOriginAddress() {
+        val query = mutableUiState.value.originQuery
+        if (query.isBlank()) {
+            showMessage("Wpisz adres, aby go wyszukać.")
+            return
+        }
+        viewModelScope.launch {
+            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+            try {
+                val addresses = addressGeocoder.search(query)
+                if (addresses.isEmpty()) {
+                    showMessage("Nie znaleziono adresu. Sprawdź wpisaną nazwę.")
+                } else {
+                    mutableUiState.update {
+                        it.copy(
+                            originAddressCandidates = addresses,
+                            originPlace = null,
+                            originStop = null,
+                            nearbyOriginStops = emptyList(),
+                            journey = null,
+                            liveDepartures = null
+                        )
+                    }
+                }
+            } catch (exception: IOException) {
+                showMessage("Nie udało się wyszukać adresu: ${exception.message.orEmpty()}")
+            } catch (exception: IllegalArgumentException) {
+                showMessage("Nieprawidłowy adres: ${exception.message.orEmpty()}")
+            } finally {
+                mutableUiState.update { it.copy(isSearching = false) }
+            }
+        }
+    }
+
+    fun selectOriginAddress(place: GeoPlace) {
+        viewModelScope.launch {
+            val nearbyStops = withContext(Dispatchers.Default) {
+                mutableUiState.value.stops
+                    .sortedBy { stop ->
+                        Haversine.distanceMeters(
+                            place.latitude,
+                            place.longitude,
+                            stop.stopLat,
+                            stop.stopLon
+                        )
+                    }
+                    .take(MAX_NEARBY_STOPS)
+            }
+            mutableUiState.update {
+                it.copy(
+                    originQuery = place.label,
+                    originPlace = place,
+                    originAddressCandidates = emptyList(),
+                    nearbyOriginStops = nearbyStops,
+                    originStop = null,
+                    journey = null,
+                    liveDepartures = null,
+                    statusMessage = if (nearbyStops.isEmpty()) {
+                        "Nie znaleziono przystanków w rozkładzie."
+                    } else {
+                        null
+                    }
+                )
             }
         }
     }
@@ -478,12 +588,15 @@ class SearchViewModel @Inject constructor(
         when (result) {
             is QuickActionResult.JourneyFound -> mutableUiState.update {
                 it.copy(
+                    originQuery = "",
                     originStop = result.origin,
                     destinationStop = result.destination,
                     originPlace = result.originPlace,
                     destinationPlace = result.destinationPlace,
                     destinationQuery = result.destinationPlace.label,
+                    originAddressCandidates = emptyList(),
                     addressCandidates = emptyList(),
+                    nearbyOriginStops = emptyList(),
                     nearbyDestinationStops = emptyList(),
                     journey = result.journey,
                     liveDepartures = null,
