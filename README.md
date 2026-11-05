@@ -6,7 +6,7 @@ the architecture and phases in the project specification.
 
 ## Implementation status
 
-- The Room v2 database stores GTFS stops, routes, trips, stop times, service
+- The Room v3 database stores GTFS stops, routes, trips, stop times, service
   calendars, and date exceptions. The importer downloads the official Kraków
   feed and replaces its data transactionally in batches.
 - The route planner filters services for the requested date, scans departures
@@ -15,12 +15,16 @@ the architecture and phases in the project specification.
 - The TTSS client maps stops by stop code or supplied normalized stop-name
   mapping, applies reported delay to static departures, and returns explicitly
   marked static estimates when live data is unavailable.
-- Radio streams run in a MediaSession foreground service, support system
-  playback controls, and persist the last selected station.
-- Home/work stop preferences and a GPS context engine support nearest-stop
-  routing, already-at-destination detection, and random destinations.
-- Compose now provides first-run GTFS import progress, stop search and route
-  results, home/work/radio/random quick actions, and manual schedule refresh.
+- Radio streams run in a MediaSession foreground service, stay bound to the
+  media session while active, support system playback controls, and persist
+  the last selected station.
+- Home/work addresses are stored as coordinates; the GPS context engine finds
+  nearby stops for quick routing, already-at-destination detection, and random
+  destinations. Existing saved stop IDs remain supported.
+- Compose provides first-run GTFS import progress, a current-location origin,
+  address search with nearby stop selection, grouped stop names with explicit
+  platform selection, home/work/radio/random quick actions, and manual
+  schedule refresh.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 

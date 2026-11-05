@@ -7,14 +7,17 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
 import java.time.LocalDateTime
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.audio.RadioManager
 import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
+import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
@@ -22,18 +25,25 @@ import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
+import pl.wraven.mpkfastroute.core.location.AddressGeocoder
+import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.location.LocationPermissionRequiredException
 import pl.wraven.mpkfastroute.core.location.LocationUnavailableException
 import pl.wraven.mpkfastroute.core.settings.AppPreferences
 
 data class SearchUiState(
     val stops: List<StopEntity> = emptyList(),
-    val originQuery: String = "",
     val destinationQuery: String = "",
+    val originPlace: GeoPlace? = null,
+    val destinationPlace: GeoPlace? = null,
+    val addressCandidates: List<GeoPlace> = emptyList(),
+    val nearbyDestinationStops: List<StopEntity> = emptyList(),
     val originStop: StopEntity? = null,
     val destinationStop: StopEntity? = null,
     val homeStopId: String? = null,
     val workStopId: String? = null,
+    val homePlace: GeoPlace? = null,
+    val workPlace: GeoPlace? = null,
     val journey: CsaJourney? = null,
     val liveDepartures: LiveDeparturesResult? = null,
     val isImporting: Boolean = false,
@@ -44,6 +54,12 @@ data class SearchUiState(
 ) {
     val isScheduleEmpty: Boolean
         get() = stops.isEmpty()
+
+    val hasHomeDestination: Boolean
+        get() = homePlace != null || homeStopId != null
+
+    val hasWorkDestination: Boolean
+        get() = workPlace != null || workStopId != null
 }
 
 @HiltViewModel
@@ -53,6 +69,7 @@ class SearchViewModel @Inject constructor(
     private val routePlanner: RoutePlanner,
     private val ttssDepartureRepository: TtssDepartureRepository,
     private val contextEngine: ContextEngine,
+    private val addressGeocoder: AddressGeocoder,
     private val appPreferences: AppPreferences,
     private val radioManager: RadioManager
 ) : ViewModel() {
@@ -65,11 +82,14 @@ class SearchViewModel @Inject constructor(
         ensureScheduleImported()
     }
 
-    fun setOriginQuery(query: String) {
+    fun setDestinationQuery(query: String) {
         mutableUiState.update {
             it.copy(
-                originQuery = query,
-                originStop = null,
+                destinationQuery = query,
+                destinationStop = null,
+                destinationPlace = null,
+                addressCandidates = emptyList(),
+                nearbyDestinationStops = emptyList(),
                 journey = null,
                 liveDepartures = null,
                 statusMessage = null
@@ -77,31 +97,120 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    fun setDestinationQuery(query: String) {
-        mutableUiState.update {
-            it.copy(
-                destinationQuery = query,
-                destinationStop = null,
-                journey = null,
-                statusMessage = null
-            )
+    fun useCurrentLocation() {
+        viewModelScope.launch {
+            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+            try {
+                val origin = contextEngine.findCurrentOrigin()
+                mutableUiState.update {
+                    it.copy(
+                        originPlace = origin.place,
+                        originStop = origin.stop,
+                        journey = null,
+                        liveDepartures = null
+                    )
+                }
+            } catch (exception: LocationPermissionRequiredException) {
+                showMessage("Aby użyć lokalizacji, zezwól na dostęp do lokalizacji.")
+            } catch (exception: LocationUnavailableException) {
+                showMessage(exception.message.orEmpty())
+            } catch (exception: IllegalStateException) {
+                showMessage(exception.message.orEmpty())
+            } catch (exception: SecurityException) {
+                showMessage("Brak dostępu do lokalizacji.")
+            } catch (exception: SQLiteException) {
+                showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
+            } finally {
+                mutableUiState.update { it.copy(isSearching = false) }
+            }
         }
     }
 
-    fun selectOrigin(stop: StopEntity) {
+    fun selectDestination(stop: StopEntity) {
+        val state = mutableUiState.value
+        val place = state.destinationPlace?.takeIf {
+            state.nearbyDestinationStops.any { candidate -> candidate.stopId == stop.stopId }
+        } ?: GeoPlace(
+            label = StopNameGrouper.mainName(stop.stopName),
+            latitude = stop.stopLat,
+            longitude = stop.stopLon
+        )
         mutableUiState.update {
             it.copy(
-                originQuery = stop.stopName,
-                originStop = stop,
+                destinationQuery = StopNameGrouper.mainName(stop.stopName),
+                destinationPlace = place,
+                destinationStop = stop,
+                addressCandidates = emptyList(),
                 journey = null,
                 liveDepartures = null
             )
         }
     }
 
-    fun selectDestination(stop: StopEntity) {
-        mutableUiState.update {
-            it.copy(destinationQuery = stop.stopName, destinationStop = stop, journey = null)
+    fun searchDestinationAddress() {
+        val query = mutableUiState.value.destinationQuery
+        if (query.isBlank()) {
+            showMessage("Wpisz adres, aby go wyszukać.")
+            return
+        }
+        viewModelScope.launch {
+            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+            try {
+                val addresses = addressGeocoder.search(query)
+                if (addresses.isEmpty()) {
+                    showMessage("Nie znaleziono adresu. Sprawdź wpisaną nazwę.")
+                } else {
+                    mutableUiState.update {
+                        it.copy(
+                            addressCandidates = addresses,
+                            destinationPlace = null,
+                            destinationStop = null,
+                            nearbyDestinationStops = emptyList(),
+                            journey = null,
+                            liveDepartures = null
+                        )
+                    }
+                }
+            } catch (exception: IOException) {
+                showMessage("Nie udało się wyszukać adresu: ${exception.message.orEmpty()}")
+            } catch (exception: IllegalArgumentException) {
+                showMessage("Nieprawidłowy adres: ${exception.message.orEmpty()}")
+            } finally {
+                mutableUiState.update { it.copy(isSearching = false) }
+            }
+        }
+    }
+
+    fun selectDestinationAddress(place: GeoPlace) {
+        viewModelScope.launch {
+            val nearbyStops = withContext(Dispatchers.Default) {
+                mutableUiState.value.stops
+                    .sortedBy { stop ->
+                        Haversine.distanceMeters(
+                            place.latitude,
+                            place.longitude,
+                            stop.stopLat,
+                            stop.stopLon
+                        )
+                    }
+                    .take(MAX_NEARBY_STOPS)
+            }
+            mutableUiState.update {
+                it.copy(
+                    destinationQuery = place.label,
+                    destinationPlace = place,
+                    addressCandidates = emptyList(),
+                    nearbyDestinationStops = nearbyStops,
+                    destinationStop = null,
+                    journey = null,
+                    liveDepartures = null,
+                    statusMessage = if (nearbyStops.isEmpty()) {
+                        "Nie znaleziono przystanków w rozkładzie."
+                    } else {
+                        null
+                    }
+                )
+            }
         }
     }
 
@@ -110,7 +219,7 @@ class SearchViewModel @Inject constructor(
         val origin = state.originStop
         val destination = state.destinationStop
         if (origin == null || destination == null) {
-            showMessage("Wybierz przystanek początkowy i docelowy.")
+            showMessage("Ustaw lokalizację początkową i wybierz konkretny przystanek docelowy.")
             return
         }
 
@@ -157,11 +266,11 @@ class SearchViewModel @Inject constructor(
     }
 
     fun saveSelectedStopAsHome() {
-        saveSelectedStop(isHome = true)
+        saveSelectedPlace(isHome = true)
     }
 
     fun saveSelectedStopAsWork() {
-        saveSelectedStop(isHome = false)
+        saveSelectedPlace(isHome = false)
     }
 
     fun routeHome() {
@@ -223,6 +332,14 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    fun stopRadio() {
+        try {
+            radioManager.stop()
+        } catch (exception: IllegalStateException) {
+            showMessage("Nie można zatrzymać radia: ${exception.message.orEmpty()}")
+        }
+    }
+
     fun showMessage(message: String) {
         mutableUiState.update { it.copy(statusMessage = message) }
     }
@@ -246,8 +363,18 @@ class SearchViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
+            appPreferences.homePlace.collect { place ->
+                mutableUiState.update { it.copy(homePlace = place) }
+            }
+        }
+        viewModelScope.launch {
             appPreferences.workStopId.collect { stopId ->
                 mutableUiState.update { it.copy(workStopId = stopId) }
+            }
+        }
+        viewModelScope.launch {
+            appPreferences.workPlace.collect { place ->
+                mutableUiState.update { it.copy(workPlace = place) }
             }
         }
         viewModelScope.launch {
@@ -296,24 +423,24 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private fun saveSelectedStop(isHome: Boolean) {
-        val stop = mutableUiState.value.destinationStop
-        if (stop == null) {
-            showMessage("Najpierw wybierz przystanek docelowy.")
+    private fun saveSelectedPlace(isHome: Boolean) {
+        val place = mutableUiState.value.destinationPlace
+        if (place == null) {
+            showMessage("Najpierw wybierz adres lub przystanek docelowy.")
             return
         }
         viewModelScope.launch {
             try {
                 if (isHome) {
-                    appPreferences.saveHomeStopId(stop.stopId)
+                    appPreferences.saveHomePlace(place)
                 } else {
-                    appPreferences.saveWorkStopId(stop.stopId)
+                    appPreferences.saveWorkPlace(place)
                 }
                 showMessage(
-                    if (isHome) "Zapisano przystanek domowy." else "Zapisano przystanek pracy."
+                    if (isHome) "Zapisano adres domu." else "Zapisano adres pracy."
                 )
             } catch (exception: IOException) {
-                showMessage("Nie można zapisać przystanku: ${exception.message.orEmpty()}")
+                showMessage("Nie można zapisać lokalizacji: ${exception.message.orEmpty()}")
             }
         }
     }
@@ -353,8 +480,11 @@ class SearchViewModel @Inject constructor(
                 it.copy(
                     originStop = result.origin,
                     destinationStop = result.destination,
-                    originQuery = result.origin.stopName,
-                    destinationQuery = result.destination.stopName,
+                    originPlace = result.originPlace,
+                    destinationPlace = result.destinationPlace,
+                    destinationQuery = result.destinationPlace.label,
+                    addressCandidates = emptyList(),
+                    nearbyDestinationStops = emptyList(),
                     journey = result.journey,
                     liveDepartures = null,
                     statusMessage = null
@@ -365,7 +495,7 @@ class SearchViewModel @Inject constructor(
                 when (savedDestination) {
                     SavedDestination.HOME -> "Jesteś już w domu!"
                     SavedDestination.WORK -> "Jesteś już w pracy!"
-                    null -> "Jesteś już na miejscu: ${result.destination.stopName}."
+                    null -> "Jesteś już na miejscu: ${result.destinationName}."
                 }
             )
 
@@ -375,5 +505,9 @@ class SearchViewModel @Inject constructor(
             QuickActionResult.NoRandomDestination ->
                 showMessage("Nie znaleziono przystanku oddalonego o co najmniej 3 km.")
         }
+    }
+
+    private companion object {
+        const val MAX_NEARBY_STOPS = 6
     }
 }

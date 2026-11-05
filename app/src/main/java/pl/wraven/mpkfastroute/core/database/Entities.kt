@@ -61,7 +61,7 @@ data class CalendarDateEntity(
     tableName = "stop_times",
     indices = [
         Index(value = ["stopId", "departureTime"]),
-        Index(value = ["tripId"])
+        Index(value = ["tripId", "stopSequence"])
     ]
 )
 data class StopTimeEntity(

@@ -16,7 +16,7 @@ object RadioStations {
         RadioStation(
             id = "antyradio",
             name = "Antyradio",
-            streamUrl = "http://ant.cdn.eurozet.pl/ant-waw.mp3"
+            streamUrl = "https://ant.cdn.eurozet.pl/ant-waw.mp3"
         )
     )
 }

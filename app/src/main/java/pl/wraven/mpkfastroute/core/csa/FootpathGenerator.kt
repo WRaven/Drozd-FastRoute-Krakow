@@ -73,7 +73,7 @@ object Haversine {
     fun distanceMeters(latitude: Double, longitude: Double, stop: StopEntity): Double =
         distanceMeters(latitude, longitude, stop.stopLat, stop.stopLon)
 
-    private fun distanceMeters(
+    fun distanceMeters(
         firstLatitudeDegrees: Double,
         firstLongitudeDegrees: Double,
         secondLatitudeDegrees: Double,

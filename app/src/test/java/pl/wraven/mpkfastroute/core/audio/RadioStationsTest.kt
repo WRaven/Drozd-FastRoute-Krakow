@@ -9,7 +9,7 @@ class RadioStationsTest {
         assertEquals(
             listOf(
                 "https://waw.ic.smcdn.pl/6070-1.mp3",
-                "http://ant.cdn.eurozet.pl/ant-waw.mp3"
+                "https://ant.cdn.eurozet.pl/ant-waw.mp3"
             ),
             RadioStations.all.map(RadioStation::streamUrl)
         )

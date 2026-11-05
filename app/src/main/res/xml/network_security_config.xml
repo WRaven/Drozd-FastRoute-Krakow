@@ -3,6 +3,5 @@
     <base-config cleartextTrafficPermitted="false" />
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">www.ttss.krakow.pl</domain>
-        <domain includeSubdomains="false">ant.cdn.eurozet.pl</domain>
     </domain-config>
 </network-security-config>

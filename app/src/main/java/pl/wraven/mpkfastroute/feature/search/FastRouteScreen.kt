@@ -47,9 +47,11 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
+import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+import pl.wraven.mpkfastroute.core.location.GeoPlace
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,15 +127,19 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         } else {
             SearchContent(
                 state = state,
-                onOriginQueryChange = viewModel::setOriginQuery,
+                onUseCurrentLocation = {
+                    runWithLocationPermission(viewModel::useCurrentLocation)
+                },
                 onDestinationQueryChange = viewModel::setDestinationQuery,
-                onSelectOrigin = viewModel::selectOrigin,
                 onSelectDestination = viewModel::selectDestination,
+                onSearchAddress = viewModel::searchDestinationAddress,
+                onSelectAddress = viewModel::selectDestinationAddress,
                 onSearch = viewModel::searchRoute,
                 onGoHome = { runWithLocationPermission(viewModel::routeHome) },
                 onGoToWork = { runWithLocationPermission(viewModel::routeToWork) },
                 onRandomJourney = { runWithLocationPermission(viewModel::randomJourney) },
                 onPlayRadio = viewModel::playLastSelectedRadio,
+                onStopRadio = viewModel::stopRadio,
                 onChooseRadio = { radioSelectionVisible = true },
                 onSaveHome = viewModel::saveSelectedStopAsHome,
                 onSaveWork = viewModel::saveSelectedStopAsWork,
@@ -148,8 +154,12 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         SettingsDialog(
             progressMessage = state.progressMessage,
             isImporting = state.isImporting,
-            homeStopName = state.stops.firstOrNull { it.stopId == state.homeStopId }?.stopName,
-            workStopName = state.stops.firstOrNull { it.stopId == state.workStopId }?.stopName,
+            homeStopName = state.homePlace?.label
+                ?: state.stops.firstOrNull { it.stopId == state.homeStopId }
+                    ?.let { StopNameGrouper.mainName(it.stopName) },
+            workStopName = state.workPlace?.label
+                ?: state.stops.firstOrNull { it.stopId == state.workStopId }
+                    ?.let { StopNameGrouper.mainName(it.stopName) },
             onRefresh = viewModel::refreshSchedule,
             onDismiss = { settingsVisible = false }
         )
@@ -207,20 +217,24 @@ private fun OnboardingContent(
 @Composable
 private fun SearchContent(
     state: SearchUiState,
-    onOriginQueryChange: (String) -> Unit,
+    onUseCurrentLocation: () -> Unit,
     onDestinationQueryChange: (String) -> Unit,
-    onSelectOrigin: (StopEntity) -> Unit,
     onSelectDestination: (StopEntity) -> Unit,
+    onSearchAddress: () -> Unit,
+    onSelectAddress: (GeoPlace) -> Unit,
     onSearch: () -> Unit,
     onGoHome: () -> Unit,
     onGoToWork: () -> Unit,
     onRandomJourney: () -> Unit,
     onPlayRadio: () -> Unit,
+    onStopRadio: () -> Unit,
     onChooseRadio: () -> Unit,
     onSaveHome: () -> Unit,
     onSaveWork: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
+
     Column(
         modifier = modifier
             .verticalScroll(rememberScrollState())
@@ -231,12 +245,12 @@ private fun SearchContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(
                 onClick = onGoHome,
-                enabled = state.homeStopId != null && !state.isSearching,
+                enabled = state.hasHomeDestination && !state.isSearching,
                 label = { Text("🏠 Do domu") }
             )
             AssistChip(
                 onClick = onGoToWork,
-                enabled = state.workStopId != null && !state.isSearching,
+                enabled = state.hasWorkDestination && !state.isSearching,
                 label = { Text("🏢 Do pracy") }
             )
         }
@@ -256,29 +270,95 @@ private fun SearchContent(
                 Text("Wybierz")
             }
         }
+        TextButton(onClick = onStopRadio) {
+            Text("⏹ Zatrzymaj radio")
+        }
         AssistChip(
             onClick = onRandomJourney,
             enabled = !state.isSearching,
-            label = { Text("🎲 Zaszalej") }
+            label = {
+                Text(if (state.isSearching) "Szukam trasy..." else "🎲 Zaszalej")
+            }
         )
+        if (state.isSearching) {
+            CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+        }
 
         Text("Znajdź połączenie", style = MaterialTheme.typography.titleMedium)
-        StopSelector(
-            label = "Początek",
-            query = state.originQuery,
-            selectedStop = state.originStop,
-            stops = state.stops,
-            onQueryChange = onOriginQueryChange,
-            onSelectStop = onSelectOrigin
+        Text("Początek", style = MaterialTheme.typography.titleSmall)
+        Button(onClick = onUseCurrentLocation, enabled = !state.isSearching) {
+            Text("📍 Użyj mojej lokalizacji")
+        }
+        state.originPlace?.let { place ->
+            Text("Lokalizacja: ${place.label}")
+        }
+        state.originStop?.let { stop ->
+            Text(
+                "Najbliższy przystanek: ${StopNameGrouper.mainName(stop.stopName)}" +
+                    platformDescription(stop)
+            )
+        }
+
+        Text("Cel", style = MaterialTheme.typography.titleSmall)
+        OutlinedTextField(
+            value = state.destinationQuery,
+            onValueChange = onDestinationQueryChange,
+            label = { Text("Adres lub nazwa przystanku") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
         )
-        StopSelector(
-            label = "Cel",
-            query = state.destinationQuery,
-            selectedStop = state.destinationStop,
-            stops = state.stops,
-            onQueryChange = onDestinationQueryChange,
-            onSelectStop = onSelectDestination
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(
+                onClick = onSearchAddress,
+                enabled = !state.isSearching && state.destinationQuery.isNotBlank()
+            ) {
+                Text("Szukaj adresu")
+            }
+        }
+        state.addressCandidates.forEach { place ->
+            TextButton(
+                onClick = { onSelectAddress(place) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(place.label)
+            }
+        }
+        if (state.destinationPlace != null) {
+            Text("Adres celu: ${state.destinationPlace.label}")
+            if (state.destinationStop == null && state.nearbyDestinationStops.isNotEmpty()) {
+                Text("Wybierz konkretny przystanek:")
+                state.nearbyDestinationStops.forEach { stop ->
+                    val distanceMeters = Haversine.distanceMeters(
+                        state.destinationPlace.latitude,
+                        state.destinationPlace.longitude,
+                        stop.stopLat,
+                        stop.stopLon
+                    )
+                    TextButton(
+                        onClick = { onSelectDestination(stop) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            "${StopNameGrouper.mainName(stop.stopName)}" +
+                                "${platformDescription(stop)} · " +
+                                "${distanceMeters.toInt()} m"
+                        )
+                    }
+                }
+            }
+        } else {
+            StopGroupPicker(
+                query = state.destinationQuery,
+                groups = stopGroups,
+                onSelectStop = onSelectDestination
+            )
+        }
+        state.destinationStop?.let { stop ->
+            Text(
+                "Wybrany przystanek: ${StopNameGrouper.mainName(stop.stopName)}" +
+                    platformDescription(stop)
+            )
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onSearch,
@@ -289,13 +369,13 @@ private fun SearchContent(
             }
             TextButton(
                 onClick = onSaveHome,
-                enabled = state.destinationStop != null
+                enabled = state.destinationPlace != null
             ) {
                 Text("Zapisz jako dom")
             }
             TextButton(
                 onClick = onSaveWork,
-                enabled = state.destinationStop != null
+                enabled = state.destinationPlace != null
             ) {
                 Text("Zapisz jako pracę")
             }
@@ -319,39 +399,54 @@ private fun SearchContent(
 }
 
 @Composable
-private fun StopSelector(
-    label: String,
+private fun StopGroupPicker(
     query: String,
-    selectedStop: StopEntity?,
-    stops: List<StopEntity>,
-    onQueryChange: (String) -> Unit,
+    groups: List<StopGroup>,
     onSelectStop: (StopEntity) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQueryChange,
-            label = { Text(label) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        if (selectedStop == null && query.length >= 2) {
-            stops.asSequence()
-                .filter { stop ->
-                    stop.stopName.contains(query, ignoreCase = true) ||
+    var expandedGroup by remember(query) { mutableStateOf<String?>(null) }
+    if (query.length >= MIN_STOP_QUERY_LENGTH) {
+        val matchingGroups = groups.asSequence()
+            .filter { group ->
+                group.name.contains(query, ignoreCase = true) ||
+                    group.stops.any { stop ->
                         stop.stopCode?.contains(query, ignoreCase = true) == true
-                }
-                .take(MAX_STOP_SUGGESTIONS)
-                .forEach { stop ->
-                    Text(
-                        text = "${stop.stopName}${stop.stopCode?.let { " · $it" }.orEmpty()}",
+                    }
+            }
+            .take(MAX_STOP_SUGGESTIONS)
+            .toList()
+
+        matchingGroups.forEach { group ->
+            TextButton(
+                onClick = {
+                    if (group.stops.size == 1) {
+                        onSelectStop(group.stops.single())
+                    } else {
+                        expandedGroup = if (expandedGroup == group.name) null else group.name
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    if (group.stops.size == 1) {
+                        group.name + platformDescription(group.stops.single())
+                    } else {
+                        "${group.name} · wybierz peron (${group.stops.size})"
+                    }
+                )
+            }
+            if (expandedGroup == group.name) {
+                group.stops.forEach { stop ->
+                    TextButton(
+                        onClick = { onSelectStop(stop) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onSelectStop(stop) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                            .padding(start = 16.dp)
+                    ) {
+                        Text("${group.name}${platformDescription(stop)}")
+                    }
                 }
+            }
         }
     }
 }
@@ -471,12 +566,18 @@ private fun SettingsDialog(
 }
 
 private fun stopName(stops: List<StopEntity>, stopId: String): String =
-    stops.firstOrNull { it.stopId == stopId }?.stopName ?: stopId
+    stops.firstOrNull { it.stopId == stopId }?.let { stop ->
+        StopNameGrouper.mainName(stop.stopName) + platformDescription(stop)
+    } ?: stopId
+
+private fun platformDescription(stop: StopEntity): String =
+    StopNameGrouper.platformLabel(stop)?.let { " · słupek $it" }.orEmpty()
 
 private fun formatGtfsTime(seconds: Int): String {
     val totalMinutes = seconds / 60
     return "%02d:%02d".format(totalMinutes / 60, totalMinutes % 60)
 }
 
+private const val MIN_STOP_QUERY_LENGTH = 2
 private const val MAX_STOP_SUGGESTIONS = 6
 private const val MAX_DISPLAYED_DEPARTURES = 12

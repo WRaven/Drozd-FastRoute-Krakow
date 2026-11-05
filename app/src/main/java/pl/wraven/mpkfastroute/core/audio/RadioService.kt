@@ -1,24 +1,43 @@
 package pl.wraven.mpkfastroute.core.audio
 
+import android.app.PendingIntent
 import android.content.Intent
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import pl.wraven.mpkfastroute.MainActivity
+import pl.wraven.mpkfastroute.R
 
 class RadioService : MediaSessionService() {
     private lateinit var player: ExoPlayer
     private lateinit var mediaSession: MediaSession
 
+    @UnstableApi
     override fun onCreate() {
         super.onCreate()
         player = ExoPlayer.Builder(this).build()
         player.setAudioAttributes(AudioAttributes.DEFAULT, true)
         player.setHandleAudioBecomingNoisy(true)
-        mediaSession = MediaSession.Builder(this, player).build()
+        setMediaNotificationProvider(
+            DefaultMediaNotificationProvider(this).apply {
+                setSmallIcon(R.drawable.ic_radio_notification)
+            }
+        )
+        val activityIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        mediaSession = MediaSession.Builder(this, player)
+            .setSessionActivity(activityIntent)
+            .build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession =

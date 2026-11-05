@@ -3,7 +3,10 @@ package pl.wraven.mpkfastroute.core.csa
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.database.AppDatabase
+import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.gtfs.ServiceCalendarResolver
 
 class RoutePlanner @Inject constructor(
@@ -11,6 +14,11 @@ class RoutePlanner @Inject constructor(
     private val csaEngine: CsaEngine,
     private val footpathGenerator: FootpathGenerator
 ) {
+    @Volatile
+    private var footpathCache: FootpathCache? = null
+
+    private val footpathCacheLock = Any()
+
     suspend fun findEarliestJourney(
         originStopId: String,
         destinationStopId: String,
@@ -34,34 +42,60 @@ class RoutePlanner @Inject constructor(
             return null
         }
 
-        val connections = database.stopTimeDao()
+        val rows = database.stopTimeDao()
             .getConnectionsBetween(startTimeSeconds, endTimeSeconds)
-            .asSequence()
-            .filter { it.serviceId in activeServiceIds }
-            .map {
-                Connection(
-                    departureStopId = it.departureStopId,
-                    arrivalStopId = it.arrivalStopId,
-                    departureTime = it.departureTime,
-                    arrivalTime = it.arrivalTime,
-                    tripId = it.tripId,
-                    routeShortName = it.routeShortName
-                )
-            }
-            .toList()
+        val connections = withContext(Dispatchers.Default) {
+            rows.asSequence()
+                .filter { it.serviceId in activeServiceIds }
+                .map {
+                    Connection(
+                        departureStopId = it.departureStopId,
+                        arrivalStopId = it.arrivalStopId,
+                        departureTime = it.departureTime,
+                        arrivalTime = it.arrivalTime,
+                        tripId = it.tripId,
+                        routeShortName = it.routeShortName
+                    )
+                }
+                .toList()
+        }
         if (connections.isEmpty()) {
             return null
         }
 
-        val footpaths = footpathGenerator.generate(database.stopDao().getAll())
-        return csaEngine.findEarliestJourney(
-            connections = connections,
-            footpaths = footpaths,
-            originStopId = originStopId,
-            destinationStopId = destinationStopId,
-            startTime = startTimeSeconds
-        )
+        val stops = database.stopDao().getAll()
+        val footpaths = withContext(Dispatchers.Default) {
+            val cached = footpathCache
+            if (cached?.stops == stops) {
+                cached.footpaths
+            } else {
+                synchronized(footpathCacheLock) {
+                    val latest = footpathCache
+                    if (latest?.stops == stops) {
+                        latest.footpaths
+                    } else {
+                        footpathGenerator.generate(stops).also { generated ->
+                            footpathCache = FootpathCache(stops, generated)
+                        }
+                    }
+                }
+            }
+        }
+        return withContext(Dispatchers.Default) {
+            csaEngine.findEarliestJourney(
+                connections = connections,
+                footpaths = footpaths,
+                originStopId = originStopId,
+                destinationStopId = destinationStopId,
+                startTime = startTimeSeconds
+            )
+        }
     }
+
+    private data class FootpathCache(
+        val stops: List<StopEntity>,
+        val footpaths: List<Footpath>
+    )
 
     private companion object {
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
