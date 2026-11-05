@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -23,6 +24,7 @@ interface StopDao {
     @Query("SELECT COUNT(*) FROM stops")
     suspend fun count(): Int
 
+    @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stops: List<StopEntity>)
 
@@ -35,6 +37,7 @@ interface RouteDao {
     @Query("SELECT * FROM routes ORDER BY routeShortName, routeId")
     suspend fun getAll(): List<RouteEntity>
 
+    @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(routes: List<RouteEntity>)
 
@@ -47,6 +50,7 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE tripId = :tripId LIMIT 1")
     suspend fun getById(tripId: String): TripEntity?
 
+    @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(trips: List<TripEntity>)
 
@@ -68,6 +72,7 @@ interface StopTimeDao {
     @Query("SELECT * FROM stop_times WHERE tripId = :tripId ORDER BY stopSequence")
     suspend fun getForTrip(tripId: String): List<StopTimeEntity>
 
+    @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(stopTimes: List<StopTimeEntity>)
 
