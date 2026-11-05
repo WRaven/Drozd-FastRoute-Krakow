@@ -15,8 +15,10 @@ the architecture and phases in the project specification.
 - The TTSS client maps stops by stop code or supplied normalized stop-name
   mapping, applies reported delay to static departures, and returns explicitly
   marked static estimates when live data is unavailable.
-- Radio playback, GPS quick actions, onboarding, and the Compose search
-  interface that wires these components together are still to be implemented.
+- Radio streams run in a MediaSession foreground service, support system
+  playback controls, and persist the last selected station.
+- GPS quick actions, onboarding, and the Compose search interface that wires
+  these components together are still to be implemented.
 
 ## Versioning and in-place updates
 
