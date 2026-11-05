@@ -32,6 +32,31 @@ data class TripEntity(
     val tripHeadsign: String?
 )
 
+@Entity(tableName = "calendar")
+data class ServiceCalendarEntity(
+    @PrimaryKey val serviceId: String,
+    val monday: Int,
+    val tuesday: Int,
+    val wednesday: Int,
+    val thursday: Int,
+    val friday: Int,
+    val saturday: Int,
+    val sunday: Int,
+    val startDate: String,
+    val endDate: String
+)
+
+@Entity(
+    tableName = "calendar_dates",
+    primaryKeys = ["serviceId", "date"],
+    indices = [Index(value = ["date"])]
+)
+data class CalendarDateEntity(
+    val serviceId: String,
+    val date: String,
+    val exceptionType: Int
+)
+
 @Entity(
     tableName = "stop_times",
     indices = [

@@ -21,5 +21,6 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "mpk-krakow.db"
-        ).build()
+        ).addMigrations(AppDatabase.MIGRATION_1_2)
+            .build()
 }

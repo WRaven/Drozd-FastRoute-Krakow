@@ -8,12 +8,17 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.time.LocalDate
+import java.time.format.DateTimeParseException
+import java.time.format.DateTimeFormatter
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.database.AppDatabase
+import pl.wraven.mpkfastroute.core.database.CalendarDateEntity
 import pl.wraven.mpkfastroute.core.database.RouteEntity
+import pl.wraven.mpkfastroute.core.database.ServiceCalendarEntity
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.database.StopTimeEntity
 import pl.wraven.mpkfastroute.core.database.TripEntity
@@ -37,11 +42,16 @@ class GtfsZipParser @Inject constructor(
         val stops = mutableListOf<StopEntity>()
         val routes = mutableListOf<RouteEntity>()
         val trips = mutableListOf<TripEntity>()
-        readLookupTables(archive, stops, routes, trips)
+        val calendars = mutableListOf<ServiceCalendarEntity>()
+        val calendarDates = mutableListOf<CalendarDateEntity>()
+        readLookupTables(archive, stops, routes, trips, calendars, calendarDates)
 
         require(stops.isNotEmpty()) { "GTFS archive contains no stops." }
         require(routes.isNotEmpty()) { "GTFS archive contains no routes." }
         require(trips.isNotEmpty()) { "GTFS archive contains no trips." }
+        require(calendars.isNotEmpty() || calendarDates.isNotEmpty()) {
+            "GTFS archive contains no service calendar data."
+        }
 
         val stopIds = stops.mapTo(HashSet(stops.size)) { it.stopId }
         val tripIds = trips.mapTo(HashSet(trips.size)) { it.tripId }
@@ -53,12 +63,15 @@ class GtfsZipParser @Inject constructor(
                 val stopDao = database.stopDao()
                 val routeDao = database.routeDao()
                 val tripDao = database.tripDao()
+                val calendarDao = database.serviceCalendarDao()
                 val stopTimeDao = database.stopTimeDao()
 
                 stopTimeDao.deleteAll()
                 tripDao.deleteAll()
                 routeDao.deleteAll()
                 stopDao.deleteAll()
+                calendarDao.deleteAllExceptions()
+                calendarDao.deleteAll()
 
                 for (batch in stops.chunked(BATCH_SIZE)) {
                     stopDao.insertAll(batch)
@@ -68,6 +81,12 @@ class GtfsZipParser @Inject constructor(
                 }
                 for (batch in trips.chunked(BATCH_SIZE)) {
                     tripDao.insertAll(batch)
+                }
+                for (batch in calendars.chunked(BATCH_SIZE)) {
+                    calendarDao.insertAll(batch)
+                }
+                for (batch in calendarDates.chunked(BATCH_SIZE)) {
+                    calendarDao.insertAllExceptions(batch)
                 }
 
                 val stopTimeCount = readStopTimes(archive, stopIds, tripIds, stopTimeDao::insertAll)
@@ -99,7 +118,9 @@ class GtfsZipParser @Inject constructor(
         archive: ByteArray,
         stops: MutableList<StopEntity>,
         routes: MutableList<RouteEntity>,
-        trips: MutableList<TripEntity>
+        trips: MutableList<TripEntity>,
+        calendars: MutableList<ServiceCalendarEntity>,
+        calendarDates: MutableList<CalendarDateEntity>
     ) {
         ZipInputStream(archive.inputStream(), StandardCharsets.UTF_8).use { zip ->
             while (true) {
@@ -133,6 +154,50 @@ class GtfsZipParser @Inject constructor(
                             routeId = values.required(columns, "route_id", entry.name, rowNumber),
                             serviceId = values.required(columns, "service_id", entry.name, rowNumber),
                             tripHeadsign = values.optional(columns, "trip_headsign")
+                        )
+                    }
+
+                    "calendar.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
+                        calendars += ServiceCalendarEntity(
+                            serviceId = values.required(columns, "service_id", entry.name, rowNumber),
+                            monday = values.required(columns, "monday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "monday", rowNumber),
+                            tuesday = values.required(columns, "tuesday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "tuesday", rowNumber),
+                            wednesday = values.required(columns, "wednesday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "wednesday", rowNumber),
+                            thursday = values.required(columns, "thursday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "thursday", rowNumber),
+                            friday = values.required(columns, "friday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "friday", rowNumber),
+                            saturday = values.required(columns, "saturday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "saturday", rowNumber),
+                            sunday = values.required(columns, "sunday", entry.name, rowNumber)
+                                .toGtfsFlag(entry.name, "sunday", rowNumber),
+                            startDate = values.required(columns, "start_date", entry.name, rowNumber)
+                                .validateGtfsDate(entry.name, "start_date", rowNumber),
+                            endDate = values.required(columns, "end_date", entry.name, rowNumber)
+                                .validateGtfsDate(entry.name, "end_date", rowNumber)
+                        )
+                    }
+
+                    "calendar_dates.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
+                        val exceptionType = values.required(
+                            columns,
+                            "exception_type",
+                            entry.name,
+                            rowNumber
+                        ).toIntOrInvalid(entry.name, "exception_type", rowNumber)
+                        if (exceptionType !in 1..2) {
+                            throw IOException(
+                                "${entry.name} row $rowNumber has an invalid 'exception_type' value."
+                            )
+                        }
+                        calendarDates += CalendarDateEntity(
+                            serviceId = values.required(columns, "service_id", entry.name, rowNumber),
+                            date = values.required(columns, "date", entry.name, rowNumber)
+                                .validateGtfsDate(entry.name, "date", rowNumber),
+                            exceptionType = exceptionType
                         )
                     }
                 }
@@ -306,6 +371,21 @@ private fun List<String>.optional(
 
 private fun String.toIntOrInvalid(entryName: String, column: String, rowNumber: Int): Int =
     toIntOrNull() ?: throw IOException("$entryName row $rowNumber has an invalid '$column' value.")
+
+private fun String.toGtfsFlag(entryName: String, column: String, rowNumber: Int): Int =
+    toIntOrInvalid(entryName, column, rowNumber).also {
+        if (it !in 0..1) {
+            throw IOException("$entryName row $rowNumber has an invalid '$column' value.")
+        }
+    }
+
+private fun String.validateGtfsDate(entryName: String, column: String, rowNumber: Int): String =
+    try {
+        LocalDate.parse(this, DateTimeFormatter.BASIC_ISO_DATE)
+        this
+    } catch (exception: DateTimeParseException) {
+        throw IOException("$entryName row $rowNumber has an invalid '$column' date.", exception)
+    }
 
 private fun String.toDoubleOrInvalid(entryName: String, column: String, rowNumber: Int): Double =
     toDoubleOrNull()?.takeIf(Double::isFinite)
