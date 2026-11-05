@@ -26,8 +26,24 @@ class CsaEngine @Inject constructor() {
         originStopId: String,
         destinationStopId: String,
         startTime: Int
+    ): CsaJourney? = findEarliestJourney(
+        connections = connections,
+        footpaths = footpaths,
+        originStopIds = setOf(originStopId),
+        destinationStopIds = setOf(destinationStopId),
+        startTime = startTime
+    )
+
+    fun findEarliestJourney(
+        connections: List<Connection>,
+        footpaths: List<Footpath>,
+        originStopIds: Set<String>,
+        destinationStopIds: Set<String>,
+        startTime: Int
     ): CsaJourney? {
         require(startTime >= 0) { "Start time must not be negative." }
+        require(originStopIds.isNotEmpty()) { "At least one origin stop is required." }
+        require(destinationStopIds.isNotEmpty()) { "At least one destination stop is required." }
         require(connections.all { it.departureTime >= 0 && it.arrivalTime >= it.departureTime }) {
             "Connections must have non-negative, ordered times."
         }
@@ -35,7 +51,7 @@ class CsaEngine @Inject constructor() {
             "Footpath durations must not be negative."
         }
 
-        if (originStopId == destinationStopId) {
+        if (originStopIds.any(destinationStopIds::contains)) {
             return CsaJourney(startTime, startTime, 0, emptyList())
         }
 
@@ -89,17 +105,19 @@ class CsaEngine @Inject constructor() {
             }
         }
 
-        propagateFootpaths(
-            JourneyState(
-                stopId = originStopId,
-                arrivalTime = startTime,
-                readyTime = startTime,
-                transferCount = 0,
-                lastTripId = null,
-                previous = null,
-                step = null
+        originStopIds.forEach { originStopId ->
+            propagateFootpaths(
+                JourneyState(
+                    stopId = originStopId,
+                    arrivalTime = startTime,
+                    readyTime = startTime,
+                    transferCount = 0,
+                    lastTripId = null,
+                    previous = null,
+                    step = null
+                )
             )
-        )
+        }
 
         val sortedConnections = connections.sortedWith(
             compareBy<Connection> { it.departureTime }
@@ -139,10 +157,9 @@ class CsaEngine @Inject constructor() {
             }
         }
 
-        val bestJourney = labelsByStop[destinationStopId]
-            ?.values
-            ?.flatten()
-            ?.minWithOrNull(
+        val bestJourney = destinationStopIds
+            .flatMap { stopId -> labelsByStop[stopId]?.values?.flatten().orEmpty() }
+            .minWithOrNull(
                 compareBy<JourneyState> { it.generalizedArrivalTime }
                     .thenBy { it.arrivalTime }
                     .thenBy { it.transferCount }

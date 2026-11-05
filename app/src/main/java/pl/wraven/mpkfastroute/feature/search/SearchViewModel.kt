@@ -18,6 +18,7 @@ import pl.wraven.mpkfastroute.core.audio.RadioManager
 import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Haversine
+import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
@@ -39,10 +40,12 @@ data class SearchUiState(
     val destinationPlace: GeoPlace? = null,
     val originAddressCandidates: List<GeoPlace> = emptyList(),
     val addressCandidates: List<GeoPlace> = emptyList(),
-    val nearbyOriginStops: List<StopEntity> = emptyList(),
-    val nearbyDestinationStops: List<StopEntity> = emptyList(),
+    val nearbyOriginGroups: List<StopGroup> = emptyList(),
+    val nearbyDestinationGroups: List<StopGroup> = emptyList(),
     val originStop: StopEntity? = null,
     val destinationStop: StopEntity? = null,
+    val originStopOptions: List<StopEntity> = emptyList(),
+    val destinationStopOptions: List<StopEntity> = emptyList(),
     val homeStopId: String? = null,
     val workStopId: String? = null,
     val homePlace: GeoPlace? = null,
@@ -90,9 +93,10 @@ class SearchViewModel @Inject constructor(
             it.copy(
                 destinationQuery = query,
                 destinationStop = null,
+                destinationStopOptions = emptyList(),
                 destinationPlace = null,
                 addressCandidates = emptyList(),
-                nearbyDestinationStops = emptyList(),
+                nearbyDestinationGroups = emptyList(),
                 journey = null,
                 liveDepartures = null,
                 statusMessage = null
@@ -106,8 +110,9 @@ class SearchViewModel @Inject constructor(
                 originQuery = query,
                 originPlace = null,
                 originStop = null,
+                originStopOptions = emptyList(),
                 originAddressCandidates = emptyList(),
-                nearbyOriginStops = emptyList(),
+                nearbyOriginGroups = emptyList(),
                 journey = null,
                 liveDepartures = null,
                 statusMessage = null
@@ -115,22 +120,20 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    fun selectOrigin(stop: StopEntity) {
+    fun selectOrigin(group: StopGroup) {
         val state = mutableUiState.value
-        val place = state.originPlace?.takeIf {
-            state.nearbyOriginStops.any { candidate -> candidate.stopId == stop.stopId }
-        } ?: GeoPlace(
-            label = StopNameGrouper.mainName(stop.stopName),
-            latitude = stop.stopLat,
-            longitude = stop.stopLon
-        )
+        val selectedFromAddress = state.nearbyOriginGroups.any { it.name == group.name }
+        val place = state.originPlace.takeIf { selectedFromAddress }
+            ?: GeoPlace(group.name, group.stops.first().stopLat, group.stops.first().stopLon)
+        val representative = nearestStopToPlace(group, place)
         mutableUiState.update {
             it.copy(
-                originQuery = place.label,
+                originQuery = if (selectedFromAddress) state.originQuery else group.name,
                 originPlace = place,
-                originStop = stop,
+                originStop = representative,
+                originStopOptions = group.stops,
                 originAddressCandidates = emptyList(),
-                nearbyOriginStops = emptyList(),
+                nearbyOriginGroups = emptyList(),
                 journey = null,
                 liveDepartures = null
             )
@@ -147,8 +150,9 @@ class SearchViewModel @Inject constructor(
                         originQuery = "",
                         originPlace = origin.place,
                         originStop = origin.stop,
+                        originStopOptions = origin.stopOptions,
                         originAddressCandidates = emptyList(),
-                        nearbyOriginStops = emptyList(),
+                        nearbyOriginGroups = emptyList(),
                         journey = null,
                         liveDepartures = null
                     )
@@ -187,7 +191,8 @@ class SearchViewModel @Inject constructor(
                             originAddressCandidates = addresses,
                             originPlace = null,
                             originStop = null,
-                            nearbyOriginStops = emptyList(),
+                            originStopOptions = emptyList(),
+                            nearbyOriginGroups = emptyList(),
                             journey = null,
                             liveDepartures = null
                         )
@@ -205,28 +210,20 @@ class SearchViewModel @Inject constructor(
 
     fun selectOriginAddress(place: GeoPlace) {
         viewModelScope.launch {
-            val nearbyStops = withContext(Dispatchers.Default) {
-                mutableUiState.value.stops
-                    .sortedBy { stop ->
-                        Haversine.distanceMeters(
-                            place.latitude,
-                            place.longitude,
-                            stop.stopLat,
-                            stop.stopLon
-                        )
-                    }
-                    .take(MAX_NEARBY_STOPS)
+            val nearbyGroups = withContext(Dispatchers.Default) {
+                nearbyStopGroups(mutableUiState.value.stops, place)
             }
             mutableUiState.update {
                 it.copy(
                     originQuery = place.label,
                     originPlace = place,
                     originAddressCandidates = emptyList(),
-                    nearbyOriginStops = nearbyStops,
+                    nearbyOriginGroups = nearbyGroups,
                     originStop = null,
+                    originStopOptions = emptyList(),
                     journey = null,
                     liveDepartures = null,
-                    statusMessage = if (nearbyStops.isEmpty()) {
+                    statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
                     } else {
                         null
@@ -236,21 +233,20 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    fun selectDestination(stop: StopEntity) {
+    fun selectDestination(group: StopGroup) {
         val state = mutableUiState.value
-        val place = state.destinationPlace?.takeIf {
-            state.nearbyDestinationStops.any { candidate -> candidate.stopId == stop.stopId }
-        } ?: GeoPlace(
-            label = StopNameGrouper.mainName(stop.stopName),
-            latitude = stop.stopLat,
-            longitude = stop.stopLon
-        )
+        val selectedFromAddress = state.nearbyDestinationGroups.any { it.name == group.name }
+        val place = state.destinationPlace.takeIf { selectedFromAddress }
+            ?: GeoPlace(group.name, group.stops.first().stopLat, group.stops.first().stopLon)
+        val representative = nearestStopToPlace(group, place)
         mutableUiState.update {
             it.copy(
-                destinationQuery = StopNameGrouper.mainName(stop.stopName),
+                destinationQuery = if (selectedFromAddress) state.destinationQuery else group.name,
                 destinationPlace = place,
-                destinationStop = stop,
+                destinationStop = representative,
+                destinationStopOptions = group.stops,
                 addressCandidates = emptyList(),
+                nearbyDestinationGroups = emptyList(),
                 journey = null,
                 liveDepartures = null
             )
@@ -275,7 +271,8 @@ class SearchViewModel @Inject constructor(
                             addressCandidates = addresses,
                             destinationPlace = null,
                             destinationStop = null,
-                            nearbyDestinationStops = emptyList(),
+                            destinationStopOptions = emptyList(),
+                            nearbyDestinationGroups = emptyList(),
                             journey = null,
                             liveDepartures = null
                         )
@@ -293,28 +290,20 @@ class SearchViewModel @Inject constructor(
 
     fun selectDestinationAddress(place: GeoPlace) {
         viewModelScope.launch {
-            val nearbyStops = withContext(Dispatchers.Default) {
-                mutableUiState.value.stops
-                    .sortedBy { stop ->
-                        Haversine.distanceMeters(
-                            place.latitude,
-                            place.longitude,
-                            stop.stopLat,
-                            stop.stopLon
-                        )
-                    }
-                    .take(MAX_NEARBY_STOPS)
+            val nearbyGroups = withContext(Dispatchers.Default) {
+                nearbyStopGroups(mutableUiState.value.stops, place)
             }
             mutableUiState.update {
                 it.copy(
                     destinationQuery = place.label,
                     destinationPlace = place,
                     addressCandidates = emptyList(),
-                    nearbyDestinationStops = nearbyStops,
+                    nearbyDestinationGroups = nearbyGroups,
                     destinationStop = null,
+                    destinationStopOptions = emptyList(),
                     journey = null,
                     liveDepartures = null,
-                    statusMessage = if (nearbyStops.isEmpty()) {
+                    statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
                     } else {
                         null
@@ -328,8 +317,10 @@ class SearchViewModel @Inject constructor(
         val state = mutableUiState.value
         val origin = state.originStop
         val destination = state.destinationStop
-        if (origin == null || destination == null) {
-            showMessage("Ustaw lokalizację początkową i wybierz konkretny przystanek docelowy.")
+        val originOptions = state.originStopOptions.ifEmpty { listOfNotNull(origin) }
+        val destinationOptions = state.destinationStopOptions.ifEmpty { listOfNotNull(destination) }
+        if (originOptions.isEmpty() || destinationOptions.isEmpty()) {
+            showMessage("Ustaw przystanek początkowy i docelowy.")
             return
         }
 
@@ -339,19 +330,32 @@ class SearchViewModel @Inject constructor(
                 val now = LocalDateTime.now()
                 val serviceTime = GtfsServiceClock.from(now)
                 val journey = routePlanner.findEarliestJourney(
-                    originStopId = origin.stopId,
-                    destinationStopId = destination.stopId,
+                    originStopIds = originOptions.mapTo(mutableSetOf()) { it.stopId },
+                    destinationStopIds = destinationOptions.mapTo(mutableSetOf()) { it.stopId },
                     serviceDate = serviceTime.serviceDate,
                     startTimeSeconds = serviceTime.timeSeconds
                 )
+                val transitSteps = journey?.steps?.filterIsInstance<JourneyStep.Transit>().orEmpty()
+                val selectedOrigin = transitSteps.firstOrNull()
+                    ?.connection
+                    ?.departureStopId
+                    ?.let { database.stopDao().getById(it) }
+                    ?: originOptions.first()
+                val selectedDestination = transitSteps.lastOrNull()
+                    ?.connection
+                    ?.arrivalStopId
+                    ?.let { database.stopDao().getById(it) }
+                    ?: destinationOptions.first()
                 val liveDepartures = ttssDepartureRepository.getDepartures(
-                    stopId = origin.stopId,
+                    stopId = selectedOrigin.stopId,
                     serviceDate = serviceTime.serviceDate,
                     startTimeSeconds = serviceTime.timeSeconds,
                     nowTimeSeconds = now.toLocalTime().toSecondOfDay()
                 )
                 mutableUiState.update {
                     it.copy(
+                        originStop = selectedOrigin,
+                        destinationStop = selectedDestination,
                         journey = journey,
                         liveDepartures = liveDepartures,
                         statusMessage = if (journey == null) {
@@ -555,6 +559,30 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    private fun nearbyStopGroups(stops: List<StopEntity>, place: GeoPlace): List<StopGroup> =
+        StopNameGrouper.group(stops)
+            .sortedBy { group ->
+                group.stops.minOf { stop ->
+                    Haversine.distanceMeters(
+                        place.latitude,
+                        place.longitude,
+                        stop.stopLat,
+                        stop.stopLon
+                    )
+                }
+            }
+            .take(MAX_NEARBY_STOPS)
+
+    private fun nearestStopToPlace(group: StopGroup, place: GeoPlace): StopEntity =
+        group.stops.minByOrNull { stop ->
+            Haversine.distanceMeters(
+                place.latitude,
+                place.longitude,
+                stop.stopLat,
+                stop.stopLon
+            )
+        } ?: throw IllegalStateException("A stop group cannot be empty.")
+
     private fun runContextAction(destination: SavedDestination) {
         viewModelScope.launch {
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
@@ -591,13 +619,15 @@ class SearchViewModel @Inject constructor(
                     originQuery = "",
                     originStop = result.origin,
                     destinationStop = result.destination,
+                    originStopOptions = result.originStopOptions,
+                    destinationStopOptions = result.destinationStopOptions,
                     originPlace = result.originPlace,
                     destinationPlace = result.destinationPlace,
                     destinationQuery = result.destinationPlace.label,
                     originAddressCandidates = emptyList(),
                     addressCandidates = emptyList(),
-                    nearbyOriginStops = emptyList(),
-                    nearbyDestinationStops = emptyList(),
+                    nearbyOriginGroups = emptyList(),
+                    nearbyDestinationGroups = emptyList(),
                     journey = result.journey,
                     liveDepartures = null,
                     statusMessage = null

@@ -223,11 +223,11 @@ private fun SearchContent(
     state: SearchUiState,
     onUseCurrentLocation: () -> Unit,
     onOriginQueryChange: (String) -> Unit,
-    onSelectOrigin: (StopEntity) -> Unit,
+    onSelectOrigin: (StopGroup) -> Unit,
     onSearchOriginAddress: () -> Unit,
     onSelectOriginAddress: (GeoPlace) -> Unit,
     onDestinationQueryChange: (String) -> Unit,
-    onSelectDestination: (StopEntity) -> Unit,
+    onSelectDestination: (StopGroup) -> Unit,
     onSearchAddress: () -> Unit,
     onSelectAddress: (GeoPlace) -> Unit,
     onSearch: () -> Unit,
@@ -323,31 +323,23 @@ private fun SearchContent(
             StopGroupPicker(
                 query = state.originQuery,
                 groups = stopGroups,
-                onSelectStop = onSelectOrigin
+                onSelectGroup = onSelectOrigin
             )
         }
         state.originPlace?.let { place ->
             Text("Początek: ${place.label}")
         }
         if (state.originPlace != null && state.originStop == null &&
-            state.nearbyOriginStops.isNotEmpty()
+            state.nearbyOriginGroups.isNotEmpty()
         ) {
             Text("Wybierz przystanek początkowy:")
-            state.nearbyOriginStops.forEach { stop ->
-                val distanceMeters = Haversine.distanceMeters(
-                    state.originPlace.latitude,
-                    state.originPlace.longitude,
-                    stop.stopLat,
-                    stop.stopLon
-                )
+            state.nearbyOriginGroups.forEach { group ->
+                val distanceMeters = distanceToStopGroup(state.originPlace, group)
                 TextButton(
-                    onClick = { onSelectOrigin(stop) },
+                    onClick = { onSelectOrigin(group) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        "${StopNameGrouper.mainName(stop.stopName)} · " +
-                            "${distanceMeters.toInt()} m"
-                    )
+                    Text("${group.name} · ${distanceMeters.toInt()} m")
                 }
             }
         }
@@ -381,23 +373,15 @@ private fun SearchContent(
         }
         if (state.destinationPlace != null) {
             Text("Adres celu: ${state.destinationPlace.label}")
-            if (state.destinationStop == null && state.nearbyDestinationStops.isNotEmpty()) {
-                Text("Wybierz konkretny przystanek:")
-                state.nearbyDestinationStops.forEach { stop ->
-                    val distanceMeters = Haversine.distanceMeters(
-                        state.destinationPlace.latitude,
-                        state.destinationPlace.longitude,
-                        stop.stopLat,
-                        stop.stopLon
-                    )
+            if (state.destinationStop == null && state.nearbyDestinationGroups.isNotEmpty()) {
+                Text("Wybierz przystanek:")
+                state.nearbyDestinationGroups.forEach { group ->
+                    val distanceMeters = distanceToStopGroup(state.destinationPlace, group)
                     TextButton(
-                        onClick = { onSelectDestination(stop) },
+                        onClick = { onSelectDestination(group) },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text(
-                            "${StopNameGrouper.mainName(stop.stopName)} · " +
-                                "${distanceMeters.toInt()} m"
-                        )
+                        Text("${group.name} · ${distanceMeters.toInt()} m")
                     }
                 }
             }
@@ -405,7 +389,7 @@ private fun SearchContent(
             StopGroupPicker(
                 query = state.destinationQuery,
                 groups = stopGroups,
-                onSelectStop = onSelectDestination
+                onSelectGroup = onSelectDestination
             )
         }
         state.destinationStop?.let { stop ->
@@ -454,9 +438,8 @@ private fun SearchContent(
 private fun StopGroupPicker(
     query: String,
     groups: List<StopGroup>,
-    onSelectStop: (StopEntity) -> Unit
+    onSelectGroup: (StopGroup) -> Unit
 ) {
-    var expandedGroup by remember(query) { mutableStateOf<String?>(null) }
     if (query.length >= MIN_STOP_QUERY_LENGTH) {
         val matchingGroups = groups.asSequence()
             .filter { group ->
@@ -470,34 +453,10 @@ private fun StopGroupPicker(
 
         matchingGroups.forEach { group ->
             TextButton(
-                onClick = {
-                    if (group.stops.size == 1) {
-                        onSelectStop(group.stops.single())
-                    } else {
-                        expandedGroup = if (expandedGroup == group.name) null else group.name
-                    }
-                },
+                onClick = { onSelectGroup(group) },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(
-                    if (group.stops.size == 1) {
-                        group.name
-                    } else {
-                        "${group.name} · wybierz przystanek"
-                    }
-                )
-            }
-            if (expandedGroup == group.name) {
-                group.stops.forEach { stop ->
-                    TextButton(
-                        onClick = { onSelectStop(stop) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 16.dp)
-                    ) {
-                        Text(group.name)
-                    }
-                }
+                Text(group.name)
             }
         }
     }
@@ -622,6 +581,11 @@ private fun stopName(stops: List<StopEntity>, stopId: String): String =
     stops.firstOrNull { it.stopId == stopId }?.let { stop ->
         StopNameGrouper.mainName(stop.stopName)
     } ?: "Nieznany przystanek"
+
+private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =
+    group.stops.minOfOrNull { stop ->
+        Haversine.distanceMeters(place.latitude, place.longitude, stop.stopLat, stop.stopLon)
+    } ?: throw IllegalStateException("A stop group cannot be empty.")
 
 private fun formatGtfsTime(seconds: Int): String {
     val totalMinutes = seconds / 60

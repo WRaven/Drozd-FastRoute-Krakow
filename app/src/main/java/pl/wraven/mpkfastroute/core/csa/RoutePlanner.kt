@@ -25,8 +25,24 @@ class RoutePlanner @Inject constructor(
         serviceDate: LocalDate,
         startTimeSeconds: Int,
         searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS
+    ): CsaJourney? = findEarliestJourney(
+        originStopIds = setOf(originStopId),
+        destinationStopIds = setOf(destinationStopId),
+        serviceDate = serviceDate,
+        startTimeSeconds = startTimeSeconds,
+        searchWindowSeconds = searchWindowSeconds
+    )
+
+    suspend fun findEarliestJourney(
+        originStopIds: Set<String>,
+        destinationStopIds: Set<String>,
+        serviceDate: LocalDate,
+        startTimeSeconds: Int,
+        searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS
     ): CsaJourney? {
         require(startTimeSeconds >= 0) { "Start time must not be negative." }
+        require(originStopIds.isNotEmpty()) { "At least one origin stop is required." }
+        require(destinationStopIds.isNotEmpty()) { "At least one destination stop is required." }
         require(searchWindowSeconds in 1..MAX_SEARCH_WINDOW_SECONDS) {
             "Search window must be between 1 second and 2 hours."
         }
@@ -85,8 +101,8 @@ class RoutePlanner @Inject constructor(
             csaEngine.findEarliestJourney(
                 connections = connections,
                 footpaths = footpaths,
-                originStopId = originStopId,
-                destinationStopId = destinationStopId,
+                originStopIds = originStopIds,
+                destinationStopIds = destinationStopIds,
                 startTime = startTimeSeconds
             )
         }

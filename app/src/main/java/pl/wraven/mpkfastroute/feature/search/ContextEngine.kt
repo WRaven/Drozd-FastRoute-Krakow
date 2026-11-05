@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Haversine
+import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
@@ -25,6 +26,8 @@ sealed interface QuickActionResult {
     data class JourneyFound(
         val origin: StopEntity,
         val destination: StopEntity,
+        val originStopOptions: List<StopEntity>,
+        val destinationStopOptions: List<StopEntity>,
         val journey: CsaJourney,
         val originPlace: GeoPlace,
         val destinationPlace: GeoPlace
@@ -48,16 +51,20 @@ class ContextEngine @Inject constructor(
 ) {
     data class CurrentOrigin(
         val place: GeoPlace,
-        val stop: StopEntity
+        val stop: StopEntity,
+        val stopOptions: List<StopEntity>
     )
 
     suspend fun findCurrentOrigin(): CurrentOrigin {
         val location = locationProvider.getCurrentLocation()
         val stops = database.stopDao().getAll()
-        val stop = withContext(Dispatchers.Default) { findNearestStop(stops, location) }
+        val stopGroup = withContext(Dispatchers.Default) {
+            findNearestStopGroup(stops, location)
+        }
         return CurrentOrigin(
             place = GeoPlace("Moja lokalizacja", location.latitude, location.longitude),
-            stop = stop
+            stop = nearestStopToLocation(stopGroup, location),
+            stopOptions = stopGroup.stops
         )
     }
 
@@ -100,10 +107,11 @@ class ContextEngine @Inject constructor(
         }
 
         val stops = database.stopDao().getAll()
-        val (origin, destinationStop) = withContext(Dispatchers.Default) {
-            findNearestStop(stops, currentLocation) to (
-                legacyTarget ?: findNearestStop(stops, targetPlace.latitude, targetPlace.longitude)
-                )
+        val (originGroup, destinationGroup) = withContext(Dispatchers.Default) {
+            val originStop = findNearestStop(stops, currentLocation)
+            val destinationStop = legacyTarget
+                ?: findNearestStop(stops, targetPlace.latitude, targetPlace.longitude)
+            findStopGroup(stops, originStop) to findStopGroup(stops, destinationStop)
         }
         val originPlace = GeoPlace(
             "Moja lokalizacja",
@@ -111,10 +119,11 @@ class ContextEngine @Inject constructor(
             currentLocation.longitude
         )
         return findJourney(
-            origin = origin,
-            destination = destinationStop,
+            originGroup = originGroup,
+            destinationGroup = destinationGroup,
             originPlace = originPlace,
             destinationPlace = targetPlace,
+            allStops = stops,
             searchWindowSeconds = DEFAULT_SEARCH_WINDOW_SECONDS
         )
     }
@@ -122,58 +131,75 @@ class ContextEngine @Inject constructor(
     suspend fun findRandomJourney(): QuickActionResult {
         val currentLocation = locationProvider.getCurrentLocation()
         val stops = database.stopDao().getAll()
-        val (origin, destination) = withContext(Dispatchers.Default) {
-            val nearest = findNearestStop(stops, currentLocation)
-            val candidateGroups = StopNameGrouper.group(stops)
-                .mapNotNull { group ->
-                    val eligibleStops = group.stops.filter {
-                        Haversine.distanceMeters(nearest, it) >=
-                            RANDOM_DESTINATION_MIN_DISTANCE_METERS
-                    }
-                    eligibleStops.randomOrNull()
+        val (originGroup, destinationGroup) = withContext(Dispatchers.Default) {
+            val origin = findNearestStopGroup(stops, currentLocation)
+            val nearest = nearestStopToLocation(origin, currentLocation)
+            val destination = StopNameGrouper.group(stops)
+                .filter { group ->
+                    group.stops.minOf {
+                        Haversine.distanceMeters(nearest, it)
+                    } >= RANDOM_DESTINATION_MIN_DISTANCE_METERS
                 }
-            nearest to candidateGroups.randomOrNull()
+                .randomOrNull()
+            origin to destination
         }
-        if (destination == null) {
+        if (destinationGroup == null) {
             return QuickActionResult.NoRandomDestination
         }
+        val destination = destinationGroup.stops.first()
 
         return findJourney(
-            origin = origin,
-            destination = destination,
+            originGroup = originGroup,
+            destinationGroup = destinationGroup,
             originPlace = GeoPlace(
                 "Moja lokalizacja",
                 currentLocation.latitude,
                 currentLocation.longitude
             ),
             destinationPlace = GeoPlace(
-                StopNameGrouper.mainName(destination.stopName),
+                destinationGroup.name,
                 destination.stopLat,
                 destination.stopLon
             ),
+            allStops = stops,
             searchWindowSeconds = RANDOM_SEARCH_WINDOW_SECONDS
         )
     }
 
     private suspend fun findJourney(
-        origin: StopEntity,
-        destination: StopEntity,
+        originGroup: StopGroup,
+        destinationGroup: StopGroup,
         originPlace: GeoPlace,
         destinationPlace: GeoPlace,
+        allStops: List<StopEntity>,
         searchWindowSeconds: Int
     ): QuickActionResult {
         val serviceTime = GtfsServiceClock.from(LocalDateTime.now())
         val journey = routePlanner.findEarliestJourney(
-            originStopId = origin.stopId,
-            destinationStopId = destination.stopId,
+            originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId },
+            destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId },
             serviceDate = serviceTime.serviceDate,
             startTimeSeconds = serviceTime.timeSeconds,
             searchWindowSeconds = searchWindowSeconds
         ) ?: return QuickActionResult.NoJourneyFound
 
+        val transitSteps = journey.steps.filterIsInstance<JourneyStep.Transit>()
+        val origin = transitSteps.firstOrNull()
+            ?.connection
+            ?.departureStopId
+            ?.let { stopId -> allStops.firstOrNull { it.stopId == stopId } }
+            ?: originGroup.stops.first()
+        val destination = transitSteps.lastOrNull()
+            ?.connection
+            ?.arrivalStopId
+            ?.let { stopId -> allStops.firstOrNull { it.stopId == stopId } }
+            ?: destinationGroup.stops.first()
+
         return QuickActionResult.JourneyFound(
             origin = origin,
             destination = destination,
+            originStopOptions = originGroup.stops,
+            destinationStopOptions = destinationGroup.stops,
             journey = journey,
             originPlace = originPlace,
             destinationPlace = destinationPlace
@@ -190,6 +216,19 @@ class ContextEngine @Inject constructor(
     ): StopEntity =
         stops.minByOrNull { stop -> Haversine.distanceMeters(latitude, longitude, stop) }
             ?: throw IllegalStateException("No GTFS stops are available.")
+
+    private fun findNearestStopGroup(stops: List<StopEntity>, location: Location): StopGroup =
+        findStopGroup(stops, findNearestStop(stops, location))
+
+    private fun findStopGroup(stops: List<StopEntity>, stop: StopEntity): StopGroup =
+        StopNameGrouper.group(stops).firstOrNull {
+            it.name == StopNameGrouper.mainName(stop.stopName)
+        } ?: StopGroup(StopNameGrouper.mainName(stop.stopName), listOf(stop))
+
+    private fun nearestStopToLocation(group: StopGroup, location: Location): StopEntity =
+        group.stops.minByOrNull {
+            Haversine.distanceMeters(location.latitude, location.longitude, it)
+        } ?: throw IllegalStateException("A stop group cannot be empty.")
 
     private companion object {
         const val ALREADY_THERE_DISTANCE_METERS = 100.0

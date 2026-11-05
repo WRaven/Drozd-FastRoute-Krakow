@@ -25,6 +25,28 @@ class CsaEngineTest {
     }
 
     @Test
+    fun choosesBestJourneyAcrossOriginAndDestinationPlatforms() {
+        val journey = engine.findEarliestJourney(
+            connections = listOf(
+                connection("origin-1", "destination-1", 100, 1_300, "trip-1"),
+                connection("origin-2", "destination-2", 200, 900, "trip-2")
+            ),
+            footpaths = emptyList(),
+            originStopIds = setOf("origin-1", "origin-2"),
+            destinationStopIds = setOf("destination-1", "destination-2"),
+            startTime = 100
+        )
+
+        assertNotNull(journey)
+        assertEquals(900, journey?.arrivalTime)
+        val selectedConnection =
+            (journey?.steps?.single() as? JourneyStep.Transit)?.connection
+        assertNotNull(selectedConnection)
+        assertEquals("origin-2", selectedConnection?.departureStopId)
+        assertEquals("destination-2", selectedConnection?.arrivalStopId)
+    }
+
+    @Test
     fun appliesThreeMinuteMinimumAndPenaltyWhenChangingTrips() {
         val journey = engine.findEarliestJourney(
             connections = listOf(
