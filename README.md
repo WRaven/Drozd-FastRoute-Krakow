@@ -12,8 +12,11 @@ the architecture and phases in the project specification.
 - The route planner filters services for the requested date, scans departures
   within a two-hour window, applies a three-minute transfer penalty, and
   includes walking transfers between stops within 150 meters.
-- TTSS live departures, radio playback, GPS quick actions, onboarding, and the
-  complete Compose search interface are still to be implemented.
+- The TTSS client maps stops by stop code or supplied normalized stop-name
+  mapping, applies reported delay to static departures, and returns explicitly
+  marked static estimates when live data is unavailable.
+- Radio playback, GPS quick actions, onboarding, and the Compose search
+  interface that wires these components together are still to be implemented.
 
 ## Versioning and in-place updates
 
