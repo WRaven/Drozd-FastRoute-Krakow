@@ -60,9 +60,15 @@ class GtfsZipParser @Inject constructor(
                 routeDao.deleteAll()
                 stopDao.deleteAll()
 
-                stops.chunked(BATCH_SIZE).forEach(stopDao::insertAll)
-                routes.chunked(BATCH_SIZE).forEach(routeDao::insertAll)
-                trips.chunked(BATCH_SIZE).forEach(tripDao::insertAll)
+                for (batch in stops.chunked(BATCH_SIZE)) {
+                    stopDao.insertAll(batch)
+                }
+                for (batch in routes.chunked(BATCH_SIZE)) {
+                    routeDao.insertAll(batch)
+                }
+                for (batch in trips.chunked(BATCH_SIZE)) {
+                    tripDao.insertAll(batch)
+                }
 
                 val stopTimeCount = readStopTimes(archive, stopIds, tripIds, stopTimeDao::insertAll)
                 check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
