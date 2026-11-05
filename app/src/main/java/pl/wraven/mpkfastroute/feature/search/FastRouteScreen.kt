@@ -46,8 +46,10 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import pl.wraven.mpkfastroute.core.audio.RadioStations
+import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -356,7 +358,7 @@ private fun StopSelector(
 
 @Composable
 private fun JourneyResult(
-    journey: pl.wraven.mpkfastroute.core.csa.CsaJourney,
+    journey: CsaJourney,
     stops: List<StopEntity>,
     origin: StopEntity?,
     destination: StopEntity?
@@ -391,38 +393,6 @@ private fun JourneyResult(
                     )
                 }
 
-                @Composable
-                private fun LiveDeparturesSection(
-                    stop: StopEntity?,
-                    departures: pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
-                ) {
-                    if (departures.departures.isEmpty()) {
-                        return
-                    }
-
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            "Odjazdy z ${stop?.stopName.orEmpty()}",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
-                            val liveIndicator = if (departure.isLive) " · LIVE" else ""
-                            Text(
-                                "${departure.routeShortName} → ${departure.direction}: " +
-                                    "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
-                                color = if (departure.isLive) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                }
-                            )
-                        }
-                    }
-                }
-
                 is JourneyStep.Walk -> {
                     val footpath = step.footpath
                     Text(
@@ -432,6 +402,38 @@ private fun JourneyResult(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun LiveDeparturesSection(
+    stop: StopEntity?,
+    departures: LiveDeparturesResult
+) {
+    if (departures.departures.isEmpty()) {
+        return
+    }
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            "Odjazdy z ${stop?.stopName.orEmpty()}",
+            style = MaterialTheme.typography.titleMedium
+        )
+        departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
+            val liveIndicator = if (departure.isLive) " · LIVE" else ""
+            Text(
+                "${departure.routeShortName} → ${departure.direction}: " +
+                    "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
+                color = if (departure.isLive) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurface
+                }
+            )
         }
     }
 }
