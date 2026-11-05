@@ -9,8 +9,10 @@ the architecture and phases in the project specification.
 - Releases use semantic version tags: `vMAJOR.MINOR.PATCH` (for example,
   `v1.2.0`). The tag becomes the Android `versionName`.
 - GitHub Actions assigns the workflow run number as Android `versionCode`.
-  The Gradle configuration added in Phase 1 must read `APP_VERSION_NAME` and
-  `APP_VERSION_CODE` from the release workflow.
+  Gradle reads `APP_VERSION_NAME` and `APP_VERSION_CODE` from the release
+  workflow and uses `git describe --tags --always` for local builds.
+- The permanent Android application ID is `pl.wraven.mpkfastroute`. Do not
+  change it after publishing the first APK.
 - All releases must keep the same Android `applicationId` and be signed with
   the same release key. Changing either prevents Android from installing an
   APK over the existing app.
@@ -33,8 +35,7 @@ Keep the keystore and passwords safe and unchanged for future releases. If the
 release key is lost, Android cannot install a differently signed APK as an
 update.
 
-After Phase 1 adds the Gradle Android project, publish a version by tagging a
-commit and pushing the tag:
+Publish a version by tagging a commit and pushing the tag:
 
 ```powershell
 git tag -a v1.0.0 -m "Release v1.0.0"
@@ -43,3 +44,7 @@ git push origin v1.0.0
 
 The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
+
+Debug APKs attached to CI runs are for testing only; they use Android's debug
+signature and cannot be installed as updates to the stable, release-signed APK.
+Use APKs from GitHub Releases when verifying in-place updates.
