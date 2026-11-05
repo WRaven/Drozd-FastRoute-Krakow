@@ -136,7 +136,7 @@ class TtssLiveMapper {
         staticDepartures: List<StaticDeparture>,
         reason: String
     ): LiveDeparturesResult = LiveDeparturesResult(
-        departures = staticDepartures.map(StaticDeparture::toEstimate),
+        departures = staticDepartures.map { it.toEstimate() },
         fallbackReason = reason
     )
 
