@@ -40,6 +40,16 @@ the architecture and phases in the project specification.
   is included in door-to-door arrival estimates; results include the fastest
   option and a lower-walking alternative. Distances are Haversine estimates
   at 4.5 km/h, not pedestrian-road directions.
+- The route form can plan a one-time departure or latest arrival by date and
+  time. The startup origin defaults to the current location when permission is
+  granted, and the quick actions open the official ZTP/KMK service notices.
+- Saved home/work schedules can trigger a commute notification 15 minutes
+  before the calculated departure. It refreshes every five minutes with
+  upcoming TTSS departures and route-relevant ZTP GTFS-Realtime service alerts.
+  Android notification and background-location permissions are required; if
+  any alert feed is unavailable, the notification reports incomplete data
+  instead of claiming there are no disruptions. ZTP's GTFS-Realtime feeds are
+  published under CC BY 4.0.
 - Stop codes remain available internally for TTSS mapping and stop matching,
   but are not shown in user-facing stop labels.
 - Stop-name search ignores Polish diacritics and suggests up to three

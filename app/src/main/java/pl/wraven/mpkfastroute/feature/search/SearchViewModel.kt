@@ -20,6 +20,8 @@ import pl.wraven.mpkfastroute.core.audio.RadioManager
 import pl.wraven.mpkfastroute.core.audio.RadioPreferences
 import pl.wraven.mpkfastroute.core.audio.RadioStation
 import pl.wraven.mpkfastroute.core.audio.RadioStations
+import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
+import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.FootpathGenerator
 import pl.wraven.mpkfastroute.core.csa.Haversine
@@ -76,6 +78,7 @@ data class SearchUiState(
     val journey: CsaJourney? = null,
     val journeyOptions: List<CsaJourney> = emptyList(),
     val arrivalTarget: LocalDateTime? = null,
+    val routeTimePlan: JourneyTimePlan? = null,
     val liveDepartures: LiveDeparturesResult? = null,
     val isImporting: Boolean = false,
     val isSearching: Boolean = false,
@@ -170,6 +173,17 @@ class SearchViewModel @Inject constructor(
             )
         }
         scheduleAddressSuggestions(query, isOrigin = true)
+    }
+
+    fun useCurrentLocationIfOriginEmpty() {
+        val state = mutableUiState.value
+        if (
+            state.originPlace == null &&
+            state.originStop == null &&
+            state.originQuery.isBlank()
+        ) {
+            useCurrentLocation()
+        }
     }
 
     fun selectOrigin(group: StopGroup) {
@@ -352,6 +366,11 @@ class SearchViewModel @Inject constructor(
             showMessage("Ustaw lokalizację początkową i adres lub przystanek docelowy.")
             return
         }
+        val routeTimePlan = state.routeTimePlan
+        if (routeTimePlan != null && !routeTimePlan.dateTime.isAfter(LocalDateTime.now())) {
+            showMessage("Wybrana data i godzina już minęła.")
+            return
+        }
 
         val originAccesses = buildStopAccesses(
             place = originPlace,
@@ -398,15 +417,28 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val now = LocalDateTime.now()
-                val serviceTime = GtfsServiceClock.from(now)
+                val plannedDateTime = routeTimePlan?.dateTime ?: now
+                val searchStart = if (routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY) {
+                    plannedDateTime.minusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
+                } else {
+                    plannedDateTime
+                }
                 val candidates = routePlanner.findJourneys(
                     originAccesses = originAccesses,
                     destinationAccesses = destinationAccesses,
-                    serviceDate = serviceTime.serviceDate,
-                    startTimeSeconds = serviceTime.timeSeconds,
-                    maxResults = MAX_CSA_JOURNEY_CANDIDATES
+                    startDateTime = searchStart,
+                    searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
+                    maxResults = MAX_CSA_JOURNEY_CANDIDATES,
+                    arrivalDeadline = routeTimePlan
+                        ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
+                        ?.dateTime
                 )
-                val journeyOptions = selectRouteAlternatives(candidates)
+                val currentServiceTime = GtfsServiceClock.from(now)
+                val preferLatestArrival = routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
+                val journeyOptions = selectRouteAlternatives(
+                    candidates,
+                    preferLatestArrival = preferLatestArrival
+                )
                 diagnostics.record(
                     "Wyniki: ${candidates.size} kandydatów, " +
                         "${journeyOptions.size} tras po wyborze alternatyw."
@@ -428,6 +460,14 @@ class SearchViewModel @Inject constructor(
                 val selectedDestination = lastTransitStopId?.let(stopsById::get)
                     ?: fastestJourney?.destinationAccess?.stopId?.let(stopsById::get)
                     ?: state.destinationStop
+                val noJourneyMessage = when (routeTimePlan?.mode) {
+                    JourneyTimeMode.DEPART_AFTER ->
+                        "Nie znaleziono połączenia w ciągu dwóch godzin od wybranej godziny."
+                    JourneyTimeMode.ARRIVE_BY ->
+                        "Nie znaleziono połączenia przed wybraną godziną przyjazdu."
+                    null ->
+                        "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                }
                 mutableUiState.update {
                     it.copy(
                         originStop = selectedOrigin,
@@ -436,25 +476,25 @@ class SearchViewModel @Inject constructor(
                         journeyOptions = journeyOptions,
                         liveDepartures = null,
                         routeSearchMessage = if (fastestJourney == null) {
-                            "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                            noJourneyMessage
                         } else {
                             null
                         },
                         statusMessage = if (fastestJourney == null) {
-                            "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                            noJourneyMessage
                         } else {
                             null
                         }
                     )
                 }
-                if (fastestJourney != null && firstTransitStopId != null) {
+                if (routeTimePlan == null && fastestJourney != null && firstTransitStopId != null) {
                     diagnostics.record("Trasa gotowa; odjazdy TTSS pobierane w tle.")
                     viewModelScope.launch {
                         try {
                             val liveDepartures = ttssDepartureRepository.getDepartures(
                                 stopId = firstTransitStopId,
-                                serviceDate = serviceTime.serviceDate,
-                                startTimeSeconds = serviceTime.timeSeconds,
+                                serviceDate = currentServiceTime.serviceDate,
+                                startTimeSeconds = currentServiceTime.timeSeconds,
                                 nowTimeSeconds = now.toLocalTime().toSecondOfDay()
                             )
                             diagnostics.record("Odpowiedź TTSS odebrana.")
@@ -543,6 +583,20 @@ class SearchViewModel @Inject constructor(
 
     fun routeHome() {
         runContextAction(SavedDestination.HOME)
+    }
+
+    fun setRouteTimePlan(plan: JourneyTimePlan?) {
+        mutableUiState.update {
+            it.copy(
+                routeTimePlan = plan,
+                journey = null,
+                journeyOptions = emptyList(),
+                arrivalTarget = null,
+                liveDepartures = null,
+                routeSearchMessage = null,
+                statusMessage = null
+            )
+        }
     }
 
     fun routeToWork() {
@@ -1115,20 +1169,35 @@ class SearchViewModel @Inject constructor(
         longitude = stop.stopLon
     )
 
-    private fun selectRouteAlternatives(candidates: List<CsaJourney>): List<CsaJourney> {
+    private fun selectRouteAlternatives(
+        candidates: List<CsaJourney>,
+        preferLatestArrival: Boolean = false
+    ): List<CsaJourney> {
+        val fastestComparator = if (preferLatestArrival) {
+            compareByDescending<CsaJourney> { it.estimatedArrivalTime }
+                .thenBy { it.totalDurationSeconds }
+                .thenBy { it.totalWalkingDistanceMeters }
+                .thenBy { it.transferPenaltySeconds }
+        } else {
+            compareBy<CsaJourney> { it.totalDurationSeconds }
+                .thenBy { it.totalWalkingDistanceMeters }
+                .thenBy { it.transferPenaltySeconds }
+        }
         val ordered = candidates
             .distinctBy(::routeSignature)
-            .sortedWith(
-                compareBy<CsaJourney> { it.totalDurationSeconds }
-                    .thenBy { it.totalWalkingDistanceMeters }
-                    .thenBy { it.transferPenaltySeconds }
-            )
+            .sortedWith(fastestComparator)
         val fastest = ordered.firstOrNull() ?: return emptyList()
-        val leastWalking = ordered.minWithOrNull(
+        val leastWalkingComparator = if (preferLatestArrival) {
+            compareBy<CsaJourney> { it.totalWalkingDistanceMeters }
+                .thenByDescending { it.estimatedArrivalTime }
+                .thenBy { it.totalDurationSeconds }
+                .thenBy { it.transferPenaltySeconds }
+        } else {
             compareBy<CsaJourney> { it.totalWalkingDistanceMeters }
                 .thenBy { it.totalDurationSeconds }
                 .thenBy { it.transferPenaltySeconds }
-        ) ?: return listOf(fastest)
+        }
+        val leastWalking = ordered.minWithOrNull(leastWalkingComparator) ?: return listOf(fastest)
 
         return buildList {
             add(fastest)
@@ -1179,6 +1248,7 @@ class SearchViewModel @Inject constructor(
                     journey = null,
                     journeyOptions = emptyList(),
                     arrivalTarget = null,
+                    routeTimePlan = null,
                     liveDepartures = null
                 )
             }
@@ -1252,6 +1322,7 @@ class SearchViewModel @Inject constructor(
         const val MIN_ADDRESS_QUERY_LENGTH = 3
         const val MAX_NEARBY_STOPS = 6
         const val MAX_AUTO_STOP_ACCESS_METERS = 1_500.0
+        const val ROUTE_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
         const val MAX_CSA_JOURNEY_CANDIDATES = 20
         const val MAX_DISPLAYED_ROUTE_OPTIONS = 3
     }

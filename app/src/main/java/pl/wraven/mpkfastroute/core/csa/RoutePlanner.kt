@@ -1,6 +1,7 @@
 package pl.wraven.mpkfastroute.core.csa
 
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -8,6 +9,7 @@ import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
+import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.ServiceCalendarResolver
 
 class RoutePlanner @Inject constructor(
@@ -49,6 +51,50 @@ class RoutePlanner @Inject constructor(
         searchWindowSeconds = searchWindowSeconds,
         maxResults = 1
     ).firstOrNull()
+
+    suspend fun findJourneys(
+        originAccesses: List<StopAccess>,
+        destinationAccesses: List<StopAccess>,
+        startDateTime: LocalDateTime,
+        searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS,
+        maxResults: Int = DEFAULT_MAX_RESULTS,
+        arrivalDeadline: LocalDateTime? = null
+    ): List<CsaJourney> {
+        require(searchWindowSeconds in 1..MAX_SEARCH_WINDOW_SECONDS) {
+            "Search window must be between 1 second and 2 hours."
+        }
+        val serviceWindows = GtfsServiceClock.window(
+            startDateTime = startDateTime,
+            durationSeconds = searchWindowSeconds,
+            arrivalDeadline = arrivalDeadline
+        )
+        val journeys = mutableListOf<CsaJourney>()
+        for (window in serviceWindows) {
+            val serviceDayOffset = window.serviceDayOffsetSeconds
+            findJourneys(
+                originAccesses = originAccesses,
+                destinationAccesses = destinationAccesses,
+                serviceDate = window.serviceDate,
+                startTimeSeconds = window.startTimeSeconds,
+                searchWindowSeconds = window.durationSeconds,
+                maxResults = maxResults,
+                arrivalDeadline = window.arrivalDeadlineSeconds
+            ).forEach { journey ->
+                journeys += shiftJourneyTimes(journey, serviceDayOffset)
+            }
+        }
+        val journeyComparator = if (arrivalDeadline == null) {
+            compareBy<CsaJourney> { it.totalDurationSeconds }
+                .thenBy { it.totalWalkingDistanceMeters }
+                .thenBy { it.transferPenaltySeconds }
+        } else {
+            compareByDescending<CsaJourney> { it.estimatedArrivalTime }
+                .thenBy { it.totalDurationSeconds }
+                .thenBy { it.totalWalkingDistanceMeters }
+                .thenBy { it.transferPenaltySeconds }
+        }
+        return journeys.sortedWith(journeyComparator)
+    }
 
     suspend fun findJourneys(
         originAccesses: List<StopAccess>,
@@ -171,6 +217,32 @@ class RoutePlanner @Inject constructor(
             )
             journeys
         }
+    }
+
+    private fun shiftJourneyTimes(journey: CsaJourney, offsetSeconds: Int): CsaJourney {
+        if (offsetSeconds == 0) return journey
+        return journey.copy(
+            departureTime = Math.addExact(journey.departureTime, offsetSeconds),
+            arrivalTime = Math.addExact(journey.arrivalTime, offsetSeconds),
+            steps = journey.steps.map { step ->
+                when (step) {
+                    is JourneyStep.Transit -> step.copy(
+                        connection = step.connection.copy(
+                            departureTime = Math.addExact(
+                                step.connection.departureTime,
+                                offsetSeconds
+                            ),
+                            arrivalTime = Math.addExact(
+                                step.connection.arrivalTime,
+                                offsetSeconds
+                            )
+                        )
+                    )
+
+                    is JourneyStep.Walk -> step
+                }
+            }
+        )
     }
 
     private fun elapsedMilliseconds(startedAt: Long): Long =

@@ -51,6 +51,14 @@ class AppPreferences @Inject constructor(
         DestinationSchedule.decode(preferences[WORK_SCHEDULE])
     }
 
+    val homeCommuteNotificationOccurrence: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[HOME_COMMUTE_NOTIFICATION_OCCURRENCE]
+    }
+
+    val workCommuteNotificationOccurrence: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[WORK_COMMUTE_NOTIFICATION_OCCURRENCE]
+    }
+
     val customRoute: Flow<SavedRoute?> = dataStore.data.map { preferences ->
         preferences[CUSTOM_ROUTE]?.let { json.decodeFromString<SavedRoute>(it) }
     }
@@ -120,6 +128,18 @@ class AppPreferences @Inject constructor(
 
     suspend fun saveWorkSchedule(schedule: DestinationSchedule) {
         saveSchedule(WORK_SCHEDULE, schedule)
+    }
+
+    suspend fun markHomeCommuteNotificationOccurrence(occurrence: String) {
+        dataStore.edit { preferences ->
+            preferences[HOME_COMMUTE_NOTIFICATION_OCCURRENCE] = occurrence
+        }
+    }
+
+    suspend fun markWorkCommuteNotificationOccurrence(occurrence: String) {
+        dataStore.edit { preferences ->
+            preferences[WORK_COMMUTE_NOTIFICATION_OCCURRENCE] = occurrence
+        }
     }
 
     suspend fun saveCustomRoute(route: SavedRoute) {
@@ -269,6 +289,10 @@ class AppPreferences @Inject constructor(
         val WORK_LONGITUDE = intPreferencesKey("workPlaceLongitudeE6")
         val HOME_SCHEDULE = stringPreferencesKey("homeSchedule")
         val WORK_SCHEDULE = stringPreferencesKey("workSchedule")
+        val HOME_COMMUTE_NOTIFICATION_OCCURRENCE =
+            stringPreferencesKey("homeCommuteNotificationOccurrence")
+        val WORK_COMMUTE_NOTIFICATION_OCCURRENCE =
+            stringPreferencesKey("workCommuteNotificationOccurrence")
         val CUSTOM_ROUTE = stringPreferencesKey("customRoute")
         val RECENT_ADDRESS_PLACES = stringPreferencesKey("recentAddressPlaces")
         val RADIO_STATIONS = stringPreferencesKey("radioStations")

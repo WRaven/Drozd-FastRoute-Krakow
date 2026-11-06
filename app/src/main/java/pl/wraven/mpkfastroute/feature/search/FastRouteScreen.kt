@@ -1,11 +1,15 @@
 package pl.wraven.mpkfastroute.feature.search
 
+import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -55,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -64,17 +69,24 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.net.URI
 import java.net.URISyntaxException
 import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.UUID
 import kotlin.math.roundToInt
 import pl.wraven.mpkfastroute.core.audio.RadioStation
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Haversine
+import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
+import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
@@ -93,6 +105,11 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var scheduleTarget by remember { mutableStateOf<SavedDestination?>(null) }
     var scheduleSavesPlace by remember { mutableStateOf(false) }
     var pendingLocationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var routeTimePlanVisible by remember { mutableStateOf(false) }
+    var startupLocationRequested by rememberSaveable { mutableStateOf(false) }
+    var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
+    var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
+    var permissionStateRevision by remember { mutableStateOf(0) }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -124,6 +141,105 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     Manifest.permission.ACCESS_COARSE_LOCATION
                 )
             )
+        }
+    }
+
+    val backgroundLocationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            CommuteReminderScheduler.synchronize(context, enabled = true)
+            permissionStateRevision += 1
+        } else {
+            CommuteReminderScheduler.synchronize(context, enabled = false)
+            backgroundLocationHelpVisible = true
+        }
+    }
+
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            requestBackgroundLocationPermission(
+                context = context,
+                launcher = backgroundLocationPermissionLauncher,
+                onOpenSettingsRequired = { backgroundLocationHelpVisible = true },
+                onReady = {
+                    CommuteReminderScheduler.synchronize(context, enabled = true)
+                    permissionStateRevision += 1
+                }
+            )
+        } else {
+            CommuteReminderScheduler.synchronize(context, enabled = false)
+            permissionStateRevision += 1
+            viewModel.showMessage("Bez uprawnienia do powiadomień przypomnienia o dojeździe nie będą działać.")
+        }
+    }
+
+    fun requestNotificationPermission() {
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            requestBackgroundLocationPermission(
+                context = context,
+                launcher = backgroundLocationPermissionLauncher,
+                onOpenSettingsRequired = { backgroundLocationHelpVisible = true },
+                onReady = {
+                    CommuteReminderScheduler.synchronize(context, enabled = true)
+                    permissionStateRevision += 1
+                }
+            )
+        }
+    }
+
+    fun requestCommuteReminderPermissions() {
+        val hasForegroundLocation =
+            context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED ||
+                context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+                PackageManager.PERMISSION_GRANTED
+        if (hasForegroundLocation) {
+            requestNotificationPermission()
+        } else {
+            runWithLocationPermission(::requestNotificationPermission)
+        }
+    }
+
+    val hasSavedCommuteSchedule =
+        (state.hasHomeDestination && state.homeSchedule != null) ||
+            (state.hasWorkDestination && state.workSchedule != null)
+    val commuteRemindersEnabled = remember(permissionStateRevision, hasSavedCommuteSchedule) {
+        hasSavedCommuteSchedule && hasCommuteReminderPermissions(context)
+    }
+
+    LaunchedEffect(hasSavedCommuteSchedule) {
+        CommuteReminderScheduler.synchronize(context, commuteRemindersEnabled)
+        if (
+            hasSavedCommuteSchedule &&
+            !commuteRemindersEnabled &&
+            !reminderPermissionsRequested
+        ) {
+            reminderPermissionsRequested = true
+            requestCommuteReminderPermissions()
+        }
+    }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        permissionStateRevision += 1
+        CommuteReminderScheduler.synchronize(
+            context,
+            hasSavedCommuteSchedule && hasCommuteReminderPermissions(context)
+        )
+    }
+
+    LaunchedEffect(state.isScheduleEmpty) {
+        if (!state.isScheduleEmpty && !startupLocationRequested) {
+            startupLocationRequested = true
+            runWithLocationPermission(viewModel::useCurrentLocationIfOriginEmpty)
         }
     }
 
@@ -207,6 +323,12 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onChooseRadio = { radioSelectionVisible = true },
                 onManageRadio = { radioManagementVisible = true },
                 onSaveCustomRoute = viewModel::saveCurrentRouteAsCustom,
+                onEditRoutePlan = { routeTimePlanVisible = true },
+                onOpenServiceAlerts = {
+                    openExternalUrl("https://ztp.krakow.pl/kmk/komunikaty")
+                },
+                remindersEnabled = commuteRemindersEnabled,
+                onEnableCommuteReminders = ::requestCommuteReminderPermissions,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(contentPadding)
@@ -309,6 +431,55 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             onDismiss = { scheduleTarget = null }
         )
     }
+
+    if (routeTimePlanVisible) {
+        JourneyTimePlanDialog(
+            currentPlan = state.routeTimePlan,
+            onSave = { plan ->
+                viewModel.setRouteTimePlan(plan)
+                routeTimePlanVisible = false
+            },
+            onDismiss = { routeTimePlanVisible = false }
+        )
+    }
+
+    if (backgroundLocationHelpVisible) {
+        AlertDialog(
+            onDismissRequest = { backgroundLocationHelpVisible = false },
+            title = { Text("Lokalizacja w tle") },
+            text = {
+                Text(
+                    "Aby wyznaczać trasę przed odjazdem i aktualizować powiadomienie co 5 minut, " +
+                        "ustaw dla aplikacji lokalizację „Zawsze”. GPS jest używany lokalnie."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        backgroundLocationHelpVisible = false
+                        try {
+                            context.startActivity(
+                                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = Uri.fromParts("package", context.packageName, null)
+                                }
+                            )
+                        } catch (_: ActivityNotFoundException) {
+                            viewModel.showMessage("Nie można otworzyć ustawień aplikacji.")
+                        } catch (_: SecurityException) {
+                            viewModel.showMessage("Nie można otworzyć ustawień aplikacji.")
+                        }
+                    }
+                ) {
+                    Text("Otwórz ustawienia")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { backgroundLocationHelpVisible = false }) {
+                    Text("Później")
+                }
+            }
+        )
+    }
 }
 
 @Composable
@@ -363,6 +534,10 @@ private fun SearchContent(
     onChooseRadio: () -> Unit,
     onManageRadio: () -> Unit,
     onSaveCustomRoute: () -> Unit,
+    onEditRoutePlan: () -> Unit,
+    onOpenServiceAlerts: () -> Unit,
+    remindersEnabled: Boolean,
+    onEnableCommuteReminders: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
@@ -423,6 +598,23 @@ private fun SearchContent(
                             Text(if (state.customRoute == null) "Własny · zapisz trasę" else "Własny")
                         }
                     )
+                    AssistChip(
+                        onClick = onOpenServiceAlerts,
+                        enabled = !state.isImporting,
+                        label = { Text("📢 Komunikaty MPK") }
+                    )
+                    if (state.homeSchedule != null || state.workSchedule != null) {
+                        AssistChip(
+                            onClick = onEnableCommuteReminders,
+                            enabled = !state.isImporting,
+                            label = {
+                                Text(
+                                    if (remindersEnabled) "🔔 Powiadomienia aktywne"
+                                    else "🔔 Włącz powiadomienia"
+                                )
+                            }
+                        )
+                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -645,6 +837,25 @@ private fun SearchContent(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                TextButton(
+                    onClick = onEditRoutePlan,
+                    enabled = !state.isSearching && !state.isImporting,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        state.routeTimePlan?.let { plan ->
+                            val modeLabel = when (plan.mode) {
+                                JourneyTimeMode.DEPART_AFTER -> "Odjazd po"
+                                JourneyTimeMode.ARRIVE_BY -> "Przyjazd najpóźniej"
+                            }
+                            "$modeLabel · ${
+                                plan.dateTime.format(
+                                    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+                                )
+                            }"
+                        } ?: "🕒 Zaplanuj odjazd lub przyjazd"
+                    )
+                }
                 Button(
                     onClick = onSearch,
                     enabled = !state.isSearching && !state.isImporting &&
@@ -673,6 +884,8 @@ private fun SearchContent(
         val leastWalkingIndex = state.journeyOptions.indices.minByOrNull { index ->
             state.journeyOptions[index].totalWalkingDistanceMeters
         }
+        val preferLatestArrival =
+            state.routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
         state.journeyOptions.forEachIndexed { index, journey ->
             JourneyResult(
                 journey = journey,
@@ -684,6 +897,9 @@ private fun SearchContent(
                     it.stopId == journey.destinationAccess.stopId
                 } ?: state.destinationStop,
                 routeLabel = when {
+                    preferLatestArrival && index == 0 && index == leastWalkingIndex ->
+                        "Najbliżej godziny · najmniej chodzenia"
+                    preferLatestArrival && index == 0 -> "Najbliżej godziny"
                     index == 0 && index == leastWalkingIndex ->
                         "Najszybciej · najmniej chodzenia"
                     index == 0 -> "Najszybciej"
@@ -1244,6 +1460,146 @@ private fun SettingsDialog(
 }
 
 @Composable
+private fun JourneyTimePlanDialog(
+    currentPlan: JourneyTimePlan?,
+    onSave: (JourneyTimePlan?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var mode by remember(currentPlan) {
+        mutableStateOf(currentPlan?.mode ?: JourneyTimeMode.DEPART_AFTER)
+    }
+    var dateTime by remember(currentPlan) {
+        val now = LocalDateTime.now()
+        mutableStateOf(
+            currentPlan?.dateTime?.takeIf { it.isAfter(now) }
+                ?: now.plusMinutes(5).withSecond(0).withNano(0)
+        )
+    }
+    var datePickerVisible by remember { mutableStateOf(false) }
+    var timePickerVisible by remember { mutableStateOf(false) }
+    val isDateTimeValid = dateTime.isAfter(LocalDateTime.now())
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zaplanuj podróż") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Wybierz jeden sposób planowania:")
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    FilterChip(
+                        selected = mode == JourneyTimeMode.DEPART_AFTER,
+                        onClick = { mode = JourneyTimeMode.DEPART_AFTER },
+                        label = { Text("Odjazd po") }
+                    )
+                    FilterChip(
+                        selected = mode == JourneyTimeMode.ARRIVE_BY,
+                        onClick = { mode = JourneyTimeMode.ARRIVE_BY },
+                        label = { Text("Przyjazd najpóźniej") }
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { datePickerVisible = true }) {
+                        Text("Data: ${dateTime.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}")
+                    }
+                    TextButton(onClick = { timePickerVisible = true }) {
+                        Text("Godzina: ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}")
+                    }
+                }
+                Text(
+                    if (mode == JourneyTimeMode.DEPART_AFTER) {
+                        "Szukam od wybranej godziny w ciągu 2 godzin."
+                    } else {
+                        "Szukam połączenia, które dotrze do celu przed wybraną godziną."
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (!isDateTimeValid) {
+                    Text(
+                        "Wybierz przyszłą datę i godzinę.",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(JourneyTimePlan(mode, dateTime)) },
+                enabled = isDateTimeValid
+            ) {
+                Text("Zapisz plan")
+            }
+        },
+        dismissButton = {
+            Row {
+                if (currentPlan != null) {
+                    TextButton(onClick = { onSave(null) }) {
+                        Text("Od teraz")
+                    }
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Anuluj")
+                }
+            }
+        }
+    )
+
+    if (datePickerVisible) {
+        val picker = remember(dateTime) {
+            DatePickerDialog(
+                context,
+                { _, year, month, day ->
+                    dateTime = LocalDateTime.of(
+                        LocalDate.of(year, month + 1, day),
+                        dateTime.toLocalTime()
+                    )
+                    datePickerVisible = false
+                },
+                dateTime.year,
+                dateTime.monthValue - 1,
+                dateTime.dayOfMonth
+            ).apply {
+                datePicker.minDate = LocalDate.now()
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+                    .toEpochMilli()
+                setOnDismissListener { datePickerVisible = false }
+            }
+        }
+        LaunchedEffect(picker) {
+            picker.show()
+        }
+    }
+
+    if (timePickerVisible) {
+        val picker = remember(dateTime) {
+            TimePickerDialog(
+                context,
+                { _, hour, minute ->
+                    dateTime = dateTime
+                        .withHour(hour)
+                        .withMinute(minute)
+                        .withSecond(0)
+                        .withNano(0)
+                    timePickerVisible = false
+                },
+                dateTime.hour,
+                dateTime.minute,
+                true
+            ).apply {
+                setOnDismissListener { timePickerVisible = false }
+            }
+        }
+        LaunchedEffect(picker) {
+            picker.show()
+        }
+    }
+}
+
+@Composable
 private fun DestinationScheduleDialog(
     destinationName: String,
     initialSchedule: DestinationSchedule,
@@ -1507,6 +1863,52 @@ private fun isHttpStreamUrl(value: String): Boolean {
         uri.scheme.equals("http", ignoreCase = true) ||
             uri.scheme.equals("https", ignoreCase = true)
         ) && !uri.host.isNullOrBlank()
+}
+
+private fun hasCommuteReminderPermissions(context: Context): Boolean {
+    val hasForegroundLocation =
+        context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+    val hasBackgroundLocation =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+    val hasNotifications =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
+    val notificationManager = context.getSystemService(
+        android.app.NotificationManager::class.java
+    )
+    val notificationsEnabled =
+        notificationManager.areNotificationsEnabled() &&
+            notificationManager.getNotificationChannel(CommuteReminderScheduler.CHANNEL_ID)
+                ?.importance != android.app.NotificationManager.IMPORTANCE_NONE
+    return hasForegroundLocation && hasBackgroundLocation && hasNotifications &&
+        notificationsEnabled
+}
+
+private fun requestBackgroundLocationPermission(
+    context: Context,
+    launcher: androidx.activity.compose.ManagedActivityResultLauncher<String, Boolean>,
+    onOpenSettingsRequired: () -> Unit,
+    onReady: () -> Unit
+) {
+    if (
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+        context.checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) !=
+        PackageManager.PERMISSION_GRANTED
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            onOpenSettingsRequired()
+        } else {
+            launcher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
+    } else {
+        onReady()
+    }
 }
 
 private fun scheduleSummary(schedule: DestinationSchedule?): String =

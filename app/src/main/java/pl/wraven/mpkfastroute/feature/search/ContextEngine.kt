@@ -33,7 +33,8 @@ sealed interface QuickActionResult {
         val journey: CsaJourney,
         val originPlace: GeoPlace,
         val destinationPlace: GeoPlace,
-        val arrivalTarget: LocalDateTime? = null
+        val arrivalTarget: LocalDateTime? = null,
+        val departureTarget: LocalDateTime? = null
     ) : QuickActionResult
 
     data class AlreadyAtDestination(
@@ -70,7 +71,10 @@ class ContextEngine @Inject constructor(
         )
     }
 
-    suspend fun routeToSavedStop(destination: SavedDestination): QuickActionResult {
+    suspend fun routeToSavedStop(
+        destination: SavedDestination,
+        arrivalTargetOverride: LocalDateTime? = null
+    ): QuickActionResult {
         val savedPlace = when (destination) {
             SavedDestination.HOME -> appPreferences.homePlace.first()
             SavedDestination.WORK -> appPreferences.workPlace.first()
@@ -130,7 +134,7 @@ class ContextEngine @Inject constructor(
             originPlace = originPlace,
             destinationPlace = targetPlace,
             allStops = stops,
-            arrivalTarget = schedule?.nextOccurrence(LocalDateTime.now())
+            arrivalTarget = arrivalTargetOverride ?: schedule?.nextOccurrence(LocalDateTime.now())
         )
     }
 
@@ -146,49 +150,26 @@ class ContextEngine @Inject constructor(
         val earliestScheduledStart =
             arrivalTarget?.minusSeconds(MAX_SEARCH_WINDOW_SECONDS.toLong())
         val searchStart = earliestScheduledStart?.takeIf { it.isAfter(now) } ?: now
-        val serviceTime = GtfsServiceClock.from(searchStart)
         val searchWindowSeconds = arrivalTarget?.let {
             Duration.between(searchStart, it).seconds.toInt()
         } ?: DEFAULT_SEARCH_WINDOW_SECONDS
-        val arrivalDeadline = serviceTime.timeSeconds + searchWindowSeconds
         val originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId }
         val destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId }
-        val candidateJourneys = if (arrivalTarget == null) {
-            listOfNotNull(
-                routePlanner.findEarliestJourney(
-                    originStopIds = originStopIds,
-                    destinationStopIds = destinationStopIds,
-                    serviceDate = serviceTime.serviceDate,
-                    startTimeSeconds = serviceTime.timeSeconds,
-                    searchWindowSeconds = searchWindowSeconds
-                )
-            )
-        } else {
-            routePlanner.findJourneys(
-                originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
-                destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
-                serviceDate = serviceTime.serviceDate,
-                startTimeSeconds = serviceTime.timeSeconds,
-                searchWindowSeconds = searchWindowSeconds,
-                maxResults = 1,
-                arrivalDeadline = arrivalDeadline
-            )
-        }
-        val journey = if (arrivalTarget == null) {
-            candidateJourneys.firstOrNull()
-        } else {
-            candidateJourneys
-                .firstOrNull()
-                ?.let { candidate ->
-                    val firstTransit = candidate.steps
-                        .filterIsInstance<JourneyStep.Transit>()
-                        .firstOrNull()
-                    candidate.copy(
-                        departureTime = firstTransit?.connection?.departureTime
-                            ?: candidate.departureTime
-                    )
-                }
-        } ?: return QuickActionResult.NoJourneyFound
+        val candidateJourney = routePlanner.findJourneys(
+            originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
+            destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
+            startDateTime = searchStart,
+            searchWindowSeconds = searchWindowSeconds,
+            maxResults = 1,
+            arrivalDeadline = arrivalTarget
+        ).firstOrNull() ?: return QuickActionResult.NoJourneyFound
+        val firstTransit = candidateJourney.steps
+            .filterIsInstance<JourneyStep.Transit>()
+            .firstOrNull()
+        val journey = candidateJourney.copy(
+            departureTime = firstTransit?.connection?.departureTime
+                ?: candidateJourney.departureTime
+        )
 
         val transitSteps = journey.steps.filterIsInstance<JourneyStep.Transit>()
         val origin = transitSteps.firstOrNull()
@@ -210,7 +191,10 @@ class ContextEngine @Inject constructor(
             journey = journey,
             originPlace = originPlace,
             destinationPlace = destinationPlace,
-            arrivalTarget = arrivalTarget
+            arrivalTarget = arrivalTarget,
+            departureTarget = GtfsServiceClock.from(searchStart).serviceDate
+                .atStartOfDay()
+                .plusSeconds(journey.departureTime.toLong())
         )
     }
 
