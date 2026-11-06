@@ -7,6 +7,7 @@ on:
     tags:
       - "v*"
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -37,6 +38,32 @@ jobs:
       - name: Install Android SDK Platform
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Configure stable signing for the test APK
+        if: github.ref == 'refs/heads/main'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || \
+                -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
+            echo "STABLE_TEST_SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
+            echo "::warning::Stable signing secrets are missing; no test APK artifact will be uploaded."
+            exit 0
+          fi
+          keystore_path="$RUNNER_TEMP/mpk-krakow-fastroute-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          chmod 600 "$keystore_path"
+          {
+            printf 'ANDROID_KEYSTORE_FILE=%s\n' "$keystore_path"
+            printf 'ANDROID_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
+            printf 'ANDROID_KEY_ALIAS=%s\n' "$ANDROID_KEY_ALIAS"
+            printf 'ANDROID_KEY_PASSWORD=%s\n' "$ANDROID_KEY_PASSWORD"
+            echo "STABLE_TEST_SIGNING_AVAILABLE=true"
+          } >> "$GITHUB_ENV"
+
       - name: Run unit tests, lint, and debug build
         env:
           APP_VERSION_NAME: 0.1.0-ci.${{ github.run_number }}
@@ -53,8 +80,10 @@ jobs:
           test -s "$apk_path"
           versioned_path="app/build/outputs/apk/debug/MPK-Krakow-FastRoute-v${APP_VERSION_NAME}-build${APP_VERSION_CODE}-debug.apk"
           mv "$apk_path" "$versioned_path"
+        if: github.ref == 'refs/heads/main' && env.STABLE_TEST_SIGNING_AVAILABLE == 'true'
 
       - name: Upload debug APK artifact
+        if: github.ref == 'refs/heads/main' && env.STABLE_TEST_SIGNING_AVAILABLE == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: MPK-Krakow-FastRoute-ci-build-${{ github.run_number }}

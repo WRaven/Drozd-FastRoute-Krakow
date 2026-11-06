@@ -88,8 +88,10 @@ git push origin v1.0.0
 The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
 
-Debug APKs attached to CI runs are for testing only; they use Android's debug
-signature, use the separate `pl.wraven.mpkfastroute.debug` package, and appear
-as "MPK Kraków FastRoute (test)". They can be installed alongside the regular
-app, but cannot update its data or package. Use APKs from GitHub Releases when
-verifying in-place updates.
+Main-branch test APKs use the separate `pl.wraven.mpkfastroute.debug` package
+and appear as "MPK Kraków FastRoute (test)". When the four signing secrets are
+configured, CI signs them with the stable release key so one test APK can update
+another without removing its local database. The test app remains separate from
+the regular release app and does not share its data. If the secrets are missing,
+CI still runs validation but does not upload a test APK artifact. Pull-request
+builds are for validation only and do not publish APK artifacts.
