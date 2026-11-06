@@ -41,26 +41,26 @@ jobs:
       - name: Configure stable signing for the test APK
         if: github.ref == 'refs/heads/main'
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          TEST_KEYSTORE_BASE64: ${{ secrets.TEST_KEYSTORE_BASE64 }}
+          TEST_KEYSTORE_PASSWORD: ${{ secrets.TEST_KEYSTORE_PASSWORD }}
+          TEST_KEY_ALIAS: ${{ secrets.TEST_KEY_ALIAS }}
+          TEST_KEY_PASSWORD: ${{ secrets.TEST_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || \
-                -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
+          if [[ -z "$TEST_KEYSTORE_BASE64" || -z "$TEST_KEYSTORE_PASSWORD" || \
+                -z "$TEST_KEY_ALIAS" || -z "$TEST_KEY_PASSWORD" ]]; then
             echo "STABLE_TEST_SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
-            echo "::warning::Stable signing secrets are missing; no test APK artifact will be uploaded."
+            echo "::warning::Test signing secrets are missing; no test APK artifact will be uploaded."
             exit 0
           fi
-          keystore_path="$RUNNER_TEMP/mpk-krakow-fastroute-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          keystore_path="$RUNNER_TEMP/mpk-krakow-fastroute-test.jks"
+          printf '%s' "$TEST_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
           chmod 600 "$keystore_path"
           {
-            printf 'ANDROID_KEYSTORE_FILE=%s\n' "$keystore_path"
-            printf 'ANDROID_KEYSTORE_PASSWORD=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
-            printf 'ANDROID_KEY_ALIAS=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'ANDROID_KEY_PASSWORD=%s\n' "$ANDROID_KEY_PASSWORD"
+            printf 'TEST_KEYSTORE_FILE=%s\n' "$keystore_path"
+            printf 'TEST_KEYSTORE_PASSWORD=%s\n' "$TEST_KEYSTORE_PASSWORD"
+            printf 'TEST_KEY_ALIAS=%s\n' "$TEST_KEY_ALIAS"
+            printf 'TEST_KEY_PASSWORD=%s\n' "$TEST_KEY_PASSWORD"
             echo "STABLE_TEST_SIGNING_AVAILABLE=true"
           } >> "$GITHUB_ENV"
 

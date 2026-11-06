@@ -41,7 +41,14 @@ val signingValues = listOf(
     providers.environmentVariable("ANDROID_KEY_ALIAS").orNull?.takeIf(String::isNotBlank),
     providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull?.takeIf(String::isNotBlank)
 )
+val testSigningValues = listOf(
+    providers.environmentVariable("TEST_KEYSTORE_FILE").orNull?.takeIf(String::isNotBlank),
+    providers.environmentVariable("TEST_KEYSTORE_PASSWORD").orNull?.takeIf(String::isNotBlank),
+    providers.environmentVariable("TEST_KEY_ALIAS").orNull?.takeIf(String::isNotBlank),
+    providers.environmentVariable("TEST_KEY_PASSWORD").orNull?.takeIf(String::isNotBlank)
+)
 val hasReleaseSigning = signingValues.all { it != null }
+val hasTestSigning = testSigningValues.all { it != null }
 val releaseBuildRequested = gradle.startParameter.taskNames.any {
     it.contains("assembleRelease", ignoreCase = true) ||
         it.contains("bundleRelease", ignoreCase = true) ||
@@ -54,6 +61,12 @@ if (signingValues.any { it != null } && !hasReleaseSigning) {
             "ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD."
     )
 }
+if (testSigningValues.any { it != null } && !hasTestSigning) {
+    throw GradleException(
+        "Test signing requires TEST_KEYSTORE_FILE, TEST_KEYSTORE_PASSWORD, " +
+            "TEST_KEY_ALIAS, and TEST_KEY_PASSWORD."
+    )
+}
 if (releaseBuildRequested && !hasReleaseSigning) {
     throw GradleException(
         "Release APKs must use the stable signing key. Configure all four ANDROID_KEYSTORE_* " +
@@ -62,6 +75,9 @@ if (releaseBuildRequested && !hasReleaseSigning) {
 }
 if (hasReleaseSigning && !file(signingValues[0]!!).isFile) {
     throw GradleException("The configured Android release keystore does not exist.")
+}
+if (hasTestSigning && !file(testSigningValues[0]!!).isFile) {
+    throw GradleException("The configured Android test keystore does not exist.")
 }
 
 android {
@@ -89,14 +105,22 @@ android {
                 keyPassword = signingValues[3]
             }
         }
+        if (hasTestSigning) {
+            create("stableTest") {
+                storeFile = file(testSigningValues[0]!!)
+                storePassword = testSigningValues[1]
+                keyAlias = testSigningValues[2]
+                keyPassword = testSigningValues[3]
+            }
+        }
     }
 
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-test"
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("stableRelease")
+            if (hasTestSigning) {
+                signingConfig = signingConfigs.getByName("stableTest")
             }
         }
         release {

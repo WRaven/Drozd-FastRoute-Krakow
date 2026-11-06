@@ -89,9 +89,32 @@ The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
 
 Main-branch test APKs use the separate `pl.wraven.mpkfastroute.debug` package
-and appear as "MPK Kraków FastRoute (test)". When the four signing secrets are
-configured, CI signs them with the stable release key so one test APK can update
-another without removing its local database. The test app remains separate from
-the regular release app and does not share its data. If the secrets are missing,
-CI still runs validation but does not upload a test APK artifact. Pull-request
-builds are for validation only and do not publish APK artifacts.
+and appear as "MPK Kraków FastRoute (test)". Configure a separate, stable test
+keystore using these GitHub Actions repository secrets:
+
+| Secret | Value |
+| --- | --- |
+| `TEST_KEYSTORE_BASE64` | Base64 encoding of the test keystore file |
+| `TEST_KEYSTORE_PASSWORD` | Keystore password |
+| `TEST_KEY_ALIAS` | Signing key alias |
+| `TEST_KEY_PASSWORD` | Signing key password |
+
+On Windows, create the test keystore outside the repository in PowerShell:
+
+```powershell
+$keyPath = Join-Path $HOME "mpk-fastroute-test.jks"
+$keytool = "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"
+& $keytool -genkeypair -v -keystore $keyPath -storetype JKS `
+  -alias mpk-fastroute-test -keyalg RSA -keysize 2048 -validity 10000 `
+  -dname "CN=MPK FastRoute Test, OU=Development, O=WRaven, C=PL"
+[Convert]::ToBase64String([IO.File]::ReadAllBytes($keyPath)) | Set-Clipboard
+```
+
+Use the copied value for `TEST_KEYSTORE_BASE64`, the alias `mpk-fastroute-test`
+for `TEST_KEY_ALIAS`, and the passwords you entered for the password secrets.
+Keep this test keystore safe and unchanged; CI signs test APKs with it so one
+test APK can update another without removing its local database. The test app
+remains separate from the regular release app and does not share its data. If
+the test secrets are missing, CI still runs validation but does not upload a
+test APK artifact. Pull-request builds are for validation only and do not
+publish APK artifacts.
