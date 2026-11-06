@@ -21,8 +21,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -30,6 +33,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -259,220 +263,305 @@ private fun SearchContent(
         modifier = modifier
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text("Szybkie akcje", style = MaterialTheme.typography.titleMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            AssistChip(
-                onClick = onGoHome,
-                enabled = state.hasHomeDestination && !state.isSearching && !state.isImporting,
-                label = { Text("🏠 Do domu") }
-            )
-            AssistChip(
-                onClick = onGoToWork,
-                enabled = state.hasWorkDestination && !state.isSearching && !state.isImporting,
-                label = { Text("🏢 Do pracy") }
-            )
-        }
-        Row(
+        Card(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Button(
-                onClick = onPlayRadio,
-                enabled = !state.isSearching,
-                modifier = Modifier.weight(1f)
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text("📻 Uruchom radio · ${RadioStations.all[state.lastSelectedRadioIndex].name}")
-            }
-            Spacer(Modifier.width(8.dp))
-            TextButton(onClick = onChooseRadio) {
-                Text("Wybierz")
+                Text("Szybkie akcje", style = MaterialTheme.typography.titleMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AssistChip(
+                        onClick = onGoHome,
+                        enabled = state.hasHomeDestination &&
+                            !state.isSearching && !state.isImporting,
+                        label = { Text("🏠 Do domu") }
+                    )
+                    AssistChip(
+                        onClick = onGoToWork,
+                        enabled = state.hasWorkDestination &&
+                            !state.isSearching && !state.isImporting,
+                        label = { Text("🏢 Do pracy") }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onPlayRadio,
+                        enabled = !state.isSearching,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            "📻 Uruchom radio · " +
+                                RadioStations.all[state.lastSelectedRadioIndex].name
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(onClick = onChooseRadio) {
+                        Text("Wybierz")
+                    }
+                }
+                TextButton(onClick = onStopRadio) {
+                    Text("⏹ Zatrzymaj radio")
+                }
+                AssistChip(
+                    onClick = onRandomJourney,
+                    enabled = !state.isSearching && !state.isImporting,
+                    label = {
+                        Text(if (state.isSearching) "Szukam trasy..." else "🎲 Zaszalej")
+                    }
+                )
             }
         }
-        TextButton(onClick = onStopRadio) {
-            Text("⏹ Zatrzymaj radio")
-        }
-        AssistChip(
-            onClick = onRandomJourney,
-            enabled = !state.isSearching && !state.isImporting,
-            label = {
-                Text(if (state.isSearching) "Szukam trasy..." else "🎲 Zaszalej")
-            }
-        )
         if (state.isImporting && state.progressMessage.isNotBlank()) {
-            Text(state.progressMessage, style = MaterialTheme.typography.bodySmall)
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    state.progressMessage,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
         }
         if (state.isSearching) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
 
-        Text("Znajdź połączenie", style = MaterialTheme.typography.titleMedium)
-        Text("Początek", style = MaterialTheme.typography.titleSmall)
-        Button(
-            onClick = onUseCurrentLocation,
-            enabled = !state.isSearching && !state.isImporting
+        Text("Znajdź połączenie", style = MaterialTheme.typography.headlineSmall)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
-            Text("📍 Użyj mojej lokalizacji")
-        }
-        Text("albo wpisz adres lub nazwę przystanku")
-        OutlinedTextField(
-            value = state.originQuery,
-            onValueChange = onOriginQueryChange,
-            label = { Text("Adres lub nazwa przystanku") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        TextButton(
-            onClick = onSearchOriginAddress,
-            enabled = !state.isSearching && !state.isImporting &&
-                state.originQuery.isNotBlank()
-        ) {
-            Text("Szukaj adresu początku")
-        }
-        state.originAddressCandidates.forEach { place ->
-            TextButton(
-                onClick = { onSelectOriginAddress(place) },
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(place.label)
-            }
-        }
-        if (state.originPlace == null && state.originAddressCandidates.isEmpty()) {
-            StopGroupPicker(
-                query = state.originQuery,
-                groups = stopGroups,
-                recentStopNames = state.recentStopSearches,
-                onSelectGroup = onSelectOrigin
-            )
-        }
-        state.originPlace?.let { place ->
-            Text("Początek: ${place.label}")
-            if (!state.originStopManuallySelected) {
-                Text("Przystanek dobiorę podczas wyszukiwania trasy.")
-                TextButton(
-                    onClick = { showOriginStopPicker = !showOriginStopPicker },
-                    enabled = state.nearbyOriginGroups.isNotEmpty() &&
-                        !state.isSearching && !state.isImporting
+                Text("Początek", style = MaterialTheme.typography.titleMedium)
+                Button(
+                    onClick = onUseCurrentLocation,
+                    enabled = !state.isSearching && !state.isImporting,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(if (showOriginStopPicker) "Ukryj przystanki" else "Wybierz przystanek")
+                    Text("📍 Użyj mojej lokalizacji")
                 }
-                if (showOriginStopPicker) {
-                    Text("Wybierz przystanek początkowy:")
-                    state.nearbyOriginGroups.forEach { group ->
-                        val distanceMeters = distanceToStopGroup(place, group)
-                        TextButton(
-                            onClick = {
-                                showOriginStopPicker = false
-                                onSelectOrigin(group)
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("${group.name} · ${distanceMeters.toInt()} m")
-                        }
+                Text(
+                    "albo wpisz adres lub nazwę przystanku",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedTextField(
+                    value = state.originQuery,
+                    onValueChange = onOriginQueryChange,
+                    label = { Text("Adres lub nazwa przystanku") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TextButton(
+                    onClick = onSearchOriginAddress,
+                    enabled = !state.isSearching && !state.isImporting &&
+                        state.originQuery.isNotBlank()
+                ) {
+                    Text("Szukaj adresu początku")
+                }
+                state.originAddressCandidates.forEach { place ->
+                    TextButton(
+                        onClick = { onSelectOriginAddress(place) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(place.label)
                     }
                 }
-            }
-        }
-        state.originStop?.let { stop ->
-            Text("Przystanek początkowy: ${StopNameGrouper.mainName(stop.stopName)}")
-        }
-
-        Text("Cel", style = MaterialTheme.typography.titleSmall)
-        OutlinedTextField(
-            value = state.destinationQuery,
-            onValueChange = onDestinationQueryChange,
-            label = { Text("Adres lub nazwa przystanku") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(
-                onClick = onSearchAddress,
-                enabled = !state.isSearching && !state.isImporting &&
-                    state.destinationQuery.isNotBlank()
-            ) {
-                Text("Szukaj adresu")
-            }
-        }
-        state.addressCandidates.forEach { place ->
-            TextButton(
-                onClick = { onSelectAddress(place) },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(place.label)
-            }
-        }
-        if (state.destinationPlace != null) {
-            Text("Adres celu: ${state.destinationPlace.label}")
-            if (!state.destinationStopManuallySelected) {
-                Text("Przystanek dobiorę podczas wyszukiwania trasy.")
-                TextButton(
-                    onClick = { showDestinationStopPicker = !showDestinationStopPicker },
-                    enabled = state.nearbyDestinationGroups.isNotEmpty() &&
-                        !state.isSearching && !state.isImporting
-                ) {
-                    Text(
-                        if (showDestinationStopPicker) {
-                            "Ukryj przystanki"
-                        } else {
-                            "Wybierz przystanek"
-                        }
+                if (state.originPlace == null && state.originAddressCandidates.isEmpty()) {
+                    StopGroupPicker(
+                        query = state.originQuery,
+                        groups = stopGroups,
+                        recentStopNames = state.recentStopSearches,
+                        onSelectGroup = onSelectOrigin
                     )
                 }
-                if (showDestinationStopPicker) {
-                    Text("Wybierz przystanek docelowy:")
-                    state.nearbyDestinationGroups.forEach { group ->
-                        val distanceMeters = distanceToStopGroup(state.destinationPlace, group)
+                state.originPlace?.let { place ->
+                    Text("Adres początku: ${place.label}")
+                    if (!state.originStopManuallySelected) {
+                        Text(
+                            "Przystanek dobiorę podczas wyszukiwania trasy.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         TextButton(
-                            onClick = {
-                                showDestinationStopPicker = false
-                                onSelectDestination(group)
-                            },
-                            modifier = Modifier.fillMaxWidth()
+                            onClick = { showOriginStopPicker = !showOriginStopPicker },
+                            enabled = state.nearbyOriginGroups.isNotEmpty() &&
+                                !state.isSearching && !state.isImporting
                         ) {
-                            Text("${group.name} · ${distanceMeters.toInt()} m")
+                            Text(
+                                if (showOriginStopPicker) "Ukryj przystanki"
+                                else "Wybierz przystanek"
+                            )
+                        }
+                        if (showOriginStopPicker) {
+                            Text("Wybierz przystanek początkowy:")
+                            state.nearbyOriginGroups.forEach { group ->
+                                val distanceMeters = distanceToStopGroup(place, group)
+                                TextButton(
+                                    onClick = {
+                                        showOriginStopPicker = false
+                                        onSelectOrigin(group)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("${group.name} · ${distanceMeters.toInt()} m")
+                                }
+                            }
                         }
                     }
                 }
+                state.originStop?.let { stop ->
+                    Text(
+                        "Wybrany przystanek: " +
+                            StopNameGrouper.mainName(stop.stopName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
-        } else if (state.addressCandidates.isEmpty()) {
-            StopGroupPicker(
-                query = state.destinationQuery,
-                groups = stopGroups,
-                recentStopNames = state.recentStopSearches,
-                onSelectGroup = onSelectDestination
-            )
         }
-        state.destinationStop?.let { stop ->
-            Text("Przystanek docelowy: ${StopNameGrouper.mainName(stop.stopName)}")
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text("Cel", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(
+                    value = state.destinationQuery,
+                    onValueChange = onDestinationQueryChange,
+                    label = { Text("Adres lub nazwa przystanku") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                TextButton(
+                    onClick = onSearchAddress,
+                    enabled = !state.isSearching && !state.isImporting &&
+                        state.destinationQuery.isNotBlank()
+                ) {
+                    Text("Szukaj adresu")
+                }
+                state.addressCandidates.forEach { place ->
+                    TextButton(
+                        onClick = { onSelectAddress(place) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(place.label)
+                    }
+                }
+                if (state.destinationPlace != null) {
+                    Text("Adres celu: ${state.destinationPlace.label}")
+                    if (!state.destinationStopManuallySelected) {
+                        Text(
+                            "Przystanek dobiorę podczas wyszukiwania trasy.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        TextButton(
+                            onClick = {
+                                showDestinationStopPicker = !showDestinationStopPicker
+                            },
+                            enabled = state.nearbyDestinationGroups.isNotEmpty() &&
+                                !state.isSearching && !state.isImporting
+                        ) {
+                            Text(
+                                if (showDestinationStopPicker) "Ukryj przystanki"
+                                else "Wybierz przystanek"
+                            )
+                        }
+                        if (showDestinationStopPicker) {
+                            Text("Wybierz przystanek docelowy:")
+                            state.nearbyDestinationGroups.forEach { group ->
+                                val distanceMeters =
+                                    distanceToStopGroup(state.destinationPlace, group)
+                                TextButton(
+                                    onClick = {
+                                        showDestinationStopPicker = false
+                                        onSelectDestination(group)
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("${group.name} · ${distanceMeters.toInt()} m")
+                                }
+                            }
+                        }
+                    }
+                } else if (state.addressCandidates.isEmpty()) {
+                    StopGroupPicker(
+                        query = state.destinationQuery,
+                        groups = stopGroups,
+                        recentStopNames = state.recentStopSearches,
+                        onSelectGroup = onSelectDestination
+                    )
+                }
+                state.destinationStop?.let { stop ->
+                    Text(
+                        "Wybrany przystanek: " +
+                            StopNameGrouper.mainName(stop.stopName),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onSearch,
-                enabled = !state.isSearching && !state.isImporting &&
-                    (state.originPlace != null || state.originStop != null) &&
-                    (state.destinationPlace != null || state.destinationStop != null)
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(if (state.isSearching) "Szukam..." else "Szukaj trasy")
-            }
-            TextButton(
-                onClick = onSaveHome,
-                enabled = state.destinationPlace != null
-            ) {
-                Text("Zapisz jako dom")
-            }
-            TextButton(
-                onClick = onSaveWork,
-                enabled = state.destinationPlace != null
-            ) {
-                Text("Zapisz jako pracę")
+                Button(
+                    onClick = onSearch,
+                    enabled = !state.isSearching && !state.isImporting &&
+                        (state.originPlace != null || state.originStop != null) &&
+                        (state.destinationPlace != null || state.destinationStop != null),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (state.isSearching) "Szukam..." else "Szukaj trasy")
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    TextButton(
+                        onClick = onSaveHome,
+                        enabled = state.destinationPlace != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Ustaw jako dom")
+                    }
+                    TextButton(
+                        onClick = onSaveWork,
+                        enabled = state.destinationPlace != null,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Ustaw jako pracę")
+                    }
+                }
             }
         }
         state.routeSearchMessage?.let { message ->
             Text(message, color = MaterialTheme.colorScheme.error)
         }
 
+        if (state.journeyOptions.isNotEmpty()) {
+            Text("Proponowane trasy", style = MaterialTheme.typography.headlineSmall)
+        }
         val leastWalkingIndex = state.journeyOptions.indices.minByOrNull { index ->
             state.journeyOptions[index].totalWalkingDistanceMeters
         }
@@ -575,65 +664,240 @@ private fun JourneyResult(
     destination: StopEntity?,
     routeLabel: String? = null
 ) {
-    Column(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
     ) {
-        Text(routeLabel ?: "Wynik", style = MaterialTheme.typography.titleLarge)
-        Text(
-            "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
-                destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
-            fontWeight = FontWeight.Medium
-        )
-        Text(
-            (if (routeLabel == null) "Przyjazd " else "Przyjazd do celu około ") +
-                formatGtfsTime(
-                    if (routeLabel == null) journey.arrivalTime else journey.estimatedArrivalTime
-                ) +
-                if (journey.transferPenaltySeconds > 0) {
-                    " · kara przesiadkowa +${journey.transferPenaltySeconds / 60} min"
-                } else {
-                    ""
-                }
-        )
-        if (routeLabel != null) {
-            Text("Czas od wyjścia: ${formatDuration(journey.totalDurationSeconds)}")
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primaryContainer,
+                shape = MaterialTheme.shapes.small
+            ) {
+                Text(
+                    routeLabel ?: "Wynik",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
             Text(
-                "Spacer łącznie: " +
-                    "${formatDistance(journey.totalWalkingDistanceMeters)}"
+                "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
+                    destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
             )
-            Text(
-                "Do przystanku ${formatDistance(journey.originAccess.walkingDistanceMeters)} · " +
-                    "przesiadki " +
-                    "${formatDistance(journey.transferWalkingDistanceMeters)} · " +
-                    "od przystanku ${formatDistance(journey.destinationAccess.walkingDistanceMeters)}"
-            )
-        }
-        journey.steps.forEach { step ->
-            when (step) {
-                is JourneyStep.Transit -> {
-                    val connection = step.connection
-                    Text(
-                        "Linia ${connection.routeShortName}: " +
-                            "${stopName(stops, connection.departureStopId)} " +
-                            "${formatGtfsTime(connection.departureTime)} → " +
-                            "${stopName(stops, connection.arrivalStopId)} " +
-                            formatGtfsTime(connection.arrivalTime)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JourneyMetric(
+                    label = "PRZYJAZD",
+                    value = formatGtfsTime(journey.estimatedArrivalTime),
+                    modifier = Modifier.weight(1f)
+                )
+                JourneyMetric(
+                    label = "CZAS",
+                    value = formatDuration(journey.totalDurationSeconds),
+                    modifier = Modifier.weight(1f)
+                )
+                JourneyMetric(
+                    label = "SPACER",
+                    value = formatDistance(journey.totalWalkingDistanceMeters),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            if (journey.transferPenaltySeconds > 0) {
+                Text(
+                    "Kara za przesiadkę: +${journey.transferPenaltySeconds / 60} min",
+                    color = MaterialTheme.colorScheme.tertiary,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+            if (routeLabel != null) {
+                Text(
+                    "Dystans pieszo",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    JourneyMetric(
+                        label = "NA START",
+                        value = formatDistance(journey.originAccess.walkingDistanceMeters),
+                        modifier = Modifier.weight(1f)
+                    )
+                    JourneyMetric(
+                        label = "PRZESIADKI",
+                        value = formatDistance(journey.transferWalkingDistanceMeters),
+                        modifier = Modifier.weight(1f)
+                    )
+                    JourneyMetric(
+                        label = "DO CELU",
+                        value = formatDistance(journey.destinationAccess.walkingDistanceMeters),
+                        modifier = Modifier.weight(1f)
                     )
                 }
+            }
+            HorizontalDivider()
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                collapseTransitSteps(journey.steps).forEach { step ->
+                    when (step) {
+                        is JourneyStep.Transit -> {
+                            val connection = step.connection
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        shape = MaterialTheme.shapes.small
+                                    ) {
+                                        Text(
+                                            "Linia ${connection.routeShortName}",
+                                            modifier = Modifier.padding(
+                                                horizontal = 10.dp,
+                                                vertical = 8.dp
+                                            ),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            "${stopName(stops, connection.departureStopId)} · " +
+                                                formatGtfsTime(connection.departureTime),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            "${stopName(stops, connection.arrivalStopId)} · " +
+                                                formatGtfsTime(connection.arrivalTime),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
-                is JourneyStep.Walk -> {
-                    val footpath = step.footpath
-                    Text(
-                        "Przejście ${stopName(stops, footpath.fromStopId)} → " +
-                            "${stopName(stops, footpath.toStopId)} " +
-                            "(${formatDistance(footpath.distanceMeters)}, " +
-                            "${formatDuration(footpath.durationSeconds)})"
-                    )
+                        is JourneyStep.Walk -> {
+                            val footpath = step.footpath
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = MaterialTheme.shapes.medium
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Surface(
+                                        color = MaterialTheme.colorScheme.secondaryContainer,
+                                        shape = MaterialTheme.shapes.small
+                                    ) {
+                                        Text(
+                                            "PIESZO",
+                                            modifier = Modifier.padding(
+                                                horizontal = 10.dp,
+                                                vertical = 8.dp
+                                            ),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                    ) {
+                                        Text(
+                                            "${stopName(stops, footpath.fromStopId)} → " +
+                                                stopName(stops, footpath.toStopId),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                        Text(
+                                            "${formatDistance(footpath.distanceMeters)} · " +
+                                                formatDuration(footpath.durationSeconds),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun JourneyMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                value,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+}
+
+private fun collapseTransitSteps(steps: List<JourneyStep>): List<JourneyStep> {
+    val collapsed = mutableListOf<JourneyStep>()
+    steps.forEach { step ->
+        val current = step as? JourneyStep.Transit
+        val previous = collapsed.lastOrNull() as? JourneyStep.Transit
+        if (
+            current != null &&
+            previous != null &&
+            previous.connection.tripId == current.connection.tripId &&
+            previous.connection.arrivalStopId == current.connection.departureStopId
+        ) {
+            collapsed[collapsed.lastIndex] = JourneyStep.Transit(
+                previous.connection.copy(
+                    arrivalStopId = current.connection.arrivalStopId,
+                    arrivalTime = current.connection.arrivalTime
+                )
+            )
+        } else {
+            collapsed += step
+        }
+    }
+    return collapsed
 }
 
 @Composable
@@ -645,25 +909,31 @@ private fun LiveDeparturesSection(
         return
     }
 
-    Column(
+    Card(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Text(
-            "Odjazdy z ${stop?.stopName?.let(StopNameGrouper::mainName).orEmpty()}",
-            style = MaterialTheme.typography.titleMedium
-        )
-        departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
-            val liveIndicator = if (departure.isLive) " · LIVE" else ""
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             Text(
-                "${departure.routeShortName} → ${departure.direction}: " +
-                    "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
-                color = if (departure.isLive) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurface
-                }
+                "Odjazdy z ${stop?.stopName?.let(StopNameGrouper::mainName).orEmpty()}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
             )
+            departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
+                val liveIndicator = if (departure.isLive) " · LIVE" else ""
+                Text(
+                    "${departure.routeShortName} → ${departure.direction}: " +
+                        "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
+                    color = if (departure.isLive) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+            }
         }
     }
 }
