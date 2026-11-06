@@ -209,6 +209,25 @@ class CsaEngineTest {
         assertEquals(emptyList<JourneyStep>(), journey?.steps)
     }
 
+    @Test
+    fun reportsConnectionScanProgress() {
+        val progress = mutableListOf<CsaProgress>()
+
+        val journeys = engine.findJourneys(
+            connections = listOf(connection("A", "B", 100, 200, "trip-1")),
+            footpaths = emptyList(),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("B", 0.0, 0)),
+            startTime = 100,
+            onProgress = progress::add
+        )
+
+        assertEquals(1, journeys.size)
+        assertEquals(1, progress.last().scannedConnections)
+        assertEquals(1, progress.last().totalConnections)
+        assertEquals(2, progress.last().reachedStops)
+    }
+
     private fun connection(
         from: String,
         to: String,

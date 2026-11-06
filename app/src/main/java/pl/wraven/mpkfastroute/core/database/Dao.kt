@@ -111,32 +111,6 @@ interface StopTimeDao {
 
     @Query(
         """
-        SELECT departure.stopId AS departureStopId,
-               arrival.stopId AS arrivalStopId,
-               departure.departureTime AS departureTime,
-               arrival.arrivalTime AS arrivalTime,
-               trip.tripId AS tripId,
-               route.routeShortName AS routeShortName,
-               trip.serviceId AS serviceId
-        FROM stop_times AS departure
-        JOIN stop_times AS arrival
-          ON arrival.tripId = departure.tripId
-         AND arrival.stopSequence = (
-             SELECT MIN(nextStop.stopSequence)
-             FROM stop_times AS nextStop
-             WHERE nextStop.tripId = departure.tripId
-               AND nextStop.stopSequence > departure.stopSequence
-         )
-        JOIN trips AS trip ON trip.tripId = departure.tripId
-        JOIN routes AS route ON route.routeId = trip.routeId
-        WHERE departure.departureTime BETWEEN :startTime AND :endTime
-        ORDER BY departure.departureTime, departure.tripId, departure.stopSequence
-        """
-    )
-    suspend fun getConnectionsBetween(startTime: Int, endTime: Int): List<GtfsConnectionRow>
-
-    @Query(
-        """
         SELECT route.routeShortName AS routeShortName,
                trip.tripHeadsign AS direction,
                stopTime.departureTime AS departureTime,
@@ -163,5 +137,31 @@ interface StopTimeDao {
     suspend fun insertAll(stopTimes: List<StopTimeEntity>)
 
     @Query("DELETE FROM stop_times")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface ConnectionDao {
+    @Query(
+        """
+        SELECT departureStopId, arrivalStopId, departureTime, arrivalTime,
+               tripId, routeShortName, serviceId
+        FROM connections
+        WHERE departureTime BETWEEN :startTime AND :endTime
+        ORDER BY departureTime
+        """
+    )
+    suspend fun getConnectionsBetween(
+        startTime: Int,
+        endTime: Int
+    ): List<GtfsConnectionRow>
+
+    @Query("SELECT COUNT(*) FROM connections")
+    suspend fun count(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(connections: List<ConnectionEntity>)
+
+    @Query("DELETE FROM connections")
     suspend fun deleteAll()
 }

@@ -73,3 +73,18 @@ data class StopTimeEntity(
     val stopId: String,
     val stopSequence: Int
 )
+
+@Entity(
+    tableName = "connections",
+    indices = [Index(value = ["departureTime", "serviceId", "tripId"])]
+)
+data class ConnectionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tripId: String,
+    val serviceId: String,
+    val routeShortName: String,
+    val departureStopId: String,
+    val arrivalStopId: String,
+    val departureTime: Int,
+    val arrivalTime: Int
+)

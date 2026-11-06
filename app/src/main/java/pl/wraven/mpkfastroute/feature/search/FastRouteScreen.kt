@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -40,7 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -165,7 +169,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             workStopName = state.workPlace?.label
                 ?: state.stops.firstOrNull { it.stopId == state.workStopId }
                     ?.let { StopNameGrouper.mainName(it.stopName) },
+            diagnosticEntries = state.diagnosticEntries,
             onRefresh = viewModel::refreshSchedule,
+            onClearDiagnostics = viewModel::clearDiagnostics,
+            onDiagnosticsCopied = viewModel::diagnosticsCopied,
             onDismiss = { settingsVisible = false }
         )
     }
@@ -258,12 +265,12 @@ private fun SearchContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(
                 onClick = onGoHome,
-                enabled = state.hasHomeDestination && !state.isSearching,
+                enabled = state.hasHomeDestination && !state.isSearching && !state.isImporting,
                 label = { Text("🏠 Do domu") }
             )
             AssistChip(
                 onClick = onGoToWork,
-                enabled = state.hasWorkDestination && !state.isSearching,
+                enabled = state.hasWorkDestination && !state.isSearching && !state.isImporting,
                 label = { Text("🏢 Do pracy") }
             )
         }
@@ -288,18 +295,24 @@ private fun SearchContent(
         }
         AssistChip(
             onClick = onRandomJourney,
-            enabled = !state.isSearching,
+            enabled = !state.isSearching && !state.isImporting,
             label = {
                 Text(if (state.isSearching) "Szukam trasy..." else "🎲 Zaszalej")
             }
         )
+        if (state.isImporting && state.progressMessage.isNotBlank()) {
+            Text(state.progressMessage, style = MaterialTheme.typography.bodySmall)
+        }
         if (state.isSearching) {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
 
         Text("Znajdź połączenie", style = MaterialTheme.typography.titleMedium)
         Text("Początek", style = MaterialTheme.typography.titleSmall)
-        Button(onClick = onUseCurrentLocation, enabled = !state.isSearching) {
+        Button(
+            onClick = onUseCurrentLocation,
+            enabled = !state.isSearching && !state.isImporting
+        ) {
             Text("📍 Użyj mojej lokalizacji")
         }
         Text("albo wpisz adres lub nazwę przystanku")
@@ -312,7 +325,8 @@ private fun SearchContent(
         )
         TextButton(
             onClick = onSearchOriginAddress,
-            enabled = !state.isSearching && state.originQuery.isNotBlank()
+            enabled = !state.isSearching && !state.isImporting &&
+                state.originQuery.isNotBlank()
         ) {
             Text("Szukaj adresu początku")
         }
@@ -338,7 +352,8 @@ private fun SearchContent(
                 Text("Przystanek dobiorę podczas wyszukiwania trasy.")
                 TextButton(
                     onClick = { showOriginStopPicker = !showOriginStopPicker },
-                    enabled = state.nearbyOriginGroups.isNotEmpty() && !state.isSearching
+                    enabled = state.nearbyOriginGroups.isNotEmpty() &&
+                        !state.isSearching && !state.isImporting
                 ) {
                     Text(if (showOriginStopPicker) "Ukryj przystanki" else "Wybierz przystanek")
                 }
@@ -374,7 +389,8 @@ private fun SearchContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(
                 onClick = onSearchAddress,
-                enabled = !state.isSearching && state.destinationQuery.isNotBlank()
+                enabled = !state.isSearching && !state.isImporting &&
+                    state.destinationQuery.isNotBlank()
             ) {
                 Text("Szukaj adresu")
             }
@@ -393,7 +409,8 @@ private fun SearchContent(
                 Text("Przystanek dobiorę podczas wyszukiwania trasy.")
                 TextButton(
                     onClick = { showDestinationStopPicker = !showDestinationStopPicker },
-                    enabled = state.nearbyDestinationGroups.isNotEmpty() && !state.isSearching
+                    enabled = state.nearbyDestinationGroups.isNotEmpty() &&
+                        !state.isSearching && !state.isImporting
                 ) {
                     Text(
                         if (showDestinationStopPicker) {
@@ -433,7 +450,7 @@ private fun SearchContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onSearch,
-                enabled = !state.isSearching &&
+                enabled = !state.isSearching && !state.isImporting &&
                     (state.originPlace != null || state.originStop != null) &&
                     (state.destinationPlace != null || state.destinationStop != null)
             ) {
@@ -657,9 +674,18 @@ private fun SettingsDialog(
     isImporting: Boolean,
     homeStopName: String?,
     workStopName: String?,
+    diagnosticEntries: List<String>,
     onRefresh: () -> Unit,
+    onClearDiagnostics: () -> Unit,
+    onDiagnosticsCopied: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    val diagnosticsScrollState = rememberScrollState()
+    LaunchedEffect(diagnosticEntries.lastOrNull()) {
+        diagnosticsScrollState.animateScrollTo(diagnosticsScrollState.maxValue)
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ustawienia") },
@@ -672,6 +698,44 @@ private fun SettingsDialog(
                 }
                 if (progressMessage.isNotBlank()) {
                     Text(progressMessage)
+                }
+                Text("Terminal diagnostyczny wyszukiwania")
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(8.dp)
+                ) {
+                    if (diagnosticEntries.isEmpty()) {
+                        Text("Brak wpisów.")
+                    } else {
+                        Text(
+                            text = diagnosticEntries.joinToString("\n"),
+                            modifier = Modifier.verticalScroll(diagnosticsScrollState),
+                            fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            clipboardManager.setText(
+                                AnnotatedString(diagnosticEntries.joinToString("\n"))
+                            )
+                            onDiagnosticsCopied()
+                        },
+                        enabled = diagnosticEntries.isNotEmpty()
+                    ) {
+                        Text("Kopiuj")
+                    }
+                    TextButton(
+                        onClick = onClearDiagnostics,
+                        enabled = diagnosticEntries.isNotEmpty()
+                    ) {
+                        Text("Wyczyść")
+                    }
                 }
             }
         },

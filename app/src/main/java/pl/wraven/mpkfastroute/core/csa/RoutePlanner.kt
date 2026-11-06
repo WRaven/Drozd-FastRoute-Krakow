@@ -7,12 +7,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
 import pl.wraven.mpkfastroute.core.gtfs.ServiceCalendarResolver
 
 class RoutePlanner @Inject constructor(
     private val database: AppDatabase,
     private val csaEngine: CsaEngine,
-    private val footpathGenerator: FootpathGenerator
+    private val footpathGenerator: FootpathGenerator,
+    private val diagnostics: SearchDiagnostics
 ) {
     @Volatile
     private var footpathCache: FootpathCache? = null
@@ -65,6 +67,12 @@ class RoutePlanner @Inject constructor(
         }
         val endTimeSeconds = Math.addExact(startTimeSeconds, searchWindowSeconds)
         val serviceDateString = serviceDate.format(DateTimeFormatter.BASIC_ISO_DATE)
+        val searchStartedAt = System.nanoTime()
+        diagnostics.record(
+            "Wyszukiwanie rozpoczęte: ${originAccesses.size} początkowych i " +
+                "${destinationAccesses.size} końcowych przystanków; okno " +
+                "$searchWindowSeconds s."
+        )
         val calendarDao = database.serviceCalendarDao()
         val activeServiceIds = ServiceCalendarResolver.activeServiceIds(
             date = serviceDate,
@@ -72,11 +80,21 @@ class RoutePlanner @Inject constructor(
             exceptions = calendarDao.getExceptionsForDate(serviceDateString)
         )
         if (activeServiceIds.isEmpty()) {
+            diagnostics.record("Brak aktywnych usług dla wybranego dnia.")
             return emptyList()
         }
+        diagnostics.record("Aktywne usługi: ${activeServiceIds.size}.")
 
-        val rows = database.stopTimeDao()
+        diagnostics.record(
+            "Odczyt indeksu połączeń: $startTimeSeconds–$endTimeSeconds s."
+        )
+        val connectionQueryStartedAt = System.nanoTime()
+        val rows = database.connectionDao()
             .getConnectionsBetween(startTimeSeconds, endTimeSeconds)
+        diagnostics.record(
+            "Indeks zwrócił ${rows.size} połączeń w " +
+                "${elapsedMilliseconds(connectionQueryStartedAt)} ms."
+        )
         val connections = withContext(Dispatchers.Default) {
             rows.asSequence()
                 .filter { it.serviceId in activeServiceIds }
@@ -92,13 +110,17 @@ class RoutePlanner @Inject constructor(
                 }
                 .toList()
         }
+        diagnostics.record("Po filtrze kalendarza pozostało ${connections.size} połączeń.")
         if (connections.isEmpty() && originAccesses.none { origin ->
                 destinationAccesses.any { it.stopId == origin.stopId }
             }
         ) {
+            diagnostics.record("Brak połączeń w oknie czasowym; zakończono wyszukiwanie.")
             return emptyList()
         }
 
+        diagnostics.record("Budowanie sieci pieszych przejść.")
+        val footpathStartedAt = System.nanoTime()
         val stops = database.stopDao().getAll()
         val footpaths = withContext(Dispatchers.Default) {
             val cached = footpathCache
@@ -117,17 +139,37 @@ class RoutePlanner @Inject constructor(
                 }
             }
         }
+        diagnostics.record(
+            "Przystanki: ${stops.size}; przejścia piesze: ${footpaths.size}; " +
+                "${elapsedMilliseconds(footpathStartedAt)} ms."
+        )
+        diagnostics.record("Rozpoczęto skanowanie CSA.")
         return withContext(Dispatchers.Default) {
-            csaEngine.findJourneys(
+            val journeys = csaEngine.findJourneys(
                 connections = connections,
                 footpaths = footpaths,
                 originAccesses = originAccesses,
                 destinationAccesses = destinationAccesses,
                 startTime = startTimeSeconds,
-                maxResults = maxResults
+                maxResults = maxResults,
+                onProgress = { progress ->
+                    diagnostics.record(
+                        "CSA: ${progress.scannedConnections}/${progress.totalConnections} " +
+                            "połączeń, ${progress.reachedStops} osiągniętych przystanków, " +
+                            "${progress.propagatedStates} przejść pieszych."
+                    )
+                }
             )
+            diagnostics.record(
+                "CSA zakończone: ${journeys.size} tras w " +
+                    "${elapsedMilliseconds(searchStartedAt)} ms."
+            )
+            journeys
         }
     }
+
+    private fun elapsedMilliseconds(startedAt: Long): Long =
+        (System.nanoTime() - startedAt) / NANOS_PER_MILLISECOND
 
     private data class FootpathCache(
         val stops: List<StopEntity>,
@@ -135,6 +177,7 @@ class RoutePlanner @Inject constructor(
     )
 
     private companion object {
+        const val NANOS_PER_MILLISECOND = 1_000_000L
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
         const val MAX_SEARCH_WINDOW_SECONDS = DEFAULT_SEARCH_WINDOW_SECONDS
         const val DEFAULT_MAX_RESULTS = 20

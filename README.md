@@ -6,13 +6,15 @@ the architecture and phases in the project specification.
 
 ## Implementation status
 
-- The Room v4 database stores GTFS stops, routes, trips, stop times, service
-  calendars, and date exceptions. The importer downloads the official Kraków
-  feed to a temporary cache file, reports download and import progress, and
-  replaces its data transactionally in batches. A departure-time index
-  accelerates route queries and is added to existing databases by migration.
+- The Room v5 database stores GTFS stops, routes, trips, stop times, service
+  calendars, date exceptions, and a materialized index of adjacent trip
+  connections. The importer downloads the official Kraków feed to a temporary
+  cache file, reports download/import/indexing progress, and replaces its data
+  transactionally in batches. Existing databases build the connection index
+  after migration instead of doing expensive connection joins on every search.
 - The route planner filters services for the requested date, scans departures
-  within a two-hour window, requires at least three minutes when changing
+  from the indexed connections within a two-hour window, requires at least
+  three minutes when changing
   vehicles, and includes walking transfers between stops up to 500 meters.
   Its geographic grid limits footpath generation to nearby stops. Static route
   results are displayed before the separate live-departure request completes.
@@ -41,6 +43,9 @@ the architecture and phases in the project specification.
   recently selected stop names from either search field.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
+- Settings include an in-memory, bounded search diagnostic log with copy and
+  clear actions. It reports database/index/CSA stages and counts without
+  recording addresses or GPS coordinates.
 
 ## Versioning and in-place updates
 

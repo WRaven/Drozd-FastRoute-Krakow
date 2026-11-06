@@ -41,6 +41,13 @@ data class StopAccess(
     }
 }
 
+data class CsaProgress(
+    val scannedConnections: Int,
+    val totalConnections: Int,
+    val reachedStops: Int,
+    val propagatedStates: Int
+)
+
 sealed interface JourneyStep {
     data class Transit(val connection: Connection) : JourneyStep
 
@@ -83,7 +90,8 @@ class CsaEngine @Inject constructor() {
         originAccesses: List<StopAccess>,
         destinationAccesses: List<StopAccess>,
         startTime: Int,
-        maxResults: Int = DEFAULT_MAX_RESULTS
+        maxResults: Int = DEFAULT_MAX_RESULTS,
+        onProgress: (CsaProgress) -> Unit = {}
     ): List<CsaJourney> {
         require(startTime >= 0) { "Start time must not be negative." }
         require(originAccesses.isNotEmpty()) { "At least one origin stop is required." }
@@ -101,6 +109,19 @@ class CsaEngine @Inject constructor() {
 
         val labelsByStop = mutableMapOf<String, MutableMap<String?, MutableList<JourneyState>>>()
         val footpathsByStop = footpaths.groupBy(Footpath::fromStopId)
+        var scannedConnections = 0
+        var propagatedStates = 0
+
+        fun reportProgress() {
+            onProgress(
+                CsaProgress(
+                    scannedConnections = scannedConnections,
+                    totalConnections = connections.size,
+                    reachedStops = labelsByStop.size,
+                    propagatedStates = propagatedStates
+                )
+            )
+        }
 
         fun addLabel(candidate: JourneyState): Boolean {
             val labelsByTrip = labelsByStop.getOrPut(candidate.stopId) { mutableMapOf() }
@@ -121,6 +142,10 @@ class CsaEngine @Inject constructor() {
 
             while (pending.isNotEmpty()) {
                 val current = pending.removeFirst()
+                propagatedStates += 1
+                if (propagatedStates % FOOTPATH_PROGRESS_INTERVAL == 0) {
+                    reportProgress()
+                }
                 if (labelsByStop[current.stopId]?.get(current.lastTripId)?.contains(current) != true) {
                     continue
                 }
@@ -184,6 +209,10 @@ class CsaEngine @Inject constructor() {
             )
         }
         for (connection in sortedConnections) {
+            scannedConnections += 1
+            if (scannedConnections % CONNECTION_PROGRESS_INTERVAL == 0) {
+                reportProgress()
+            }
             val sourceLabels = labelsByStop[connection.departureStopId]
                 ?.values
                 ?.flatMap { it }
@@ -223,6 +252,7 @@ class CsaEngine @Inject constructor() {
                 )
             }
         }
+        reportProgress()
 
         val candidates = uniqueDestinations.flatMap { destinationAccess ->
             labelsByStop[destinationAccess.stopId]
@@ -337,6 +367,8 @@ class CsaEngine @Inject constructor() {
 
     private companion object {
         const val TRANSFER_PENALTY_SECONDS = 180
+        const val CONNECTION_PROGRESS_INTERVAL = 5_000
+        const val FOOTPATH_PROGRESS_INTERVAL = 10_000
         const val DEFAULT_MAX_RESULTS = 20
     }
 }

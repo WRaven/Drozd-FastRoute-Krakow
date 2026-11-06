@@ -12,9 +12,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TripEntity::class,
         ServiceCalendarEntity::class,
         CalendarDateEntity::class,
-        StopTimeEntity::class
+        StopTimeEntity::class,
+        ConnectionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -27,6 +28,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun serviceCalendarDao(): ServiceCalendarDao
 
     abstract fun stopTimeDao(): StopTimeDao
+
+    abstract fun connectionDao(): ConnectionDao
 
     companion object {
         val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -82,6 +85,31 @@ abstract class AppDatabase : RoomDatabase() {
                     """
                     CREATE INDEX IF NOT EXISTS `index_stop_times_departureTime_tripId_stopSequence`
                     ON `stop_times` (`departureTime`, `tripId`, `stopSequence`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `connections` (
+                        `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        `tripId` TEXT NOT NULL,
+                        `serviceId` TEXT NOT NULL,
+                        `routeShortName` TEXT NOT NULL,
+                        `departureStopId` TEXT NOT NULL,
+                        `arrivalStopId` TEXT NOT NULL,
+                        `departureTime` INTEGER NOT NULL,
+                        `arrivalTime` INTEGER NOT NULL
+                    )
+                    """.trimIndent()
+                )
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_connections_departureTime_serviceId_tripId`
+                    ON `connections` (`departureTime`, `serviceId`, `tripId`)
                     """.trimIndent()
                 )
             }

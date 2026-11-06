@@ -24,6 +24,7 @@ import pl.wraven.mpkfastroute.core.csa.RoutePlanner
 import pl.wraven.mpkfastroute.core.csa.StopAccess
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
@@ -61,6 +62,7 @@ data class SearchUiState(
     val isImporting: Boolean = false,
     val isSearching: Boolean = false,
     val progressMessage: String = "",
+    val diagnosticEntries: List<String> = emptyList(),
     val routeSearchMessage: String? = null,
     val statusMessage: String? = null,
     val lastSelectedRadioIndex: Int = 0
@@ -84,7 +86,8 @@ class SearchViewModel @Inject constructor(
     private val contextEngine: ContextEngine,
     private val addressGeocoder: AddressGeocoder,
     private val appPreferences: AppPreferences,
-    private val radioManager: RadioManager
+    private val radioManager: RadioManager,
+    private val diagnostics: SearchDiagnostics
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(SearchUiState())
     val uiState = mutableUiState.asStateFlow()
@@ -92,6 +95,7 @@ class SearchViewModel @Inject constructor(
     init {
         observeStops()
         observePreferences()
+        observeDiagnostics()
         ensureScheduleImported()
     }
 
@@ -357,6 +361,11 @@ class SearchViewModel @Inject constructor(
 
     fun searchRoute() {
         val state = mutableUiState.value
+        if (state.isImporting) {
+            diagnostics.record("Wyszukiwanie wstrzymane: trwa przygotowanie indeksu.")
+            showMessage("Trwa przygotowanie lokalnego indeksu połączeń. Spróbuj ponownie za chwilę.")
+            return
+        }
         val originPlace = state.originPlace ?: state.originStop?.let(::placeForStop)
         val destinationPlace = state.destinationPlace ?: state.destinationStop?.let(::placeForStop)
         if (originPlace == null || destinationPlace == null) {
@@ -392,6 +401,10 @@ class SearchViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            diagnostics.record(
+                "Przygotowano wyszukiwanie dla ${originAccesses.size} początkowych i " +
+                    "${destinationAccesses.size} końcowych przystanków."
+            )
             mutableUiState.update {
                 it.copy(
                     isSearching = true,
@@ -413,6 +426,10 @@ class SearchViewModel @Inject constructor(
                     maxResults = MAX_CSA_JOURNEY_CANDIDATES
                 )
                 val journeyOptions = selectRouteAlternatives(candidates)
+                diagnostics.record(
+                    "Wyniki: ${candidates.size} kandydatów, " +
+                        "${journeyOptions.size} tras po wyborze alternatyw."
+                )
                 val fastestJourney = journeyOptions.firstOrNull()
                 val transitSteps = fastestJourney?.steps
                     ?.filterIsInstance<JourneyStep.Transit>()
@@ -450,6 +467,7 @@ class SearchViewModel @Inject constructor(
                     )
                 }
                 if (fastestJourney != null && firstTransitStopId != null) {
+                    diagnostics.record("Trasa gotowa; odjazdy TTSS pobierane w tle.")
                     viewModelScope.launch {
                         try {
                             val liveDepartures = ttssDepartureRepository.getDepartures(
@@ -458,6 +476,7 @@ class SearchViewModel @Inject constructor(
                                 startTimeSeconds = serviceTime.timeSeconds,
                                 nowTimeSeconds = now.toLocalTime().toSecondOfDay()
                             )
+                            diagnostics.record("Odpowiedź TTSS odebrana.")
                             mutableUiState.update { current ->
                                 if (current.journey !== fastestJourney) {
                                     current
@@ -466,6 +485,7 @@ class SearchViewModel @Inject constructor(
                                 }
                             }
                         } catch (exception: SQLiteException) {
+                            diagnostics.record("Błąd bazy podczas pobierania odjazdów TTSS.")
                             mutableUiState.update { current ->
                                 if (current.journey !== fastestJourney) {
                                     current
@@ -478,6 +498,10 @@ class SearchViewModel @Inject constructor(
                                 }
                             }
                         } catch (exception: IllegalStateException) {
+                            diagnostics.record(
+                                "Błąd danych podczas pobierania odjazdów TTSS: " +
+                                    exception.message.orEmpty()
+                            )
                             mutableUiState.update { current ->
                                 if (current.journey !== fastestJourney) {
                                     current
@@ -493,12 +517,20 @@ class SearchViewModel @Inject constructor(
                     }
                 }
             } catch (exception: IllegalArgumentException) {
+                diagnostics.record("Nieprawidłowe dane trasy: ${exception.message.orEmpty()}")
                 val message = "Nie można wyszukać trasy: ${exception.message.orEmpty()}"
                 mutableUiState.update {
                     it.copy(routeSearchMessage = message, statusMessage = message)
                 }
             } catch (exception: SQLiteException) {
+                diagnostics.record("Błąd bazy danych podczas wyszukiwania.")
                 val message = "Nie można odczytać rozkładu: ${exception.message.orEmpty()}"
+                mutableUiState.update {
+                    it.copy(routeSearchMessage = message, statusMessage = message)
+                }
+            } catch (exception: IllegalStateException) {
+                diagnostics.record("Wyszukiwanie przerwane: ${exception.message.orEmpty()}")
+                val message = "Nie udało się wyszukać trasy: ${exception.message.orEmpty()}"
                 mutableUiState.update {
                     it.copy(routeSearchMessage = message, statusMessage = message)
                 }
@@ -595,6 +627,14 @@ class SearchViewModel @Inject constructor(
         mutableUiState.update { it.copy(statusMessage = null) }
     }
 
+    fun clearDiagnostics() {
+        diagnostics.clear()
+    }
+
+    fun diagnosticsCopied() {
+        showMessage("Skopiowano dziennik diagnostyczny.")
+    }
+
     private fun observeStops() {
         viewModelScope.launch {
             database.stopDao().observeAll().collect { stops ->
@@ -636,14 +676,58 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    private fun observeDiagnostics() {
+        viewModelScope.launch {
+            diagnostics.entries.collect { entries ->
+                mutableUiState.update { it.copy(diagnosticEntries = entries) }
+            }
+        }
+    }
+
     private fun ensureScheduleImported() {
         viewModelScope.launch {
             try {
                 if (database.stopDao().count() == 0) {
                     importSchedule()
+                } else if (database.connectionDao().count() == 0) {
+                    prepareConnectionIndex()
                 }
             } catch (exception: SQLiteException) {
                 showMessage("Nie można sprawdzić lokalnego rozkładu: ${exception.message.orEmpty()}")
+            }
+        }
+    }
+
+    private suspend fun prepareConnectionIndex() {
+        if (mutableUiState.value.isImporting) {
+            return
+        }
+        diagnostics.record("Brak lokalnego indeksu połączeń; rozpoczęto jego budowę.")
+        mutableUiState.update {
+            it.copy(
+                isImporting = true,
+                progressMessage = "Przygotowanie szybkiego indeksu połączeń...",
+                statusMessage = null
+            )
+        }
+        try {
+            gtfsZipParser.rebuildConnectionIndex { progress ->
+                diagnostics.record(progress)
+                mutableUiState.update { it.copy(progressMessage = progress) }
+            }
+            showMessage("Lokalny indeks połączeń jest gotowy.")
+        } catch (exception: IllegalStateException) {
+            diagnostics.record("Błąd budowy indeksu: ${exception.message.orEmpty()}")
+            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
+        } catch (exception: IllegalArgumentException) {
+            diagnostics.record("Nieprawidłowe dane podczas budowy indeksu: ${exception.message.orEmpty()}")
+            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
+        } catch (exception: SQLiteException) {
+            diagnostics.record("Błąd bazy podczas budowy indeksu.")
+            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
+        } finally {
+            mutableUiState.update {
+                it.copy(isImporting = false, progressMessage = "")
             }
         }
     }
@@ -652,21 +736,28 @@ class SearchViewModel @Inject constructor(
         if (mutableUiState.value.isImporting) {
             return
         }
+        diagnostics.record("Rozpoczęto pobieranie i import GTFS.")
         mutableUiState.update {
             it.copy(isImporting = true, progressMessage = "Przygotowanie importu...", statusMessage = null)
         }
         try {
             gtfsZipParser.importSchedule { progress ->
+                diagnostics.record(progress)
                 mutableUiState.update { it.copy(progressMessage = progress) }
             }
+            diagnostics.record("Import GTFS zakończony pomyślnie.")
             showMessage("Rozkład został zaktualizowany.")
         } catch (exception: IOException) {
+            diagnostics.record("Błąd pobierania GTFS: ${exception.message.orEmpty()}")
             showMessage("Nie udało się pobrać rozkładu: ${exception.message.orEmpty()}")
         } catch (exception: IllegalArgumentException) {
+            diagnostics.record("Nieprawidłowe dane GTFS: ${exception.message.orEmpty()}")
             showMessage("Rozkład ma nieprawidłowe dane: ${exception.message.orEmpty()}")
         } catch (exception: IllegalStateException) {
+            diagnostics.record("Błąd importu GTFS: ${exception.message.orEmpty()}")
             showMessage("Nie udało się zaimportować rozkładu: ${exception.message.orEmpty()}")
         } catch (exception: SQLiteException) {
+            diagnostics.record("Błąd bazy danych podczas importu GTFS.")
             showMessage("Nie udało się zapisać rozkładu: ${exception.message.orEmpty()}")
         } finally {
             mutableUiState.update {

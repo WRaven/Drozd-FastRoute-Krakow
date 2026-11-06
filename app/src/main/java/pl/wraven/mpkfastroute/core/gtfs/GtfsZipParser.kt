@@ -36,6 +36,7 @@ private const val READ_TIMEOUT_MILLIS = 120_000
 
 class GtfsZipParser @Inject constructor(
     private val database: AppDatabase,
+    private val connectionIndexBuilder: ConnectionIndexBuilder,
     @param:ApplicationContext private val context: Context
 ) {
     suspend fun importSchedule(
@@ -105,6 +106,7 @@ class GtfsZipParser @Inject constructor(
                         onProgress("Importowanie połączeń: $count")
                     }
                     check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
+                    connectionIndexBuilder.rebuildWithinTransaction(onProgress)
                 }
             } finally {
                 sqliteDatabase.execSQL("PRAGMA foreign_keys = ON")
@@ -113,6 +115,10 @@ class GtfsZipParser @Inject constructor(
         } finally {
             archive.delete()
         }
+    }
+
+    suspend fun rebuildConnectionIndex(onProgress: (String) -> Unit = {}) {
+        connectionIndexBuilder.rebuild(onProgress)
     }
 
     private fun downloadArchive(onProgress: (String) -> Unit): File {
