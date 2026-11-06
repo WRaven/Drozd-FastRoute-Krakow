@@ -13,6 +13,7 @@ import android.os.Build
 import android.util.Log
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.Data
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.google.android.gms.common.api.ApiException
@@ -190,8 +191,11 @@ class CommuteStatusWorker @AssistedInject constructor(
 
         val departureTarget = journeyResult.departureTarget ?: return Result.failure()
         val now = LocalDateTime.now()
-        val notificationTime = departureTarget.minusMinutes(NOTIFICATION_LEAD_MINUTES)
-        val updatedInput = inputData.toBuilder()
+        val notificationTime = departureTarget.minusMinutes(
+            CommuteReminderScheduler.NOTIFICATION_LEAD_MINUTES
+        )
+        val updatedInput = Data.Builder()
+            .putAll(inputData)
             .putString(
                 CommuteReminderScheduler.DEPARTURE_TARGET_KEY,
                 departureTarget.toString()

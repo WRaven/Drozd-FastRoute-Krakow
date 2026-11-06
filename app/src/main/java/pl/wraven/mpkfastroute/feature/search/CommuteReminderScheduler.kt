@@ -114,5 +114,5 @@ object CommuteReminderScheduler {
     ): String = "commute-${destination.name.lowercase()}-$arrivalTarget"
 
     private const val COORDINATOR_INTERVAL_MINUTES = 15L
-    private const val NOTIFICATION_LEAD_MINUTES = 15L
+    const val NOTIFICATION_LEAD_MINUTES = 15L
 }
