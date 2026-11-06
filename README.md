@@ -45,9 +45,9 @@ the architecture and phases in the project specification.
 - Stop-name search ignores Polish diacritics and suggests up to three
   recently selected stop names from either search field.
 - Settings can check the latest public GitHub release, open its release page,
-  edit home/work arrival schedules, and contact the author. Radio settings
-  support adding, editing, and removing stream entries; the radio action
-  toggles between starting and stopping playback.
+  edit home/work arrival schedules, and contact the author. Until a stable
+  release is published, the updater reports that none is available. Radio
+  settings support managing streams, and the radio action toggles playback.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 - Settings include an in-memory, bounded search diagnostic log with copy and

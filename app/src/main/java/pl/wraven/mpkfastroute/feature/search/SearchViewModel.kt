@@ -41,6 +41,7 @@ import pl.wraven.mpkfastroute.core.settings.AppPreferences
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
 import pl.wraven.mpkfastroute.core.settings.SavedRoute
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
+import pl.wraven.mpkfastroute.core.update.NoStableReleaseAvailableException
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
 
 data class SearchUiState(
@@ -700,6 +701,14 @@ class SearchViewModel @Inject constructor(
                             "Masz aktualną wersję (${result.currentVersion})."
                         },
                         updateCheckResult = result
+                    )
+                }
+            } catch (_: NoStableReleaseAvailableException) {
+                mutableUiState.update {
+                    it.copy(
+                        updateCheckMessage =
+                            "Nie opublikowano jeszcze stabilnego wydania na GitHub. " +
+                                "Sprawdź ponownie później."
                     )
                 }
             } catch (exception: IOException) {

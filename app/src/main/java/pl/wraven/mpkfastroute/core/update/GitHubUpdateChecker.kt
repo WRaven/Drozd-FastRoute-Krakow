@@ -20,6 +20,8 @@ data class UpdateCheckResult(
     val updateAvailable: Boolean
 )
 
+class NoStableReleaseAvailableException : IOException()
+
 class GitHubUpdateChecker @Inject constructor(
     @param:ApplicationContext private val context: Context,
     private val httpClient: HttpClient,
@@ -30,9 +32,7 @@ class GitHubUpdateChecker @Inject constructor(
             header("Accept", "application/vnd.github+json")
             header("User-Agent", USER_AGENT)
         }
-        if (response.status.value !in 200..299) {
-            throw IOException("GitHub returned HTTP ${response.status.value}.")
-        }
+        ensureSuccessfulResponse(response.status.value)
 
         val release = try {
             json.parseToJsonElement(response.bodyAsText()).jsonObject
@@ -61,6 +61,14 @@ class GitHubUpdateChecker @Inject constructor(
             "https://api.github.com/repos/WRaven/MPK-Krakow-FastRoute/releases/latest"
         private const val USER_AGENT = "MPK-Krakow-FastRoute"
         private val VERSION_PATTERN = Regex("""^[vV]?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$""")
+
+        internal fun ensureSuccessfulResponse(statusCode: Int) {
+            when {
+                statusCode == 404 -> throw NoStableReleaseAvailableException()
+                statusCode !in 200..299 ->
+                    throw IOException("GitHub returned HTTP $statusCode.")
+            }
+        }
 
         internal fun compareVersions(left: String, right: String): Int {
             val leftParts = versionParts(left)
