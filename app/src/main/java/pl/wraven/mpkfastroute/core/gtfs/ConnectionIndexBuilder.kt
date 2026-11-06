@@ -20,9 +20,11 @@ class ConnectionIndexBuilder @Inject constructor(
         val startedAt = System.nanoTime()
         onProgress("Budowanie lokalnej siatki połączeń...")
         val connectionDao = database.connectionDao()
+        val sqliteDatabase = database.openHelper.writableDatabase
+        sqliteDatabase.execSQL("DROP INDEX IF EXISTS `$CONNECTION_INDEX_NAME`")
         connectionDao.deleteAll()
 
-        val cursor = database.openHelper.readableDatabase.query(SOURCE_QUERY)
+        val cursor = sqliteDatabase.query(SOURCE_QUERY)
         var previousTripId: String? = null
         var previousStopId: String? = null
         var previousDepartureTime = 0
@@ -65,7 +67,7 @@ class ConnectionIndexBuilder @Inject constructor(
                     batch.clear()
                 }
                 if (processedStopTimes % PROGRESS_INTERVAL == 0) {
-                    val progress = "Indeksowanie połączeń: $processedStopTimes przystanków, " +
+                    val progress = "Indeksowanie: $processedStopTimes wpisów stop_times, " +
                         "$insertedConnections segmentów."
                     onProgress(progress)
                 }
@@ -82,16 +84,27 @@ class ConnectionIndexBuilder @Inject constructor(
             "The GTFS schedule does not contain any adjacent stop connections."
         }
 
+        onProgress("Tworzenie indeksu SQLite do wyszukiwania połączeń...")
+        val indexStartedAt = System.nanoTime()
+        sqliteDatabase.execSQL(CREATE_CONNECTION_INDEX_SQL)
+        val indexElapsedSeconds =
+            (System.nanoTime() - indexStartedAt) / NANOS_PER_SECOND
         val elapsedSeconds = (System.nanoTime() - startedAt) / NANOS_PER_SECOND
         val completion = "Indeks połączeń gotowy: $insertedConnections segmentów " +
-            "w ${elapsedSeconds}s."
+            "w ${elapsedSeconds}s (indeks SQLite: ${indexElapsedSeconds}s)."
         onProgress(completion)
     }
 
     private companion object {
+        const val CONNECTION_INDEX_NAME =
+            "index_connections_departureTime_serviceId_tripId"
         const val INSERT_BATCH_SIZE = 5_000
         const val PROGRESS_INTERVAL = 50_000
         const val NANOS_PER_SECOND = 1_000_000_000L
+        const val CREATE_CONNECTION_INDEX_SQL = """
+            CREATE INDEX IF NOT EXISTS `index_connections_departureTime_serviceId_tripId`
+            ON `connections` (`departureTime`, `serviceId`, `tripId`)
+        """
 
         const val SOURCE_QUERY = """
             SELECT stopTime.tripId,

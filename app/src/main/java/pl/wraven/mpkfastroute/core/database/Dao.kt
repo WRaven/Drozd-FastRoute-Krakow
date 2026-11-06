@@ -159,7 +159,7 @@ interface ConnectionDao {
     @Query("SELECT COUNT(*) FROM connections")
     suspend fun count(): Int
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert
     suspend fun insertAll(connections: List<ConnectionEntity>)
 
     @Query("DELETE FROM connections")

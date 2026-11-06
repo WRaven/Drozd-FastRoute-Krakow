@@ -103,7 +103,7 @@ class GtfsZipParser @Inject constructor(
                         tripIds = tripIds,
                         insertBatch = stopTimeDao::insertAll
                     ) { count ->
-                        onProgress("Importowanie połączeń: $count")
+                        onProgress("Import GTFS: $count wpisów stop_times.")
                     }
                     check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
                     connectionIndexBuilder.rebuildWithinTransaction(onProgress)
