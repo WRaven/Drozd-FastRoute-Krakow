@@ -2,6 +2,7 @@ package pl.wraven.mpkfastroute.feature.search
 
 import android.location.Location
 import java.time.LocalDateTime
+import java.time.Duration
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -10,6 +11,7 @@ import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
+import pl.wraven.mpkfastroute.core.csa.StopAccess
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
@@ -30,7 +32,8 @@ sealed interface QuickActionResult {
         val destinationStopOptions: List<StopEntity>,
         val journey: CsaJourney,
         val originPlace: GeoPlace,
-        val destinationPlace: GeoPlace
+        val destinationPlace: GeoPlace,
+        val arrivalTarget: LocalDateTime? = null
     ) : QuickActionResult
 
     data class AlreadyAtDestination(
@@ -40,7 +43,6 @@ sealed interface QuickActionResult {
 
     data object NoJourneyFound : QuickActionResult
 
-    data object NoRandomDestination : QuickActionResult
 }
 
 class ContextEngine @Inject constructor(
@@ -72,6 +74,10 @@ class ContextEngine @Inject constructor(
         val savedPlace = when (destination) {
             SavedDestination.HOME -> appPreferences.homePlace.first()
             SavedDestination.WORK -> appPreferences.workPlace.first()
+        }
+        val schedule = when (destination) {
+            SavedDestination.HOME -> appPreferences.homeSchedule.first()
+            SavedDestination.WORK -> appPreferences.workSchedule.first()
         }
         val legacyStopId = when (destination) {
             SavedDestination.HOME -> appPreferences.homeStopId.first()
@@ -124,45 +130,7 @@ class ContextEngine @Inject constructor(
             originPlace = originPlace,
             destinationPlace = targetPlace,
             allStops = stops,
-            searchWindowSeconds = DEFAULT_SEARCH_WINDOW_SECONDS
-        )
-    }
-
-    suspend fun findRandomJourney(): QuickActionResult {
-        val currentLocation = locationProvider.getCurrentLocation()
-        val stops = database.stopDao().getAll()
-        val (originGroup, destinationGroup) = withContext(Dispatchers.Default) {
-            val origin = findNearestStopGroup(stops, currentLocation)
-            val nearest = nearestStopToLocation(origin, currentLocation)
-            val destination = StopNameGrouper.group(stops)
-                .filter { group ->
-                    group.stops.minOf {
-                        Haversine.distanceMeters(nearest, it)
-                    } >= RANDOM_DESTINATION_MIN_DISTANCE_METERS
-                }
-                .randomOrNull()
-            origin to destination
-        }
-        if (destinationGroup == null) {
-            return QuickActionResult.NoRandomDestination
-        }
-        val destination = destinationGroup.stops.first()
-
-        return findJourney(
-            originGroup = originGroup,
-            destinationGroup = destinationGroup,
-            originPlace = GeoPlace(
-                "Moja lokalizacja",
-                currentLocation.latitude,
-                currentLocation.longitude
-            ),
-            destinationPlace = GeoPlace(
-                destinationGroup.name,
-                destination.stopLat,
-                destination.stopLon
-            ),
-            allStops = stops,
-            searchWindowSeconds = RANDOM_SEARCH_WINDOW_SECONDS
+            arrivalTarget = schedule?.nextOccurrence(LocalDateTime.now())
         )
     }
 
@@ -172,16 +140,55 @@ class ContextEngine @Inject constructor(
         originPlace: GeoPlace,
         destinationPlace: GeoPlace,
         allStops: List<StopEntity>,
-        searchWindowSeconds: Int
+        arrivalTarget: LocalDateTime?
     ): QuickActionResult {
-        val serviceTime = GtfsServiceClock.from(LocalDateTime.now())
-        val journey = routePlanner.findEarliestJourney(
-            originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId },
-            destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId },
-            serviceDate = serviceTime.serviceDate,
-            startTimeSeconds = serviceTime.timeSeconds,
-            searchWindowSeconds = searchWindowSeconds
-        ) ?: return QuickActionResult.NoJourneyFound
+        val now = LocalDateTime.now()
+        val earliestScheduledStart =
+            arrivalTarget?.minusSeconds(MAX_SEARCH_WINDOW_SECONDS.toLong())
+        val searchStart = earliestScheduledStart?.takeIf { it.isAfter(now) } ?: now
+        val serviceTime = GtfsServiceClock.from(searchStart)
+        val searchWindowSeconds = arrivalTarget?.let {
+            Duration.between(searchStart, it).seconds.toInt()
+        } ?: DEFAULT_SEARCH_WINDOW_SECONDS
+        val originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId }
+        val destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId }
+        val candidateJourneys = if (arrivalTarget == null) {
+            listOfNotNull(
+                routePlanner.findEarliestJourney(
+                    originStopIds = originStopIds,
+                    destinationStopIds = destinationStopIds,
+                    serviceDate = serviceTime.serviceDate,
+                    startTimeSeconds = serviceTime.timeSeconds,
+                    searchWindowSeconds = searchWindowSeconds
+                )
+            )
+        } else {
+            routePlanner.findJourneys(
+                originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
+                destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
+                serviceDate = serviceTime.serviceDate,
+                startTimeSeconds = serviceTime.timeSeconds,
+                searchWindowSeconds = searchWindowSeconds,
+                maxResults = MAX_SCHEDULED_JOURNEYS
+            )
+        }
+        val arrivalDeadline = serviceTime.timeSeconds + searchWindowSeconds
+        val journey = if (arrivalTarget == null) {
+            candidateJourneys.firstOrNull()
+        } else {
+            candidateJourneys
+                .filter { it.estimatedArrivalTime <= arrivalDeadline }
+                .maxByOrNull(CsaJourney::estimatedArrivalTime)
+                ?.let { candidate ->
+                    val firstTransit = candidate.steps
+                        .filterIsInstance<JourneyStep.Transit>()
+                        .firstOrNull()
+                    candidate.copy(
+                        departureTime = firstTransit?.connection?.departureTime
+                            ?: candidate.departureTime
+                    )
+                }
+        } ?: return QuickActionResult.NoJourneyFound
 
         val transitSteps = journey.steps.filterIsInstance<JourneyStep.Transit>()
         val origin = transitSteps.firstOrNull()
@@ -202,7 +209,8 @@ class ContextEngine @Inject constructor(
             destinationStopOptions = destinationGroup.stops,
             journey = journey,
             originPlace = originPlace,
-            destinationPlace = destinationPlace
+            destinationPlace = destinationPlace,
+            arrivalTarget = arrivalTarget
         )
     }
 
@@ -232,8 +240,8 @@ class ContextEngine @Inject constructor(
 
     private companion object {
         const val ALREADY_THERE_DISTANCE_METERS = 100.0
-        const val RANDOM_DESTINATION_MIN_DISTANCE_METERS = 3_000.0
-        const val RANDOM_SEARCH_WINDOW_SECONDS = 60 * 60
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
+        const val MAX_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
+        const val MAX_SCHEDULED_JOURNEYS = 100
     }
 }

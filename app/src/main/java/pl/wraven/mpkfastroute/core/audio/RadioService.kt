@@ -46,7 +46,7 @@ class RadioService : MediaSessionService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val startResult = super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
-            ACTION_PLAY -> playStation(intent.getIntExtra(EXTRA_STATION_INDEX, DEFAULT_STATION_INDEX))
+            ACTION_PLAY -> playStation(intent)
             ACTION_STOP -> {
                 player.stop()
                 player.clearMediaItems()
@@ -62,13 +62,31 @@ class RadioService : MediaSessionService() {
         super.onDestroy()
     }
 
-    private fun playStation(index: Int) {
-        if (index !in RadioStations.all.indices) {
+    private fun playStation(intent: Intent) {
+        val ids = intent.getStringArrayListExtra(EXTRA_STATION_IDS)
+        val names = intent.getStringArrayListExtra(EXTRA_STATION_NAMES)
+        val urls = intent.getStringArrayListExtra(EXTRA_STATION_URLS)
+        if (
+            ids == null || names == null || urls == null ||
+            ids.size != names.size || ids.size != urls.size
+        ) {
+            stopSelf()
+            return
+        }
+        val stations = ids.indices.map { index ->
+            RadioStation(
+                id = ids[index],
+                name = names[index],
+                streamUrl = urls[index]
+            )
+        }
+        val selectedIndex = intent.getIntExtra(EXTRA_STATION_INDEX, DEFAULT_STATION_INDEX)
+        if (selectedIndex !in stations.indices) {
             stopSelf()
             return
         }
 
-        val mediaItems = RadioStations.all.map { station ->
+        val mediaItems = stations.map { station ->
             MediaItem.Builder()
                 .setMediaId(station.id)
                 .setUri(station.streamUrl)
@@ -80,7 +98,7 @@ class RadioService : MediaSessionService() {
                 )
                 .build()
         }
-        player.setMediaItems(mediaItems, index, 0L)
+        player.setMediaItems(mediaItems, selectedIndex, 0L)
         player.prepare()
         player.play()
     }
@@ -89,6 +107,9 @@ class RadioService : MediaSessionService() {
         const val ACTION_PLAY = "pl.wraven.mpkfastroute.action.PLAY_RADIO"
         const val ACTION_STOP = "pl.wraven.mpkfastroute.action.STOP_RADIO"
         const val EXTRA_STATION_INDEX = "radio_station_index"
+        const val EXTRA_STATION_IDS = "radio_station_ids"
+        const val EXTRA_STATION_NAMES = "radio_station_names"
+        const val EXTRA_STATION_URLS = "radio_station_urls"
         const val DEFAULT_STATION_INDEX = 0
         const val RADIO_ARTIST = "Radio"
     }

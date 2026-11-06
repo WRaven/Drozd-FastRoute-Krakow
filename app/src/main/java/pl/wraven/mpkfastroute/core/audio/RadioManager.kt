@@ -25,16 +25,32 @@ class RadioManager @Inject constructor(
     private var mediaControllerFuture: ListenableFuture<MediaController>? = null
 
     suspend fun playLastSelectedStation() {
-        playStation(radioPreferences.lastSelectedRadioIndex.first())
+        val stationId = radioPreferences.lastSelectedRadioId.first()
+            ?: throw IllegalStateException("No radio stations are configured.")
+        playStation(stationId)
     }
 
-    suspend fun playStation(index: Int) {
-        require(index in RadioStations.all.indices) { "Unknown radio station index: $index." }
-        radioPreferences.saveLastSelectedRadioIndex(index)
+    suspend fun playStation(stationId: String) {
+        val stations = radioPreferences.stations.first()
+        val index = stations.indexOfFirst { it.id == stationId }
+        require(index >= 0) { "Unknown radio station id: $stationId." }
+        radioPreferences.saveLastSelectedStation(stationId)
         context.startForegroundService(
             Intent(context, RadioService::class.java)
                 .setAction(RadioService.ACTION_PLAY)
                 .putExtra(RadioService.EXTRA_STATION_INDEX, index)
+                .putStringArrayListExtra(
+                    RadioService.EXTRA_STATION_IDS,
+                    ArrayList(stations.map(RadioStation::id))
+                )
+                .putStringArrayListExtra(
+                    RadioService.EXTRA_STATION_NAMES,
+                    ArrayList(stations.map(RadioStation::name))
+                )
+                .putStringArrayListExtra(
+                    RadioService.EXTRA_STATION_URLS,
+                    ArrayList(stations.map(RadioStation::streamUrl))
+                )
         )
         val future = getOrCreateControllerFuture()
         try {

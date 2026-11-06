@@ -23,15 +23,18 @@ the architecture and phases in the project specification.
   marked static estimates when live data is unavailable.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
-  the last selected station.
-- Home/work addresses are stored as coordinates; the GPS context engine finds
-  nearby stops for quick routing, already-at-destination detection, and random
-  destinations. Existing saved stop IDs remain supported.
+  the selected station. The editable default list includes Eska Rock, Antyradio,
+  Radio Pogoda, and Radio Kraków.
+- Home/work destinations are stored as coordinates with recurring arrival
+  times and selected weekdays. Their quick actions find a route that arrives
+  by the next matching scheduled time; a long press on a route saves its
+  endpoints as the single "Własny" quick action. Existing saved stop IDs remain
+  supported.
 - Compose provides first-run GTFS import progress, a current-location or
-  typed-address/name origin, address search with automatic stop selection and
-  an optional "Wybierz przystanek" control, grouped stop names with automatic
-  platform selection for the selected route,
-  home/work/radio/random quick actions, and manual schedule refresh.
+  typed-address/name origin, debounced address and stop suggestions, recent
+  address/stop selections, an optional "Wybierz przystanek" control, grouped
+  stop names with automatic platform selection, and home/work/custom/radio
+  quick actions.
 - Address routes compare up to six nearby stop-name groups within 1.5 km.
   Walking to the first stop, between transfer stops, and from the final stop
   is included in door-to-door arrival estimates; results include the fastest
@@ -41,6 +44,9 @@ the architecture and phases in the project specification.
   but are not shown in user-facing stop labels.
 - Stop-name search ignores Polish diacritics and suggests up to three
   recently selected stop names from either search field.
+- Settings can check the latest public GitHub release, open its release page,
+  edit home/work arrival schedules, and contact the author. Radio settings
+  support adding, editing, and removing stream entries.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 - Settings include an in-memory, bounded search diagnostic log with copy and

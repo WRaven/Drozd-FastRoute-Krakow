@@ -8,9 +8,13 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlin.math.roundToInt
+import pl.wraven.mpkfastroute.core.audio.RadioStation
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 
 private val Context.appPreferencesDataStore by preferencesDataStore(
@@ -18,7 +22,8 @@ private val Context.appPreferencesDataStore by preferencesDataStore(
 )
 
 class AppPreferences @Inject constructor(
-    @ApplicationContext context: Context
+    @ApplicationContext context: Context,
+    private val json: Json
 ) {
     private val dataStore = context.appPreferencesDataStore
 
@@ -36,6 +41,33 @@ class AppPreferences @Inject constructor(
 
     val workPlace: Flow<GeoPlace?> = dataStore.data.map { preferences ->
         readPlace(preferences, WORK_PLACE_LABEL, WORK_LATITUDE, WORK_LONGITUDE)
+    }
+
+    val homeSchedule: Flow<DestinationSchedule?> = dataStore.data.map { preferences ->
+        DestinationSchedule.decode(preferences[HOME_SCHEDULE])
+    }
+
+    val workSchedule: Flow<DestinationSchedule?> = dataStore.data.map { preferences ->
+        DestinationSchedule.decode(preferences[WORK_SCHEDULE])
+    }
+
+    val customRoute: Flow<SavedRoute?> = dataStore.data.map { preferences ->
+        preferences[CUSTOM_ROUTE]?.let { json.decodeFromString<SavedRoute>(it) }
+    }
+
+    val recentAddressPlaces: Flow<List<GeoPlace>> = dataStore.data.map { preferences ->
+        preferences[RECENT_ADDRESS_PLACES]
+            ?.let { json.decodeFromString<List<GeoPlace>>(it) }
+            .orEmpty()
+            .take(MAX_RECENT_ADDRESS_PLACES)
+    }
+
+    val radioStationsJson: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[RADIO_STATIONS]
+    }
+
+    val lastSelectedRadioId: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[LAST_SELECTED_RADIO_ID]
     }
 
     val lastSelectedRadioIndex: Flow<Int> = dataStore.data.map { preferences ->
@@ -58,12 +90,70 @@ class AppPreferences @Inject constructor(
         saveStopId(WORK_STOP_ID, stopId)
     }
 
-    suspend fun saveHomePlace(place: GeoPlace) {
-        savePlace(HOME_STOP_ID, HOME_PLACE_LABEL, HOME_LATITUDE, HOME_LONGITUDE, place)
+    suspend fun saveHomePlace(place: GeoPlace, schedule: DestinationSchedule) {
+        savePlace(
+            HOME_STOP_ID,
+            HOME_PLACE_LABEL,
+            HOME_LATITUDE,
+            HOME_LONGITUDE,
+            HOME_SCHEDULE,
+            place,
+            schedule
+        )
     }
 
-    suspend fun saveWorkPlace(place: GeoPlace) {
-        savePlace(WORK_STOP_ID, WORK_PLACE_LABEL, WORK_LATITUDE, WORK_LONGITUDE, place)
+    suspend fun saveWorkPlace(place: GeoPlace, schedule: DestinationSchedule) {
+        savePlace(
+            WORK_STOP_ID,
+            WORK_PLACE_LABEL,
+            WORK_LATITUDE,
+            WORK_LONGITUDE,
+            WORK_SCHEDULE,
+            place,
+            schedule
+        )
+    }
+
+    suspend fun saveHomeSchedule(schedule: DestinationSchedule) {
+        saveSchedule(HOME_SCHEDULE, schedule)
+    }
+
+    suspend fun saveWorkSchedule(schedule: DestinationSchedule) {
+        saveSchedule(WORK_SCHEDULE, schedule)
+    }
+
+    suspend fun saveCustomRoute(route: SavedRoute) {
+        dataStore.edit { preferences ->
+            preferences[CUSTOM_ROUTE] = json.encodeToString(route)
+        }
+    }
+
+    suspend fun recordAddressPlace(place: GeoPlace) {
+        dataStore.edit { preferences ->
+            val previousPlaces = preferences[RECENT_ADDRESS_PLACES]
+                ?.let { json.decodeFromString<List<GeoPlace>>(it) }
+                .orEmpty()
+                .filterNot {
+                    it.label.equals(place.label, ignoreCase = true) &&
+                        it.latitude == place.latitude &&
+                        it.longitude == place.longitude
+                }
+            preferences[RECENT_ADDRESS_PLACES] = json.encodeToString(
+                (listOf(place) + previousPlaces).take(MAX_RECENT_ADDRESS_PLACES)
+            )
+        }
+    }
+
+    suspend fun saveRadioStations(stations: List<RadioStation>) {
+        dataStore.edit { preferences ->
+            preferences[RADIO_STATIONS] = json.encodeToString(stations)
+        }
+    }
+
+    suspend fun saveLastSelectedRadioId(id: String) {
+        dataStore.edit { preferences ->
+            preferences[LAST_SELECTED_RADIO_ID] = id
+        }
     }
 
     suspend fun saveLastSelectedRadioIndex(index: Int) {
@@ -107,13 +197,25 @@ class AppPreferences @Inject constructor(
         labelKey: Preferences.Key<String>,
         latitudeKey: Preferences.Key<Int>,
         longitudeKey: Preferences.Key<Int>,
-        place: GeoPlace
+        scheduleKey: Preferences.Key<String>,
+        place: GeoPlace,
+        schedule: DestinationSchedule
     ) {
         dataStore.edit { preferences ->
             preferences.remove(legacyStopIdKey)
             preferences[labelKey] = place.label
             preferences[latitudeKey] = (place.latitude * COORDINATE_SCALE).roundToInt()
             preferences[longitudeKey] = (place.longitude * COORDINATE_SCALE).roundToInt()
+            preferences[scheduleKey] = schedule.encode()
+        }
+    }
+
+    private suspend fun saveSchedule(
+        key: Preferences.Key<String>,
+        schedule: DestinationSchedule
+    ) {
+        dataStore.edit { preferences ->
+            preferences[key] = schedule.encode()
         }
     }
 
@@ -165,10 +267,17 @@ class AppPreferences @Inject constructor(
         val WORK_PLACE_LABEL = stringPreferencesKey("workPlaceLabel")
         val WORK_LATITUDE = intPreferencesKey("workPlaceLatitudeE6")
         val WORK_LONGITUDE = intPreferencesKey("workPlaceLongitudeE6")
+        val HOME_SCHEDULE = stringPreferencesKey("homeSchedule")
+        val WORK_SCHEDULE = stringPreferencesKey("workSchedule")
+        val CUSTOM_ROUTE = stringPreferencesKey("customRoute")
+        val RECENT_ADDRESS_PLACES = stringPreferencesKey("recentAddressPlaces")
+        val RADIO_STATIONS = stringPreferencesKey("radioStations")
+        val LAST_SELECTED_RADIO_ID = stringPreferencesKey("lastSelectedRadioId")
         val LAST_SELECTED_RADIO_INDEX = intPreferencesKey("lastSelectedRadioIndex")
         val RECENT_STOP_SEARCHES = stringPreferencesKey("recentStopSearches")
         const val RECENT_STOP_DELIMITER = "\u001F"
         const val MAX_RECENT_STOP_SEARCHES = 3
+        const val MAX_RECENT_ADDRESS_PLACES = 5
         const val DEFAULT_RADIO_INDEX = 0
         const val COORDINATE_SCALE = 1_000_000.0
         val RADIO_INDEX_RANGE = 0..1

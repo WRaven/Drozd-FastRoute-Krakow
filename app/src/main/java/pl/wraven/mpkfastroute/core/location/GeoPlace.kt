@@ -1,5 +1,8 @@
 package pl.wraven.mpkfastroute.core.location
 
+import kotlinx.serialization.Serializable
+
+@Serializable
 data class GeoPlace(
     val label: String,
     val latitude: Double,
