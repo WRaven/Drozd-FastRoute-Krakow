@@ -44,12 +44,20 @@ the architecture and phases in the project specification.
   time. The startup origin defaults to the current location when permission is
   granted, and the quick actions open the official ZTP/KMK service notices.
 - Saved home/work schedules can trigger a commute notification 15 minutes
-  before the calculated departure. It refreshes every five minutes with
-  upcoming TTSS departures and route-relevant ZTP GTFS-Realtime service alerts.
+  before the calculated departure. The notification shows upcoming TTSS
+  departures in its collapsed preview and refreshes every five minutes with
+  route-relevant ZTP GTFS-Realtime service alerts.
   Android notification and background-location permissions are required; if
   any alert feed is unavailable, the notification reports incomplete data
   instead of claiming there are no disruptions. ZTP's GTFS-Realtime feeds are
-  published under CC BY 4.0.
+  published under CC BY 4.0. Live departure and alert requests use Android's
+  active network, so Wi-Fi is used when available and mobile data is the
+  fallback.
+- The app checks the official static GTFS feed daily and imports it when its
+  ETag or last-modified value changes. The request uses the currently active
+  network (Wi-Fi when connected, with mobile-data fallback); WorkManager waits
+  until a network is available. Service calendars determine when newly
+  published timetable data applies.
 - Stop codes remain available internally for TTSS mapping and stop matching,
   but are not shown in user-facing stop labels.
 - Stop-name search ignores Polish diacritics and suggests up to three

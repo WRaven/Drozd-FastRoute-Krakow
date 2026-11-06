@@ -5,6 +5,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
+import pl.wraven.mpkfastroute.core.gtfs.GtfsScheduleUpdateScheduler
 
 @HiltAndroidApp
 class FastRouteApplication : Application(), Configuration.Provider {
@@ -15,4 +16,9 @@ class FastRouteApplication : Application(), Configuration.Provider {
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
             .build()
+
+    override fun onCreate() {
+        super.onCreate()
+        GtfsScheduleUpdateScheduler.schedule(this)
+    }
 }

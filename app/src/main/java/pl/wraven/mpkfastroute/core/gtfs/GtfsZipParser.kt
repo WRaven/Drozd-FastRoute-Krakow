@@ -27,12 +27,16 @@ import pl.wraven.mpkfastroute.core.database.StopTimeEntity
 import pl.wraven.mpkfastroute.core.database.TripEntity
 
 const val GTFS_KRAKOW_URL = "https://gtfs.ztp.krakow.pl/GTFS_KRK.zip"
+internal const val GTFS_UPDATE_PREFERENCES = "gtfs_update_metadata"
+internal const val GTFS_LAST_CHECKED_AT_KEY = "last_checked_at"
 
 private const val BATCH_SIZE = 5_000
 private const val PROGRESS_BATCH_SIZE = 50_000
 private const val DOWNLOAD_PROGRESS_INTERVAL_BYTES = 5_000_000L
 private const val CONNECT_TIMEOUT_MILLIS = 30_000
 private const val READ_TIMEOUT_MILLIS = 120_000
+private const val GTFS_ETAG_KEY = "etag"
+private const val GTFS_LAST_MODIFIED_KEY = "last_modified"
 
 class GtfsZipParser @Inject constructor(
     private val database: AppDatabase,
@@ -41,9 +45,26 @@ class GtfsZipParser @Inject constructor(
 ) {
     suspend fun importSchedule(
         onProgress: (String) -> Unit = {}
-    ) = withContext(Dispatchers.IO) {
+    ) {
+        importScheduleInternal(onlyIfUpdated = false, onProgress = onProgress)
+    }
+
+    suspend fun importScheduleIfUpdated(
+        onProgress: (String) -> Unit = {}
+    ): Boolean = importScheduleInternal(onlyIfUpdated = true, onProgress = onProgress)
+
+    private suspend fun importScheduleInternal(
+        onlyIfUpdated: Boolean,
+        onProgress: (String) -> Unit
+    ): Boolean = withContext(Dispatchers.IO) {
         onProgress("Pobieranie rozkładu ZTP Kraków...")
-        val archive = downloadArchive(onProgress)
+        val downloadedArchive = downloadArchive(onProgress, onlyIfUpdated)
+        if (downloadedArchive == null) {
+            markScheduleChecked()
+            onProgress("Rozkład GTFS jest aktualny.")
+            return@withContext false
+        }
+        val archive = downloadedArchive.file
         try {
             onProgress("Odczytywanie przystanków, tras i kalendarza...")
             val stops = mutableListOf<StopEntity>()
@@ -112,6 +133,8 @@ class GtfsZipParser @Inject constructor(
                 sqliteDatabase.execSQL("PRAGMA foreign_keys = ON")
             }
             onProgress("Kończenie indeksowania rozkładu...")
+            saveDownloadMetadata(downloadedArchive)
+            true
         } finally {
             archive.delete()
         }
@@ -121,7 +144,10 @@ class GtfsZipParser @Inject constructor(
         connectionIndexBuilder.rebuild(onProgress)
     }
 
-    private fun downloadArchive(onProgress: (String) -> Unit): File {
+    private fun downloadArchive(
+        onProgress: (String) -> Unit,
+        onlyIfUpdated: Boolean
+    ): DownloadedArchive? {
         val archive = File.createTempFile("gtfs-krakow-", ".zip", context.cacheDir)
         var downloadCompleted = false
         try {
@@ -129,13 +155,33 @@ class GtfsZipParser @Inject constructor(
             connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
             connection.readTimeout = READ_TIMEOUT_MILLIS
             connection.instanceFollowRedirects = true
+            if (onlyIfUpdated) {
+                val preferences = context.getSharedPreferences(
+                    GTFS_UPDATE_PREFERENCES,
+                    Context.MODE_PRIVATE
+                )
+                preferences.getString(GTFS_ETAG_KEY, null)?.let {
+                    connection.setRequestProperty("If-None-Match", it)
+                }
+                val lastModified = preferences.getLong(GTFS_LAST_MODIFIED_KEY, 0L)
+                if (lastModified > 0L) {
+                    connection.ifModifiedSince = lastModified
+                }
+            }
 
+            var eTag: String? = null
+            var lastModified = 0L
             try {
                 val responseCode = connection.responseCode
+                if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                    return null
+                }
                 if (responseCode !in 200..299) {
                     throw IOException("GTFS download failed with HTTP $responseCode.")
                 }
 
+                eTag = connection.getHeaderField("ETag")
+                lastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
                 val contentLength = connection.contentLengthLong
                 var downloadedBytes = 0L
                 var nextProgressPercent = 5
@@ -177,13 +223,35 @@ class GtfsZipParser @Inject constructor(
             }
 
             downloadCompleted = true
-            return archive
+            return DownloadedArchive(archive, eTag, lastModified)
         } finally {
             if (!downloadCompleted) {
                 archive.delete()
             }
         }
     }
+
+    private fun markScheduleChecked() {
+        context.getSharedPreferences(GTFS_UPDATE_PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
+            .apply()
+    }
+
+    private fun saveDownloadMetadata(downloadedArchive: DownloadedArchive) {
+        context.getSharedPreferences(GTFS_UPDATE_PREFERENCES, Context.MODE_PRIVATE)
+            .edit()
+            .putString(GTFS_ETAG_KEY, downloadedArchive.eTag)
+            .putLong(GTFS_LAST_MODIFIED_KEY, downloadedArchive.lastModified)
+            .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
+            .apply()
+    }
+
+    private data class DownloadedArchive(
+        val file: File,
+        val eTag: String?,
+        val lastModified: Long
+    )
 
     private suspend fun readLookupTables(
         archive: File,

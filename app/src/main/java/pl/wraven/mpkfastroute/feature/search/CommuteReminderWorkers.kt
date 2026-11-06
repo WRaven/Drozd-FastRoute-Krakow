@@ -346,9 +346,20 @@ class CommuteStatusWorker @AssistedInject constructor(
                         firstTransit.connection.routeShortName + " w najbliższych 2 godzinach."
             }
         }
-        return "Odjazd za ${roundedUpMinutes(Duration.between(LocalDateTime.now(), departureTarget))} min.\n" +
-            "$departureLines\n$disruptions"
+        return formatCommuteNotificationBody(
+            departureLines = departureLines,
+            minutesUntilDeparture = roundedUpMinutes(
+                Duration.between(LocalDateTime.now(), departureTarget)
+            ),
+            disruptions = disruptions
+        )
     }
+
+    internal fun formatCommuteNotificationBody(
+        departureLines: String,
+        minutesUntilDeparture: Long,
+        disruptions: String
+    ): String = "$departureLines\nOdjazd za $minutesUntilDeparture min.\n$disruptions"
 
     private fun formatDeparture(
         estimate: DepartureEstimate,
