@@ -156,7 +156,7 @@ class RoutePlanner @Inject constructor(
                     diagnostics.record(
                         "CSA: ${progress.scannedConnections}/${progress.totalConnections} " +
                             "połączeń, ${progress.reachedStops} osiągniętych przystanków, " +
-                            "${progress.propagatedStates} przejść pieszych."
+                            "${progress.propagatedStates} stanów po przejściu pieszym."
                     )
                 }
             )

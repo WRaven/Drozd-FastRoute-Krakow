@@ -150,6 +150,11 @@ class CsaEngine @Inject constructor() {
                     continue
                 }
 
+                // Direct links already cover transfers up to 500 m; chaining them is unbounded.
+                if (current.hasWalkedSinceTransit) {
+                    continue
+                }
+
                 for (footpath in footpathsByStop[current.stopId].orEmpty()) {
                     val arrivalTime = Math.addExact(current.arrivalTime, footpath.durationSeconds)
                     val startingTransferWalk = current.lastTripId != null &&
@@ -368,7 +373,7 @@ class CsaEngine @Inject constructor() {
     private companion object {
         const val TRANSFER_PENALTY_SECONDS = 180
         const val CONNECTION_PROGRESS_INTERVAL = 5_000
-        const val FOOTPATH_PROGRESS_INTERVAL = 10_000
+        const val FOOTPATH_PROGRESS_INTERVAL = 100_000
         const val DEFAULT_MAX_RESULTS = 20
     }
 }

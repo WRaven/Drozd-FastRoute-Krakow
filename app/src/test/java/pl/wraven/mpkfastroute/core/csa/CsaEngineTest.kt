@@ -152,6 +152,25 @@ class CsaEngineTest {
     }
 
     @Test
+    fun doesNotChainWalkingTransfersAcrossTheNetwork() {
+        val journey = engine.findEarliestJourney(
+            connections = listOf(
+                connection("origin", "A", 0, 600, "trip-1"),
+                connection("C", "destination", 1_260, 1_500, "trip-2")
+            ),
+            footpaths = listOf(
+                Footpath("A", "B", 240, 300.0),
+                Footpath("B", "C", 240, 300.0)
+            ),
+            originStopId = "origin",
+            destinationStopId = "destination",
+            startTime = 0
+        )
+
+        assertNull(journey)
+    }
+
+    @Test
     fun doesNotChargeTransferPenaltyForWalkingFromTheLastStopToTheDestination() {
         val journey = engine.findEarliestJourney(
             connections = listOf(connection("A", "B", 0, 600, "trip-1")),
