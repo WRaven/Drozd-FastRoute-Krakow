@@ -183,5 +183,6 @@ dependencies {
     implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
+    testImplementation(libs.ktor.client.mock)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

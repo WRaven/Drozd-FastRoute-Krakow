@@ -43,6 +43,11 @@ the architecture and phases in the project specification.
 - The route form can plan a one-time departure or latest arrival by date and
   time. The startup origin defaults to the current location when permission is
   granted, and the quick actions open the official ZTP/KMK service notices.
+- The weather quick action requests foreground location only when tapped and
+  shows current conditions plus an hourly 24-hour forecast from Open-Meteo.
+  Forecasts are cached in memory for 15 minutes by approximate location; no
+  weather location is stored. The weather view credits Open-Meteo and links
+  its CC BY 4.0 license.
 - Saved home/work schedules can trigger a commute notification 15 minutes
   before the calculated departure. The notification shows upcoming TTSS
   departures in its collapsed preview and refreshes every five minutes with

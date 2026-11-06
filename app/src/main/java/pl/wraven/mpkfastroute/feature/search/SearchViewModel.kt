@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.io.IOException
+import java.time.DateTimeException
 import java.time.LocalDateTime
 import kotlinx.coroutines.Job
 import javax.inject.Inject
@@ -16,6 +17,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.ktor.client.plugins.HttpRequestTimeoutException
+import kotlinx.serialization.SerializationException
 import pl.wraven.mpkfastroute.core.audio.RadioManager
 import pl.wraven.mpkfastroute.core.audio.RadioPreferences
 import pl.wraven.mpkfastroute.core.audio.RadioStation
@@ -36,6 +39,7 @@ import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
 import pl.wraven.mpkfastroute.core.location.AddressGeocoder
+import pl.wraven.mpkfastroute.core.location.CurrentLocationProvider
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.location.LocationPermissionRequiredException
 import pl.wraven.mpkfastroute.core.location.LocationUnavailableException
@@ -45,6 +49,9 @@ import pl.wraven.mpkfastroute.core.settings.SavedRoute
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
 import pl.wraven.mpkfastroute.core.update.NoReleaseAvailableException
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
+import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
+import pl.wraven.mpkfastroute.core.weather.OpenMeteoRequestException
+import pl.wraven.mpkfastroute.core.weather.WeatherForecast
 
 data class SearchUiState(
     val stops: List<StopEntity> = emptyList(),
@@ -92,7 +99,10 @@ data class SearchUiState(
     val isCheckingUpdates: Boolean = false,
     val updateCheckMessage: String? = null,
     val updateCheckResult: UpdateCheckResult? = null,
-    val updatePrompt: UpdateCheckResult? = null
+    val updatePrompt: UpdateCheckResult? = null,
+    val weatherForecast: WeatherForecast? = null,
+    val isLoadingWeather: Boolean = false,
+    val weatherError: String? = null
 ) {
     val isScheduleEmpty: Boolean
         get() = stops.isEmpty()
@@ -116,12 +126,15 @@ class SearchViewModel @Inject constructor(
     private val radioManager: RadioManager,
     private val radioPreferences: RadioPreferences,
     private val updateChecker: GitHubUpdateChecker,
-    private val diagnostics: SearchDiagnostics
+    private val diagnostics: SearchDiagnostics,
+    private val currentLocationProvider: CurrentLocationProvider,
+    private val openMeteoClient: OpenMeteoClient
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(SearchUiState())
     val uiState = mutableUiState.asStateFlow()
     private var originAddressSearchJob: Job? = null
     private var destinationAddressSearchJob: Job? = null
+    private var weatherJob: Job? = null
 
     init {
         observeStops()
@@ -258,6 +271,56 @@ class SearchViewModel @Inject constructor(
             } finally {
                 mutableUiState.update { it.copy(isSearching = false) }
             }
+        }
+    }
+
+    fun loadWeather() {
+        if (mutableUiState.value.isLoadingWeather) return
+        weatherJob?.cancel()
+        weatherJob = viewModelScope.launch {
+            mutableUiState.update {
+                it.copy(isLoadingWeather = true, weatherError = null)
+            }
+            try {
+                val location = currentLocationProvider.getCurrentLocation()
+                val forecast = openMeteoClient.getForecast(
+                    latitude = location.latitude,
+                    longitude = location.longitude
+                )
+                mutableUiState.update {
+                    it.copy(
+                        weatherForecast = forecast,
+                        weatherError = null,
+                        isLoadingWeather = false
+                    )
+                }
+            } catch (exception: LocationPermissionRequiredException) {
+                showWeatherError("Zezwól na dostęp do lokalizacji, aby pobrać pogodę.")
+            } catch (exception: LocationUnavailableException) {
+                showWeatherError("Nie udało się ustalić bieżącej lokalizacji.")
+            } catch (exception: SecurityException) {
+                showWeatherError("Brak dostępu do lokalizacji.")
+            } catch (exception: HttpRequestTimeoutException) {
+                showWeatherError("Serwis pogody nie odpowiedział na czas. Spróbuj ponownie.")
+            } catch (exception: OpenMeteoRequestException) {
+                showWeatherError("Nie udało się pobrać prognozy. Spróbuj ponownie później.")
+            } catch (exception: IOException) {
+                showWeatherError("Nie udało się pobrać pogody. Sprawdź połączenie z internetem.")
+            } catch (exception: SerializationException) {
+                showWeatherError("Serwis pogody zwrócił nieprawidłowe dane.")
+            } catch (exception: DateTimeException) {
+                showWeatherError("Serwis pogody zwrócił nieprawidłowe godziny prognozy.")
+            } catch (exception: IllegalArgumentException) {
+                showWeatherError("Serwis pogody zwrócił nieprawidłowe dane.")
+            } finally {
+                mutableUiState.update { it.copy(isLoadingWeather = false) }
+            }
+        }
+    }
+
+    private fun showWeatherError(message: String) {
+        mutableUiState.update {
+            it.copy(weatherError = message)
         }
     }
 

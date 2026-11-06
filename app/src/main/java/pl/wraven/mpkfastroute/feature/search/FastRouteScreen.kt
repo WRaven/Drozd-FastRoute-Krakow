@@ -98,6 +98,7 @@ import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
+import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 
@@ -114,6 +115,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var scheduleSavesPlace by remember { mutableStateOf(false) }
     var pendingLocationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var routeTimePlanVisible by remember { mutableStateOf(false) }
+    var weatherVisible by remember { mutableStateOf(false) }
     var startupLocationRequested by rememberSaveable { mutableStateOf(false) }
     var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
     var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
@@ -335,6 +337,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onOpenServiceAlerts = {
                     openExternalUrl("https://ztp.krakow.pl/kmk/komunikaty")
                 },
+                onOpenWeather = {
+                    weatherVisible = true
+                    runWithLocationPermission(viewModel::loadWeather)
+                },
                 remindersEnabled = commuteRemindersEnabled,
                 onEnableCommuteReminders = ::requestCommuteReminderPermissions,
                 modifier = Modifier
@@ -416,6 +422,19 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 )
             }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+
+    if (weatherVisible) {
+        ModalBottomSheet(onDismissRequest = { weatherVisible = false }) {
+            WeatherForecastSheet(
+                forecast = state.weatherForecast,
+                isLoading = state.isLoadingWeather,
+                error = state.weatherError,
+                onRetry = { runWithLocationPermission(viewModel::loadWeather) },
+                onOpenAttribution = { openExternalUrl(OpenMeteoClient.ATTRIBUTION_URL) },
+                onOpenLicense = { openExternalUrl(OpenMeteoClient.LICENSE_URL) }
+            )
         }
     }
 
@@ -559,6 +578,7 @@ private fun SearchContent(
     onSaveCustomRoute: () -> Unit,
     onEditRoutePlan: () -> Unit,
     onOpenServiceAlerts: () -> Unit,
+    onOpenWeather: () -> Unit,
     remindersEnabled: Boolean,
     onEnableCommuteReminders: () -> Unit,
     modifier: Modifier = Modifier
@@ -601,6 +621,13 @@ private fun SearchContent(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AssistChip(
+                            onClick = onOpenWeather,
+                            enabled = !state.isLoadingWeather,
+                            label = {
+                                Text(if (state.isLoadingWeather) "🌤 Ładowanie..." else "🌤 Pogoda")
+                            }
+                        )
+                        AssistChip(
                         onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
                         enabled = !state.isSearching && !state.isImporting,
                         label = {

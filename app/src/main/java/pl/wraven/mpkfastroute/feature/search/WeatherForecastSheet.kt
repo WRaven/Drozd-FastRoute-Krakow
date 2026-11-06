@@ -1,0 +1,165 @@
+package pl.wraven.mpkfastroute.feature.search
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+import pl.wraven.mpkfastroute.core.weather.WeatherForecast
+import pl.wraven.mpkfastroute.core.weather.WeatherCondition
+import pl.wraven.mpkfastroute.core.weather.weatherConditionForCode
+
+@Composable
+internal fun WeatherForecastSheet(
+    forecast: WeatherForecast?,
+    isLoading: Boolean,
+    error: String?,
+    onRetry: () -> Unit,
+    onOpenAttribution: () -> Unit,
+    onOpenLicense: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(max = 680.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Pogoda w Twojej okolicy", style = MaterialTheme.typography.titleLarge)
+        when {
+            isLoading -> {
+                CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
+                Text(
+                    "Pobieranie lokalizacji i prognozy…",
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+            error != null -> {
+                Text(error, color = MaterialTheme.colorScheme.error)
+                Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                    Text("Spróbuj ponownie")
+                }
+            }
+            forecast == null -> {
+                Text("Naciśnij „Pogoda”, aby pobrać prognozę dla bieżącej lokalizacji.")
+            }
+            else -> {
+                CurrentWeatherCard(forecast)
+                Text("Najbliższe 24 godziny", style = MaterialTheme.typography.titleMedium)
+                forecast.hourly.forEach { hour ->
+                    HourlyWeatherRow(
+                        time = hour.time.format(HOURLY_TIME_FORMATTER),
+                        condition = weatherConditionForCode(hour.weatherCode),
+                        temperature = hour.temperatureCelsius,
+                        precipitationProbability = hour.precipitationProbabilityPercent,
+                        windSpeed = hour.windSpeedKilometersPerHour
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "Dane pogodowe: Open-Meteo.com. Udostępniane na licencji CC BY 4.0.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Row {
+            TextButton(onClick = onOpenAttribution) {
+                Text("Źródło: Open-Meteo")
+            }
+            TextButton(onClick = onOpenLicense) {
+                Text("Licencja CC BY 4.0")
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun CurrentWeatherCard(forecast: WeatherForecast) {
+    val current = forecast.current
+    val condition = weatherConditionForCode(current.weatherCode)
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                current.time.format(CURRENT_TIME_FORMATTER),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(condition.symbol, style = MaterialTheme.typography.headlineLarge)
+                Column {
+                    Text(
+                        "${current.temperatureCelsius.toInt()}°C",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(condition.description)
+                }
+            }
+            Text(
+                "Odczuwalna ${current.apparentTemperatureCelsius.toInt()}°C · " +
+                    "wilgotność ${current.relativeHumidityPercent}%"
+            )
+            Text(
+                "Opady ${current.precipitationMillimeters} mm · " +
+                    "wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h"
+            )
+        }
+    }
+}
+
+@Composable
+private fun HourlyWeatherRow(
+    time: String,
+    condition: WeatherCondition,
+    temperature: Double,
+    precipitationProbability: Int,
+    windSpeed: Double
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(time, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+        Text(condition.symbol, style = MaterialTheme.typography.titleMedium)
+        Text("${temperature.toInt()}°")
+        Text("💧 $precipitationProbability%")
+        Text("${windSpeed.toInt()} km/h", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+private val CURRENT_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
+private val HOURLY_TIME_FORMATTER =
+    DateTimeFormatter.ofPattern("EEE HH:mm", Locale.forLanguageTag("pl"))
