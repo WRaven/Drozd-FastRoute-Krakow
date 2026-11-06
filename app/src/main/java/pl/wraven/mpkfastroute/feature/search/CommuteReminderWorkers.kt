@@ -355,12 +355,6 @@ class CommuteStatusWorker @AssistedInject constructor(
         )
     }
 
-    internal fun formatCommuteNotificationBody(
-        departureLines: String,
-        minutesUntilDeparture: Long,
-        disruptions: String
-    ): String = "$departureLines\nOdjazd za $minutesUntilDeparture min.\n$disruptions"
-
     private fun formatDeparture(
         estimate: DepartureEstimate,
         serviceDate: java.time.LocalDate
@@ -470,3 +464,9 @@ class CommuteStatusWorker @AssistedInject constructor(
         val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
     }
 }
+
+internal fun formatCommuteNotificationBody(
+    departureLines: String,
+    minutesUntilDeparture: Long,
+    disruptions: String
+): String = "$departureLines\nOdjazd za $minutesUntilDeparture min.\n$disruptions"
