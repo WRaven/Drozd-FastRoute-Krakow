@@ -119,6 +119,83 @@ class CsaEngineTest {
     }
 
     @Test
+    fun requiresWalkingTimePlusThreeMinutesForAnInterStopTransfer() {
+        val footpath = Footpath("B", "C", 240, 300.0)
+        val connections = listOf(
+            connection("A", "B", 0, 600, "trip-1"),
+            connection("C", "D", 1_020, 1_200, "trip-2")
+        )
+
+        val journey = engine.findEarliestJourney(
+            connections = connections,
+            footpaths = listOf(footpath),
+            originStopId = "A",
+            destinationStopId = "D",
+            startTime = 0
+        )
+
+        assertNotNull(journey)
+        assertEquals(1_200, journey?.arrivalTime)
+        assertEquals(180, journey?.transferPenaltySeconds)
+        assertEquals(300.0, journey?.transferWalkingDistanceMeters)
+
+        val impossibleJourney = engine.findEarliestJourney(
+            connections = connections.map {
+                if (it.departureStopId == "C") it.copy(departureTime = 1_019) else it
+            },
+            footpaths = listOf(footpath),
+            originStopId = "A",
+            destinationStopId = "D",
+            startTime = 0
+        )
+        assertNull(impossibleJourney)
+    }
+
+    @Test
+    fun doesNotChargeTransferPenaltyForWalkingFromTheLastStopToTheDestination() {
+        val journey = engine.findEarliestJourney(
+            connections = listOf(connection("A", "B", 0, 600, "trip-1")),
+            footpaths = listOf(Footpath("B", "C", 240, 300.0)),
+            originStopId = "A",
+            destinationStopId = "C",
+            startTime = 0
+        )
+
+        assertNotNull(journey)
+        assertEquals(840, journey?.arrivalTime)
+        assertEquals(0, journey?.transferPenaltySeconds)
+    }
+
+    @Test
+    fun ranksDoorToDoorTimeAndRetainsALessWalkingAlternative() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("fast-origin", "fast-destination", 80, 200, "fast-trip"),
+                connection("walk-origin", "walk-destination", 0, 350, "less-walking-trip")
+            ),
+            footpaths = emptyList(),
+            originAccesses = listOf(
+                StopAccess("fast-origin", 100.0, 80),
+                StopAccess("walk-origin", 0.0, 0)
+            ),
+            destinationAccesses = listOf(
+                StopAccess("fast-destination", 100.0, 80),
+                StopAccess("walk-destination", 0.0, 0)
+            ),
+            startTime = 0,
+            maxResults = 2
+        )
+
+        assertEquals(2, journeys.size)
+        assertEquals("fast-origin", journeys.first().originAccess.stopId)
+        assertEquals(280, journeys.first().estimatedArrivalTime)
+        assertEquals(200.0, journeys.first().totalWalkingDistanceMeters, 0.001)
+        assertEquals("walk-origin", journeys.last().originAccess.stopId)
+        assertEquals(350, journeys.last().estimatedArrivalTime)
+        assertEquals(0.0, journeys.last().totalWalkingDistanceMeters, 0.001)
+    }
+
+    @Test
     fun returnsEmptyJourneyWhenAlreadyAtDestination() {
         val journey = engine.findEarliestJourney(
             connections = emptyList(),

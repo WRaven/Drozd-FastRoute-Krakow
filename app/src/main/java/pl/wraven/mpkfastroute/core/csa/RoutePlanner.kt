@@ -39,10 +39,27 @@ class RoutePlanner @Inject constructor(
         serviceDate: LocalDate,
         startTimeSeconds: Int,
         searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS
-    ): CsaJourney? {
+    ): CsaJourney? = findJourneys(
+        originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
+        destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
+        serviceDate = serviceDate,
+        startTimeSeconds = startTimeSeconds,
+        searchWindowSeconds = searchWindowSeconds,
+        maxResults = 1
+    ).firstOrNull()
+
+    suspend fun findJourneys(
+        originAccesses: List<StopAccess>,
+        destinationAccesses: List<StopAccess>,
+        serviceDate: LocalDate,
+        startTimeSeconds: Int,
+        searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS,
+        maxResults: Int = DEFAULT_MAX_RESULTS
+    ): List<CsaJourney> {
         require(startTimeSeconds >= 0) { "Start time must not be negative." }
-        require(originStopIds.isNotEmpty()) { "At least one origin stop is required." }
-        require(destinationStopIds.isNotEmpty()) { "At least one destination stop is required." }
+        require(originAccesses.isNotEmpty()) { "At least one origin stop is required." }
+        require(destinationAccesses.isNotEmpty()) { "At least one destination stop is required." }
+        require(maxResults > 0) { "At least one journey result is required." }
         require(searchWindowSeconds in 1..MAX_SEARCH_WINDOW_SECONDS) {
             "Search window must be between 1 second and 2 hours."
         }
@@ -55,7 +72,7 @@ class RoutePlanner @Inject constructor(
             exceptions = calendarDao.getExceptionsForDate(serviceDateString)
         )
         if (activeServiceIds.isEmpty()) {
-            return null
+            return emptyList()
         }
 
         val rows = database.stopTimeDao()
@@ -75,8 +92,11 @@ class RoutePlanner @Inject constructor(
                 }
                 .toList()
         }
-        if (connections.isEmpty()) {
-            return null
+        if (connections.isEmpty() && originAccesses.none { origin ->
+                destinationAccesses.any { it.stopId == origin.stopId }
+            }
+        ) {
+            return emptyList()
         }
 
         val stops = database.stopDao().getAll()
@@ -98,12 +118,13 @@ class RoutePlanner @Inject constructor(
             }
         }
         return withContext(Dispatchers.Default) {
-            csaEngine.findEarliestJourney(
+            csaEngine.findJourneys(
                 connections = connections,
                 footpaths = footpaths,
-                originStopIds = originStopIds,
-                destinationStopIds = destinationStopIds,
-                startTime = startTimeSeconds
+                originAccesses = originAccesses,
+                destinationAccesses = destinationAccesses,
+                startTime = startTimeSeconds,
+                maxResults = maxResults
             )
         }
     }
@@ -116,5 +137,6 @@ class RoutePlanner @Inject constructor(
     private companion object {
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
         const val MAX_SEARCH_WINDOW_SECONDS = DEFAULT_SEARCH_WINDOW_SECONDS
+        const val DEFAULT_MAX_RESULTS = 20
     }
 }

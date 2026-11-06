@@ -42,6 +42,14 @@ class AppPreferences @Inject constructor(
         preferences[LAST_SELECTED_RADIO_INDEX] ?: DEFAULT_RADIO_INDEX
     }
 
+    val recentStopSearches: Flow<List<String>> = dataStore.data.map { preferences ->
+        preferences[RECENT_STOP_SEARCHES]
+            .orEmpty()
+            .split(RECENT_STOP_DELIMITER)
+            .filter(String::isNotBlank)
+            .take(MAX_RECENT_STOP_SEARCHES)
+    }
+
     suspend fun saveHomeStopId(stopId: String?) {
         saveStopId(HOME_STOP_ID, stopId)
     }
@@ -62,6 +70,21 @@ class AppPreferences @Inject constructor(
         require(index in RADIO_INDEX_RANGE) { "Unknown radio station index: $index." }
         dataStore.edit { preferences ->
             preferences[LAST_SELECTED_RADIO_INDEX] = index
+        }
+    }
+
+    suspend fun recordStopSearch(stopName: String) {
+        val name = stopName.trim().replace(RECENT_STOP_DELIMITER, " ")
+        require(name.isNotEmpty()) { "A stop name is required." }
+        dataStore.edit { preferences ->
+            val previousNames = preferences[RECENT_STOP_SEARCHES]
+                .orEmpty()
+                .split(RECENT_STOP_DELIMITER)
+                .filter(String::isNotBlank)
+                .filterNot { it.equals(name, ignoreCase = true) }
+            preferences[RECENT_STOP_SEARCHES] = (listOf(name) + previousNames)
+                .take(MAX_RECENT_STOP_SEARCHES)
+                .joinToString(RECENT_STOP_DELIMITER)
         }
     }
 
@@ -143,6 +166,9 @@ class AppPreferences @Inject constructor(
         val WORK_LATITUDE = intPreferencesKey("workPlaceLatitudeE6")
         val WORK_LONGITUDE = intPreferencesKey("workPlaceLongitudeE6")
         val LAST_SELECTED_RADIO_INDEX = intPreferencesKey("lastSelectedRadioIndex")
+        val RECENT_STOP_SEARCHES = stringPreferencesKey("recentStopSearches")
+        const val RECENT_STOP_DELIMITER = "\u001F"
+        const val MAX_RECENT_STOP_SEARCHES = 3
         const val DEFAULT_RADIO_INDEX = 0
         const val COORDINATE_SCALE = 1_000_000.0
         val RADIO_INDEX_RANGE = 0..1

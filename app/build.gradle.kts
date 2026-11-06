@@ -92,6 +92,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-test"
+        }
         release {
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("stableRelease")

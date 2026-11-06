@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlin.math.roundToInt
 import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Haversine
@@ -242,6 +243,10 @@ private fun SearchContent(
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
+    var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
+    var showDestinationStopPicker by remember(state.destinationPlace) {
+        mutableStateOf(false)
+    }
 
     Column(
         modifier = modifier
@@ -323,23 +328,34 @@ private fun SearchContent(
             StopGroupPicker(
                 query = state.originQuery,
                 groups = stopGroups,
+                recentStopNames = state.recentStopSearches,
                 onSelectGroup = onSelectOrigin
             )
         }
         state.originPlace?.let { place ->
             Text("Początek: ${place.label}")
-        }
-        if (state.originPlace != null && state.originStop == null &&
-            state.nearbyOriginGroups.isNotEmpty()
-        ) {
-            Text("Wybierz przystanek początkowy:")
-            state.nearbyOriginGroups.forEach { group ->
-                val distanceMeters = distanceToStopGroup(state.originPlace, group)
+            if (!state.originStopManuallySelected) {
+                Text("Przystanek dobiorę podczas wyszukiwania trasy.")
                 TextButton(
-                    onClick = { onSelectOrigin(group) },
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = { showOriginStopPicker = !showOriginStopPicker },
+                    enabled = state.nearbyOriginGroups.isNotEmpty() && !state.isSearching
                 ) {
-                    Text("${group.name} · ${distanceMeters.toInt()} m")
+                    Text(if (showOriginStopPicker) "Ukryj przystanki" else "Wybierz przystanek")
+                }
+                if (showOriginStopPicker) {
+                    Text("Wybierz przystanek początkowy:")
+                    state.nearbyOriginGroups.forEach { group ->
+                        val distanceMeters = distanceToStopGroup(place, group)
+                        TextButton(
+                            onClick = {
+                                showOriginStopPicker = false
+                                onSelectOrigin(group)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("${group.name} · ${distanceMeters.toInt()} m")
+                        }
+                    }
                 }
             }
         }
@@ -373,15 +389,33 @@ private fun SearchContent(
         }
         if (state.destinationPlace != null) {
             Text("Adres celu: ${state.destinationPlace.label}")
-            if (state.destinationStop == null && state.nearbyDestinationGroups.isNotEmpty()) {
-                Text("Wybierz przystanek:")
-                state.nearbyDestinationGroups.forEach { group ->
-                    val distanceMeters = distanceToStopGroup(state.destinationPlace, group)
-                    TextButton(
-                        onClick = { onSelectDestination(group) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("${group.name} · ${distanceMeters.toInt()} m")
+            if (!state.destinationStopManuallySelected) {
+                Text("Przystanek dobiorę podczas wyszukiwania trasy.")
+                TextButton(
+                    onClick = { showDestinationStopPicker = !showDestinationStopPicker },
+                    enabled = state.nearbyDestinationGroups.isNotEmpty() && !state.isSearching
+                ) {
+                    Text(
+                        if (showDestinationStopPicker) {
+                            "Ukryj przystanki"
+                        } else {
+                            "Wybierz przystanek"
+                        }
+                    )
+                }
+                if (showDestinationStopPicker) {
+                    Text("Wybierz przystanek docelowy:")
+                    state.nearbyDestinationGroups.forEach { group ->
+                        val distanceMeters = distanceToStopGroup(state.destinationPlace, group)
+                        TextButton(
+                            onClick = {
+                                showDestinationStopPicker = false
+                                onSelectDestination(group)
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("${group.name} · ${distanceMeters.toInt()} m")
+                        }
                     }
                 }
             }
@@ -389,6 +423,7 @@ private fun SearchContent(
             StopGroupPicker(
                 query = state.destinationQuery,
                 groups = stopGroups,
+                recentStopNames = state.recentStopSearches,
                 onSelectGroup = onSelectDestination
             )
         }
@@ -398,8 +433,9 @@ private fun SearchContent(
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = onSearch,
-                enabled = !state.isSearching && state.originStop != null &&
-                    state.destinationStop != null
+                enabled = !state.isSearching &&
+                    (state.originPlace != null || state.originStop != null) &&
+                    (state.destinationPlace != null || state.destinationStop != null)
             ) {
                 Text(if (state.isSearching) "Szukam..." else "Szukaj trasy")
             }
@@ -417,13 +453,37 @@ private fun SearchContent(
             }
         }
 
-        state.journey?.let { journey ->
+        val leastWalkingIndex = state.journeyOptions.indices.minByOrNull { index ->
+            state.journeyOptions[index].totalWalkingDistanceMeters
+        }
+        state.journeyOptions.forEachIndexed { index, journey ->
             JourneyResult(
                 journey = journey,
                 stops = state.stops,
-                origin = state.originStop,
-                destination = state.destinationStop
+                origin = state.stops.firstOrNull {
+                    it.stopId == journey.originAccess.stopId
+                } ?: state.originStop,
+                destination = state.stops.firstOrNull {
+                    it.stopId == journey.destinationAccess.stopId
+                } ?: state.destinationStop,
+                routeLabel = when {
+                    index == 0 && index == leastWalkingIndex ->
+                        "Najszybciej · najmniej chodzenia"
+                    index == 0 -> "Najszybciej"
+                    index == leastWalkingIndex -> "Najmniej chodzenia"
+                    else -> "Alternatywa ${index + 1}"
+                }
             )
+        }
+        if (state.journeyOptions.isEmpty()) {
+            state.journey?.let { journey ->
+                JourneyResult(
+                    journey = journey,
+                    stops = state.stops,
+                    origin = state.originStop,
+                    destination = state.destinationStop
+                )
+            }
         }
         state.liveDepartures?.let { departures ->
             LiveDeparturesSection(
@@ -438,26 +498,51 @@ private fun SearchContent(
 private fun StopGroupPicker(
     query: String,
     groups: List<StopGroup>,
+    recentStopNames: List<String>,
     onSelectGroup: (StopGroup) -> Unit
 ) {
-    if (query.length >= MIN_STOP_QUERY_LENGTH) {
-        val matchingGroups = groups.asSequence()
+    val recentGroups = recentStopNames.mapNotNull { recentName ->
+        groups.firstOrNull { it.name.equals(recentName, ignoreCase = true) }
+            ?: groups.firstOrNull { StopNameGrouper.sameNameForSearch(it.name, recentName) }
+    }.distinctBy { StopNameGrouper.normalizeForSearch(it.name) }
+        .filter { query.isBlank() || StopNameGrouper.matches(query, it.name) }
+        .take(MAX_RECENT_STOP_SUGGESTIONS)
+    val recentGroupNames = recentGroups
+        .mapTo(mutableSetOf()) { StopNameGrouper.normalizeForSearch(it.name) }
+    val matchingGroups = if (query.length >= MIN_STOP_QUERY_LENGTH) {
+        groups.asSequence()
             .filter { group ->
-                group.name.contains(query, ignoreCase = true) ||
+                StopNameGrouper.matches(query, group.name) ||
                     group.stops.any { stop ->
-                        stop.stopCode?.contains(query, ignoreCase = true) == true
+                        stop.stopCode?.let { StopNameGrouper.matches(query, it) } == true
                     }
+            }
+            .filterNot {
+                StopNameGrouper.normalizeForSearch(it.name) in recentGroupNames
             }
             .take(MAX_STOP_SUGGESTIONS)
             .toList()
+    } else {
+        emptyList()
+    }
 
-        matchingGroups.forEach { group ->
+    if (recentGroups.isNotEmpty()) {
+        Text("Ostatnie przystanki", style = MaterialTheme.typography.labelLarge)
+        recentGroups.forEach { group ->
             TextButton(
                 onClick = { onSelectGroup(group) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(group.name)
             }
+        }
+    }
+    matchingGroups.forEach { group ->
+        TextButton(
+            onClick = { onSelectGroup(group) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(group.name)
         }
     }
 }
@@ -467,26 +552,43 @@ private fun JourneyResult(
     journey: CsaJourney,
     stops: List<StopEntity>,
     origin: StopEntity?,
-    destination: StopEntity?
+    destination: StopEntity?,
+    routeLabel: String? = null
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text("Wynik", style = MaterialTheme.typography.titleLarge)
+        Text(routeLabel ?: "Wynik", style = MaterialTheme.typography.titleLarge)
         Text(
             "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
                 destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
             fontWeight = FontWeight.Medium
         )
         Text(
-            "Przyjazd ${formatGtfsTime(journey.arrivalTime)}" +
+            (if (routeLabel == null) "Przyjazd " else "Przyjazd do celu około ") +
+                formatGtfsTime(
+                    if (routeLabel == null) journey.arrivalTime else journey.estimatedArrivalTime
+                ) +
                 if (journey.transferPenaltySeconds > 0) {
                     " · kara przesiadkowa +${journey.transferPenaltySeconds / 60} min"
                 } else {
                     ""
                 }
         )
+        if (routeLabel != null) {
+            Text("Czas od wyjścia: ${formatDuration(journey.totalDurationSeconds)}")
+            Text(
+                "Spacer łącznie: " +
+                    "${formatDistance(journey.totalWalkingDistanceMeters)}"
+            )
+            Text(
+                "Do przystanku ${formatDistance(journey.originAccess.walkingDistanceMeters)} · " +
+                    "przesiadki " +
+                    "${formatDistance(journey.transferWalkingDistanceMeters)} · " +
+                    "od przystanku ${formatDistance(journey.destinationAccess.walkingDistanceMeters)}"
+            )
+        }
         journey.steps.forEach { step ->
             when (step) {
                 is JourneyStep.Transit -> {
@@ -505,7 +607,8 @@ private fun JourneyResult(
                     Text(
                         "Przejście ${stopName(stops, footpath.fromStopId)} → " +
                             "${stopName(stops, footpath.toStopId)} " +
-                            "(${footpath.durationSeconds / 60} min)"
+                            "(${formatDistance(footpath.distanceMeters)}, " +
+                            "${formatDuration(footpath.durationSeconds)})"
                     )
                 }
             }
@@ -592,6 +695,18 @@ private fun formatGtfsTime(seconds: Int): String {
     return "%02d:%02d".format(totalMinutes / 60, totalMinutes % 60)
 }
 
+private fun formatDuration(seconds: Int): String {
+    val totalMinutes = (seconds + 59) / 60
+    return if (totalMinutes < 60) {
+        "$totalMinutes min"
+    } else {
+        "${totalMinutes / 60} godz. ${totalMinutes % 60} min"
+    }
+}
+
+private fun formatDistance(meters: Double): String = "${meters.roundToInt()} m"
+
 private const val MIN_STOP_QUERY_LENGTH = 2
 private const val MAX_STOP_SUGGESTIONS = 6
+private const val MAX_RECENT_STOP_SUGGESTIONS = 3
 private const val MAX_DISPLAYED_DEPARTURES = 12

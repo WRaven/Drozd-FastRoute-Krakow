@@ -7,10 +7,38 @@ data class CsaJourney(
     val departureTime: Int,
     val arrivalTime: Int,
     val transferPenaltySeconds: Int,
-    val steps: List<JourneyStep>
+    val steps: List<JourneyStep>,
+    val originAccess: StopAccess,
+    val destinationAccess: StopAccess,
+    val transferWalkingDistanceMeters: Double
 ) {
     val generalizedArrivalTime: Int
         get() = arrivalTime + transferPenaltySeconds
+
+    val estimatedArrivalTime: Int
+        get() = Math.addExact(generalizedArrivalTime, destinationAccess.walkingDurationSeconds)
+
+    val totalDurationSeconds: Int
+        get() = estimatedArrivalTime - departureTime
+
+    val totalWalkingDistanceMeters: Double
+        get() = originAccess.walkingDistanceMeters +
+            transferWalkingDistanceMeters +
+            destinationAccess.walkingDistanceMeters
+}
+
+data class StopAccess(
+    val stopId: String,
+    val walkingDistanceMeters: Double,
+    val walkingDurationSeconds: Int
+) {
+    init {
+        require(stopId.isNotBlank()) { "Stop ID must not be blank." }
+        require(walkingDistanceMeters.isFinite() && walkingDistanceMeters >= 0.0) {
+            "Walking distance must be finite and non-negative."
+        }
+        require(walkingDurationSeconds >= 0) { "Walking duration must not be negative." }
+    }
 }
 
 sealed interface JourneyStep {
@@ -40,10 +68,27 @@ class CsaEngine @Inject constructor() {
         originStopIds: Set<String>,
         destinationStopIds: Set<String>,
         startTime: Int
-    ): CsaJourney? {
+    ): CsaJourney? = findJourneys(
+        connections = connections,
+        footpaths = footpaths,
+        originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
+        destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
+        startTime = startTime,
+        maxResults = 1
+    ).firstOrNull()
+
+    fun findJourneys(
+        connections: List<Connection>,
+        footpaths: List<Footpath>,
+        originAccesses: List<StopAccess>,
+        destinationAccesses: List<StopAccess>,
+        startTime: Int,
+        maxResults: Int = DEFAULT_MAX_RESULTS
+    ): List<CsaJourney> {
         require(startTime >= 0) { "Start time must not be negative." }
-        require(originStopIds.isNotEmpty()) { "At least one origin stop is required." }
-        require(destinationStopIds.isNotEmpty()) { "At least one destination stop is required." }
+        require(originAccesses.isNotEmpty()) { "At least one origin stop is required." }
+        require(destinationAccesses.isNotEmpty()) { "At least one destination stop is required." }
+        require(maxResults > 0) { "At least one journey result is required." }
         require(connections.all { it.departureTime >= 0 && it.arrivalTime >= it.departureTime }) {
             "Connections must have non-negative, ordered times."
         }
@@ -51,9 +96,8 @@ class CsaEngine @Inject constructor() {
             "Footpath durations must not be negative."
         }
 
-        if (originStopIds.any(destinationStopIds::contains)) {
-            return CsaJourney(startTime, startTime, 0, emptyList())
-        }
+        val uniqueOrigins = bestAccessByStop(originAccesses)
+        val uniqueDestinations = bestAccessByStop(destinationAccesses)
 
         val labelsByStop = mutableMapOf<String, MutableMap<String?, MutableList<JourneyState>>>()
         val footpathsByStop = footpaths.groupBy(Footpath::fromStopId)
@@ -83,18 +127,24 @@ class CsaEngine @Inject constructor() {
 
                 for (footpath in footpathsByStop[current.stopId].orEmpty()) {
                     val arrivalTime = Math.addExact(current.arrivalTime, footpath.durationSeconds)
-                    val madeTransfer = current.lastTripId != null
-                    val transferCount = current.transferCount + if (madeTransfer) 1 else 0
+                    val startingTransferWalk = current.lastTripId != null &&
+                        !current.hasWalkedSinceTransit
                     val readyTime = Math.addExact(
                         Math.addExact(current.readyTime, footpath.durationSeconds),
-                        if (madeTransfer) TRANSFER_PENALTY_SECONDS else 0
+                        if (startingTransferWalk) TRANSFER_PENALTY_SECONDS else 0
                     )
                     val walked = JourneyState(
                         stopId = footpath.toStopId,
                         arrivalTime = arrivalTime,
                         readyTime = readyTime,
-                        transferCount = transferCount,
-                        lastTripId = null,
+                        transferCount = current.transferCount,
+                        lastTripId = current.lastTripId,
+                        hasWalkedSinceTransit = true,
+                        originAccess = current.originAccess,
+                        walkedDistanceMeters = current.walkedDistanceMeters +
+                            footpath.distanceMeters,
+                        transferWalkingDistanceMeters = current.transferWalkingDistanceMeters +
+                            footpath.distanceMeters,
                         previous = current,
                         step = JourneyStep.Walk(footpath)
                     )
@@ -105,14 +155,19 @@ class CsaEngine @Inject constructor() {
             }
         }
 
-        originStopIds.forEach { originStopId ->
+        uniqueOrigins.forEach { originAccess ->
+            val stopArrivalTime = Math.addExact(startTime, originAccess.walkingDurationSeconds)
             propagateFootpaths(
                 JourneyState(
-                    stopId = originStopId,
-                    arrivalTime = startTime,
-                    readyTime = startTime,
+                    stopId = originAccess.stopId,
+                    arrivalTime = stopArrivalTime,
+                    readyTime = stopArrivalTime,
                     transferCount = 0,
                     lastTripId = null,
+                    hasWalkedSinceTransit = false,
+                    originAccess = originAccess,
+                    walkedDistanceMeters = originAccess.walkingDistanceMeters,
+                    transferWalkingDistanceMeters = 0.0,
                     previous = null,
                     step = null
                 )
@@ -135,7 +190,11 @@ class CsaEngine @Inject constructor() {
                     label.lastTripId != connection.tripId
                 val transferCount = label.transferCount + if (changedTrip) 1 else 0
                 val readyTime = if (changedTrip) {
-                    Math.addExact(label.arrivalTime, TRANSFER_PENALTY_SECONDS)
+                    if (label.hasWalkedSinceTransit) {
+                        label.readyTime
+                    } else {
+                        Math.addExact(label.arrivalTime, TRANSFER_PENALTY_SECONDS)
+                    }
                 } else {
                     label.readyTime
                 }
@@ -150,6 +209,10 @@ class CsaEngine @Inject constructor() {
                         readyTime = connection.arrivalTime,
                         transferCount = transferCount,
                         lastTripId = connection.tripId,
+                        hasWalkedSinceTransit = false,
+                        originAccess = label.originAccess,
+                        walkedDistanceMeters = label.walkedDistanceMeters,
+                        transferWalkingDistanceMeters = label.transferWalkingDistanceMeters,
                         previous = label,
                         step = JourneyStep.Transit(connection)
                     )
@@ -157,29 +220,84 @@ class CsaEngine @Inject constructor() {
             }
         }
 
-        val bestJourney = destinationStopIds
-            .flatMap { stopId -> labelsByStop[stopId]?.values?.flatten().orEmpty() }
-            .minWithOrNull(
-                compareBy<JourneyState> { it.generalizedArrivalTime }
-                    .thenBy { it.arrivalTime }
-                    .thenBy { it.transferCount }
-            ) ?: return null
-
-        val steps = mutableListOf<JourneyStep>()
-        var current: JourneyState? = bestJourney
-        while (current != null) {
-            current.step?.let(steps::add)
-            current = current.previous
+        val candidates = uniqueDestinations.flatMap { destinationAccess ->
+            labelsByStop[destinationAccess.stopId]
+                ?.values
+                ?.flatMap { it.toList() }
+                .orEmpty()
+                .map { state ->
+                    JourneyCandidate(
+                        state = state,
+                        destinationAccess = destinationAccess,
+                        estimatedArrivalTime = state.generalizedArrivalTime +
+                            destinationAccess.walkingDurationSeconds,
+                        totalWalkingDistanceMeters = state.walkedDistanceMeters +
+                            destinationAccess.walkingDistanceMeters
+                    )
+                }
         }
-        steps.reverse()
+        val candidateComparator = compareBy<JourneyCandidate> { it.estimatedArrivalTime }
+            .thenBy { it.totalWalkingDistanceMeters }
+            .thenBy { it.state.transferCount }
+        val orderedCandidates = candidates.sortedWith(candidateComparator)
+        if (orderedCandidates.isEmpty()) {
+            return emptyList()
+        }
 
-        return CsaJourney(
-            departureTime = startTime,
-            arrivalTime = bestJourney.arrivalTime,
-            transferPenaltySeconds = bestJourney.transferCount * TRANSFER_PENALTY_SECONDS,
-            steps = steps
+        val selectedCandidates = orderedCandidates.take(maxResults).toMutableList()
+        val leastWalkingCandidate = candidates.minWithOrNull(
+            compareBy<JourneyCandidate> { it.totalWalkingDistanceMeters }
+                .thenBy { it.estimatedArrivalTime }
+                .thenBy { it.state.transferCount }
         )
+        if (
+            maxResults > 1 &&
+            leastWalkingCandidate != null &&
+            leastWalkingCandidate !in selectedCandidates
+        ) {
+            selectedCandidates[selectedCandidates.lastIndex] = leastWalkingCandidate
+        }
+
+        return selectedCandidates
+            .distinct()
+            .sortedWith(candidateComparator)
+            .map { candidate ->
+                val steps = mutableListOf<JourneyStep>()
+                var current: JourneyState? = candidate.state
+                while (current != null) {
+                    current.step?.let(steps::add)
+                    current = current.previous
+                }
+                steps.reverse()
+
+                CsaJourney(
+                    departureTime = startTime,
+                    arrivalTime = candidate.state.arrivalTime,
+                    transferPenaltySeconds =
+                        candidate.state.transferCount * TRANSFER_PENALTY_SECONDS,
+                    steps = steps,
+                    originAccess = candidate.state.originAccess,
+                    destinationAccess = candidate.destinationAccess,
+                    transferWalkingDistanceMeters =
+                        candidate.state.transferWalkingDistanceMeters
+                )
+            }
     }
+
+    private fun bestAccessByStop(accesses: List<StopAccess>): List<StopAccess> =
+        accesses.groupBy(StopAccess::stopId).values.map { options ->
+            options.minWithOrNull(
+                compareBy<StopAccess> { it.walkingDurationSeconds }
+                    .thenBy { it.walkingDistanceMeters }
+            ) ?: throw IllegalStateException("A stop access group cannot be empty.")
+        }
+
+    private data class JourneyCandidate(
+        val state: JourneyState,
+        val destinationAccess: StopAccess,
+        val estimatedArrivalTime: Long,
+        val totalWalkingDistanceMeters: Double
+    )
 
     private data class JourneyState(
         val stopId: String,
@@ -187,6 +305,10 @@ class CsaEngine @Inject constructor() {
         val readyTime: Int,
         val transferCount: Int,
         val lastTripId: String?,
+        val hasWalkedSinceTransit: Boolean,
+        val originAccess: StopAccess,
+        val walkedDistanceMeters: Double,
+        val transferWalkingDistanceMeters: Double,
         val previous: JourneyState?,
         val step: JourneyStep?
     ) {
@@ -196,10 +318,12 @@ class CsaEngine @Inject constructor() {
         fun dominates(other: JourneyState): Boolean =
             arrivalTime <= other.arrivalTime &&
                 readyTime <= other.readyTime &&
-                transferCount <= other.transferCount
+                transferCount <= other.transferCount &&
+                walkedDistanceMeters <= other.walkedDistanceMeters
     }
 
     private companion object {
         const val TRANSFER_PENALTY_SECONDS = 180
+        const val DEFAULT_MAX_RESULTS = 20
     }
 }

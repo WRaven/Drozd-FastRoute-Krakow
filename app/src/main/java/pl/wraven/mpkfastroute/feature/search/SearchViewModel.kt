@@ -17,9 +17,11 @@ import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.audio.RadioManager
 import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
+import pl.wraven.mpkfastroute.core.csa.FootpathGenerator
 import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
+import pl.wraven.mpkfastroute.core.csa.StopAccess
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
@@ -34,6 +36,7 @@ import pl.wraven.mpkfastroute.core.settings.AppPreferences
 
 data class SearchUiState(
     val stops: List<StopEntity> = emptyList(),
+    val recentStopSearches: List<String> = emptyList(),
     val originQuery: String = "",
     val destinationQuery: String = "",
     val originPlace: GeoPlace? = null,
@@ -46,11 +49,14 @@ data class SearchUiState(
     val destinationStop: StopEntity? = null,
     val originStopOptions: List<StopEntity> = emptyList(),
     val destinationStopOptions: List<StopEntity> = emptyList(),
+    val originStopManuallySelected: Boolean = false,
+    val destinationStopManuallySelected: Boolean = false,
     val homeStopId: String? = null,
     val workStopId: String? = null,
     val homePlace: GeoPlace? = null,
     val workPlace: GeoPlace? = null,
     val journey: CsaJourney? = null,
+    val journeyOptions: List<CsaJourney> = emptyList(),
     val liveDepartures: LiveDeparturesResult? = null,
     val isImporting: Boolean = false,
     val isSearching: Boolean = false,
@@ -98,8 +104,10 @@ class SearchViewModel @Inject constructor(
                 addressCandidates = emptyList(),
                 nearbyDestinationGroups = emptyList(),
                 journey = null,
+                journeyOptions = emptyList(),
                 liveDepartures = null,
-                statusMessage = null
+                statusMessage = null,
+                destinationStopManuallySelected = false
             )
         }
     }
@@ -114,8 +122,10 @@ class SearchViewModel @Inject constructor(
                 originAddressCandidates = emptyList(),
                 nearbyOriginGroups = emptyList(),
                 journey = null,
+                journeyOptions = emptyList(),
                 liveDepartures = null,
-                statusMessage = null
+                statusMessage = null,
+                originStopManuallySelected = false
             )
         }
     }
@@ -135,9 +145,12 @@ class SearchViewModel @Inject constructor(
                 originAddressCandidates = emptyList(),
                 nearbyOriginGroups = emptyList(),
                 journey = null,
+                journeyOptions = emptyList(),
+                originStopManuallySelected = true,
                 liveDepartures = null
             )
         }
+        recordRecentStopSearch(group.name)
     }
 
     fun useCurrentLocation() {
@@ -145,6 +158,12 @@ class SearchViewModel @Inject constructor(
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
             try {
                 val origin = contextEngine.findCurrentOrigin()
+                val allStops = mutableUiState.value.stops.ifEmpty {
+                    database.stopDao().getAll()
+                }
+                val nearbyGroups = withContext(Dispatchers.Default) {
+                    nearbyStopGroups(allStops, origin.place)
+                }
                 mutableUiState.update {
                     it.copy(
                         originQuery = "",
@@ -152,8 +171,10 @@ class SearchViewModel @Inject constructor(
                         originStop = origin.stop,
                         originStopOptions = origin.stopOptions,
                         originAddressCandidates = emptyList(),
-                        nearbyOriginGroups = emptyList(),
+                        nearbyOriginGroups = nearbyGroups,
                         journey = null,
+                        journeyOptions = emptyList(),
+                        originStopManuallySelected = false,
                         liveDepartures = null
                     )
                 }
@@ -194,6 +215,8 @@ class SearchViewModel @Inject constructor(
                             originStopOptions = emptyList(),
                             nearbyOriginGroups = emptyList(),
                             journey = null,
+                            journeyOptions = emptyList(),
+                            originStopManuallySelected = false,
                             liveDepartures = null
                         )
                     }
@@ -222,6 +245,8 @@ class SearchViewModel @Inject constructor(
                     originStop = null,
                     originStopOptions = emptyList(),
                     journey = null,
+                    journeyOptions = emptyList(),
+                    originStopManuallySelected = false,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
@@ -248,9 +273,12 @@ class SearchViewModel @Inject constructor(
                 addressCandidates = emptyList(),
                 nearbyDestinationGroups = emptyList(),
                 journey = null,
+                journeyOptions = emptyList(),
+                destinationStopManuallySelected = true,
                 liveDepartures = null
             )
         }
+        recordRecentStopSearch(group.name)
     }
 
     fun searchDestinationAddress() {
@@ -274,6 +302,8 @@ class SearchViewModel @Inject constructor(
                             destinationStopOptions = emptyList(),
                             nearbyDestinationGroups = emptyList(),
                             journey = null,
+                            journeyOptions = emptyList(),
+                            destinationStopManuallySelected = false,
                             liveDepartures = null
                         )
                     }
@@ -302,6 +332,8 @@ class SearchViewModel @Inject constructor(
                     destinationStop = null,
                     destinationStopOptions = emptyList(),
                     journey = null,
+                    journeyOptions = emptyList(),
+                    destinationStopManuallySelected = false,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
@@ -315,50 +347,94 @@ class SearchViewModel @Inject constructor(
 
     fun searchRoute() {
         val state = mutableUiState.value
-        val origin = state.originStop
-        val destination = state.destinationStop
-        val originOptions = state.originStopOptions.ifEmpty { listOfNotNull(origin) }
-        val destinationOptions = state.destinationStopOptions.ifEmpty { listOfNotNull(destination) }
-        if (originOptions.isEmpty() || destinationOptions.isEmpty()) {
-            showMessage("Ustaw przystanek początkowy i docelowy.")
+        val originPlace = state.originPlace ?: state.originStop?.let(::placeForStop)
+        val destinationPlace = state.destinationPlace ?: state.destinationStop?.let(::placeForStop)
+        if (originPlace == null || destinationPlace == null) {
+            showMessage("Ustaw lokalizację początkową i adres lub przystanek docelowy.")
+            return
+        }
+
+        val originAccesses = buildStopAccesses(
+            place = originPlace,
+            selectedStops = state.originStopOptions.ifEmpty {
+                listOfNotNull(state.originStop)
+            },
+            nearbyGroups = state.nearbyOriginGroups,
+            allStops = state.stops,
+            manuallySelected = state.originStopManuallySelected
+        )
+        val destinationAccesses = buildStopAccesses(
+            place = destinationPlace,
+            selectedStops = state.destinationStopOptions.ifEmpty {
+                listOfNotNull(state.destinationStop)
+            },
+            nearbyGroups = state.nearbyDestinationGroups,
+            allStops = state.stops,
+            manuallySelected = state.destinationStopManuallySelected
+        )
+        if (originAccesses.isEmpty()) {
+            showMessage("Nie znaleziono przystanków w promieniu 1,5 km od początku trasy.")
+            return
+        }
+        if (destinationAccesses.isEmpty()) {
+            showMessage("Nie znaleziono przystanków w promieniu 1,5 km od celu.")
             return
         }
 
         viewModelScope.launch {
-            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+            mutableUiState.update {
+                it.copy(
+                    isSearching = true,
+                    statusMessage = null,
+                    journey = null,
+                    journeyOptions = emptyList(),
+                    liveDepartures = null
+                )
+            }
             try {
                 val now = LocalDateTime.now()
                 val serviceTime = GtfsServiceClock.from(now)
-                val journey = routePlanner.findEarliestJourney(
-                    originStopIds = originOptions.mapTo(mutableSetOf()) { it.stopId },
-                    destinationStopIds = destinationOptions.mapTo(mutableSetOf()) { it.stopId },
-                    serviceDate = serviceTime.serviceDate,
-                    startTimeSeconds = serviceTime.timeSeconds
-                )
-                val transitSteps = journey?.steps?.filterIsInstance<JourneyStep.Transit>().orEmpty()
-                val selectedOrigin = transitSteps.firstOrNull()
-                    ?.connection
-                    ?.departureStopId
-                    ?.let { database.stopDao().getById(it) }
-                    ?: originOptions.first()
-                val selectedDestination = transitSteps.lastOrNull()
-                    ?.connection
-                    ?.arrivalStopId
-                    ?.let { database.stopDao().getById(it) }
-                    ?: destinationOptions.first()
-                val liveDepartures = ttssDepartureRepository.getDepartures(
-                    stopId = selectedOrigin.stopId,
+                val candidates = routePlanner.findJourneys(
+                    originAccesses = originAccesses,
+                    destinationAccesses = destinationAccesses,
                     serviceDate = serviceTime.serviceDate,
                     startTimeSeconds = serviceTime.timeSeconds,
-                    nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                    maxResults = MAX_CSA_JOURNEY_CANDIDATES
                 )
+                val journeyOptions = selectRouteAlternatives(candidates)
+                val fastestJourney = journeyOptions.firstOrNull()
+                val transitSteps = fastestJourney?.steps
+                    ?.filterIsInstance<JourneyStep.Transit>()
+                    .orEmpty()
+                val stopsById = state.stops.associateBy(StopEntity::stopId)
+                val firstTransitStopId = transitSteps.firstOrNull()
+                    ?.connection
+                    ?.departureStopId
+                val lastTransitStopId = transitSteps.lastOrNull()
+                    ?.connection
+                    ?.arrivalStopId
+                val selectedOrigin = firstTransitStopId?.let(stopsById::get)
+                    ?: fastestJourney?.originAccess?.stopId?.let(stopsById::get)
+                    ?: state.originStop
+                val selectedDestination = lastTransitStopId?.let(stopsById::get)
+                    ?: fastestJourney?.destinationAccess?.stopId?.let(stopsById::get)
+                    ?: state.destinationStop
+                val liveDepartures = firstTransitStopId?.let { stopId ->
+                    ttssDepartureRepository.getDepartures(
+                        stopId = stopId,
+                        serviceDate = serviceTime.serviceDate,
+                        startTimeSeconds = serviceTime.timeSeconds,
+                        nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                    )
+                }
                 mutableUiState.update {
                     it.copy(
                         originStop = selectedOrigin,
                         destinationStop = selectedDestination,
-                        journey = journey,
+                        journey = fastestJourney,
+                        journeyOptions = journeyOptions,
                         liveDepartures = liveDepartures,
-                        statusMessage = if (journey == null) {
+                        statusMessage = if (fastestJourney == null) {
                             "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
                         } else {
                             null
@@ -496,6 +572,11 @@ class SearchViewModel @Inject constructor(
                 mutableUiState.update { it.copy(lastSelectedRadioIndex = index) }
             }
         }
+        viewModelScope.launch {
+            appPreferences.recentStopSearches.collect { searches ->
+                mutableUiState.update { it.copy(recentStopSearches = searches) }
+            }
+        }
     }
 
     private fun ensureScheduleImported() {
@@ -583,6 +664,90 @@ class SearchViewModel @Inject constructor(
             )
         } ?: throw IllegalStateException("A stop group cannot be empty.")
 
+    private fun buildStopAccesses(
+        place: GeoPlace,
+        selectedStops: List<StopEntity>,
+        nearbyGroups: List<StopGroup>,
+        allStops: List<StopEntity>,
+        manuallySelected: Boolean
+    ): List<StopAccess> {
+        val candidates = if (manuallySelected) {
+            selectedStops
+        } else {
+            val groups = nearbyGroups.ifEmpty { nearbyStopGroups(allStops, place) }
+            groups.flatMap(StopGroup::stops)
+        }
+
+        return candidates.distinctBy(StopEntity::stopId).mapNotNull { stop ->
+            val distanceMeters = Haversine.distanceMeters(
+                place.latitude,
+                place.longitude,
+                stop.stopLat,
+                stop.stopLon
+            )
+            if (!manuallySelected && distanceMeters > MAX_AUTO_STOP_ACCESS_METERS) {
+                return@mapNotNull null
+            }
+            StopAccess(
+                stopId = stop.stopId,
+                walkingDistanceMeters = distanceMeters,
+                walkingDurationSeconds =
+                    FootpathGenerator.walkingDurationSeconds(distanceMeters)
+            )
+        }
+    }
+
+    private fun placeForStop(stop: StopEntity): GeoPlace = GeoPlace(
+        label = StopNameGrouper.mainName(stop.stopName),
+        latitude = stop.stopLat,
+        longitude = stop.stopLon
+    )
+
+    private fun selectRouteAlternatives(candidates: List<CsaJourney>): List<CsaJourney> {
+        val ordered = candidates
+            .distinctBy(::routeSignature)
+            .sortedWith(
+                compareBy<CsaJourney> { it.totalDurationSeconds }
+                    .thenBy { it.totalWalkingDistanceMeters }
+                    .thenBy { it.transferPenaltySeconds }
+            )
+        val fastest = ordered.firstOrNull() ?: return emptyList()
+        val leastWalking = ordered.minWithOrNull(
+            compareBy<CsaJourney> { it.totalWalkingDistanceMeters }
+                .thenBy { it.totalDurationSeconds }
+                .thenBy { it.transferPenaltySeconds }
+        ) ?: return listOf(fastest)
+
+        return buildList {
+            add(fastest)
+            if (routeSignature(leastWalking) != routeSignature(fastest)) {
+                add(leastWalking)
+            }
+            ordered.forEach { journey ->
+                if (none { routeSignature(it) == routeSignature(journey) }) {
+                    add(journey)
+                }
+            }
+        }.take(MAX_DISPLAYED_ROUTE_OPTIONS)
+    }
+
+    private fun routeSignature(journey: CsaJourney): String {
+        val tripIds = journey.steps
+            .filterIsInstance<JourneyStep.Transit>()
+            .joinToString(separator = ",") { it.connection.tripId }
+        return "${journey.originAccess.stopId}|$tripIds|${journey.destinationAccess.stopId}"
+    }
+
+    private fun recordRecentStopSearch(stopName: String) {
+        viewModelScope.launch {
+            try {
+                appPreferences.recordStopSearch(stopName)
+            } catch (exception: IOException) {
+                showMessage("Nie udało się zapisać historii przystanków: ${exception.message.orEmpty()}")
+            }
+        }
+    }
+
     private fun runContextAction(destination: SavedDestination) {
         viewModelScope.launch {
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
@@ -629,6 +794,9 @@ class SearchViewModel @Inject constructor(
                     nearbyOriginGroups = emptyList(),
                     nearbyDestinationGroups = emptyList(),
                     journey = result.journey,
+                    journeyOptions = emptyList(),
+                    originStopManuallySelected = false,
+                    destinationStopManuallySelected = false,
                     liveDepartures = null,
                     statusMessage = null
                 )
@@ -652,5 +820,8 @@ class SearchViewModel @Inject constructor(
 
     private companion object {
         const val MAX_NEARBY_STOPS = 6
+        const val MAX_AUTO_STOP_ACCESS_METERS = 1_500.0
+        const val MAX_CSA_JOURNEY_CANDIDATES = 20
+        const val MAX_DISPLAYED_ROUTE_OPTIONS = 3
     }
 }

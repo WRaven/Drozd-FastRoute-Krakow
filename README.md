@@ -10,8 +10,8 @@ the architecture and phases in the project specification.
   calendars, and date exceptions. The importer downloads the official Kraków
   feed and replaces its data transactionally in batches.
 - The route planner filters services for the requested date, scans departures
-  within a two-hour window, applies a three-minute transfer penalty, and
-  includes walking transfers between stops within 150 meters.
+  within a two-hour window, requires at least three minutes when changing
+  vehicles, and includes walking transfers between stops up to 500 meters.
 - The TTSS client maps stops by stop code or supplied normalized stop-name
   mapping, applies reported delay to static departures, and returns explicitly
   marked static estimates when live data is unavailable.
@@ -22,11 +22,19 @@ the architecture and phases in the project specification.
   nearby stops for quick routing, already-at-destination detection, and random
   destinations. Existing saved stop IDs remain supported.
 - Compose provides first-run GTFS import progress, a current-location or
-  typed-address/name origin, address search with nearby stop selection, grouped
-  stop names with automatic platform selection for the selected route,
+  typed-address/name origin, address search with automatic stop selection and
+  an optional "Wybierz przystanek" control, grouped stop names with automatic
+  platform selection for the selected route,
   home/work/radio/random quick actions, and manual schedule refresh.
+- Address routes compare up to six nearby stop-name groups within 1.5 km.
+  Walking to the first stop, between transfer stops, and from the final stop
+  is included in door-to-door arrival estimates; results include the fastest
+  option and a lower-walking alternative. Distances are Haversine estimates
+  at 4.5 km/h, not pedestrian-road directions.
 - Stop codes remain available internally for TTSS mapping and stop matching,
   but are not shown in user-facing stop labels.
+- Stop-name search ignores Polish diacritics and suggests up to three
+  recently selected stop names from either search field.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 
@@ -72,5 +80,7 @@ The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
 
 Debug APKs attached to CI runs are for testing only; they use Android's debug
-signature and cannot be installed as updates to the stable, release-signed APK.
-Use APKs from GitHub Releases when verifying in-place updates.
+signature, use the separate `pl.wraven.mpkfastroute.debug` package, and appear
+as "MPK Kraków FastRoute (test)". They can be installed alongside the regular
+app, but cannot update its data or package. Use APKs from GitHub Releases when
+verifying in-place updates.

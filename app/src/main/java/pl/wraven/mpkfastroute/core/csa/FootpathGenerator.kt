@@ -34,9 +34,9 @@ class FootpathGenerator @Inject constructor() {
                     for (neighbor in buckets[neighborCell].orEmpty()) {
                         val distance = Haversine.distanceMeters(stop, neighbor)
                         if (distance <= MAX_DISTANCE_METERS) {
-                            val duration = ceil(distance / WALK_SPEED_METERS_PER_SECOND).toInt()
-                            result += Footpath(stop.stopId, neighbor.stopId, duration)
-                            result += Footpath(neighbor.stopId, stop.stopId, duration)
+                            val duration = walkingDurationSeconds(distance)
+                            result += Footpath(stop.stopId, neighbor.stopId, duration, distance)
+                            result += Footpath(neighbor.stopId, stop.stopId, duration, distance)
                         }
                     }
                 }
@@ -58,11 +58,18 @@ class FootpathGenerator @Inject constructor() {
 
     private data class GridCell(val latitude: Int, val longitude: Int)
 
-    private companion object {
-        const val MAX_DISTANCE_METERS = 150.0
+    companion object {
+        const val MAX_DISTANCE_METERS = 500.0
         const val METERS_PER_LATITUDE_DEGREE = 110_000.0
         const val WALK_SPEED_METERS_PER_SECOND = 1.25
         const val MIN_LONGITUDE_SCALE = 0.01
+
+        fun walkingDurationSeconds(distanceMeters: Double): Int {
+            require(distanceMeters.isFinite() && distanceMeters >= 0.0) {
+                "Walking distance must be finite and non-negative."
+            }
+            return ceil(distanceMeters / WALK_SPEED_METERS_PER_SECOND).toInt()
+        }
     }
 }
 
