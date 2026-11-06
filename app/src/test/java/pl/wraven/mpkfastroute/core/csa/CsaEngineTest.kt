@@ -215,6 +215,29 @@ class CsaEngineTest {
     }
 
     @Test
+    fun scheduledArrivalSelectsLatestJourneyBeforeDeadline() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("A", "B", 100, 200, "early-trip"),
+                connection("A", "B", 300, 480, "near-deadline-trip"),
+                connection("A", "B", 400, 550, "late-trip")
+            ),
+            footpaths = emptyList(),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("B", 0.0, 0)),
+            startTime = 100,
+            maxResults = 1,
+            arrivalDeadline = 500
+        )
+
+        assertEquals(1, journeys.size)
+        assertEquals(480, journeys.single().estimatedArrivalTime)
+        val selectedConnection =
+            (journeys.single().steps.single() as? JourneyStep.Transit)?.connection
+        assertEquals("near-deadline-trip", selectedConnection?.tripId)
+    }
+
+    @Test
     fun returnsEmptyJourneyWhenAlreadyAtDestination() {
         val journey = engine.findEarliestJourney(
             connections = emptyList(),

@@ -84,6 +84,7 @@ data class SearchUiState(
     val statusMessage: String? = null,
     val radioStations: List<RadioStation> = RadioStations.all,
     val lastSelectedRadioId: String? = RadioStations.all.firstOrNull()?.id,
+    val isRadioPlaying: Boolean = false,
     val isCheckingUpdates: Boolean = false,
     val updateCheckMessage: String? = null,
     val updateCheckResult: UpdateCheckResult? = null
@@ -785,6 +786,11 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             radioPreferences.lastSelectedRadioId.collect { id ->
                 mutableUiState.update { it.copy(lastSelectedRadioId = id) }
+            }
+        }
+        viewModelScope.launch {
+            radioManager.isPlaying.collect { isPlaying ->
+                mutableUiState.update { it.copy(isRadioPlaying = isPlaying) }
             }
         }
         viewModelScope.launch {

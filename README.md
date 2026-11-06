@@ -46,7 +46,8 @@ the architecture and phases in the project specification.
   recently selected stop names from either search field.
 - Settings can check the latest public GitHub release, open its release page,
   edit home/work arrival schedules, and contact the author. Radio settings
-  support adding, editing, and removing stream entries.
+  support adding, editing, and removing stream entries; the radio action
+  toggles between starting and stopping playback.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 - Settings include an in-memory, bounded search diagnostic log with copy and

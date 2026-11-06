@@ -21,9 +21,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -194,8 +197,13 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onSetHome = { requestScheduleSetup(SavedDestination.HOME) },
                 onSetWork = { requestScheduleSetup(SavedDestination.WORK) },
                 onCustomRoute = viewModel::routeCustom,
-                onPlayRadio = viewModel::playLastSelectedRadio,
-                onStopRadio = viewModel::stopRadio,
+                onToggleRadio = {
+                    if (state.isRadioPlaying) {
+                        viewModel.stopRadio()
+                    } else {
+                        viewModel.playLastSelectedRadio()
+                    }
+                },
                 onChooseRadio = { radioSelectionVisible = true },
                 onManageRadio = { radioManagementVisible = true },
                 onSaveCustomRoute = viewModel::saveCurrentRouteAsCustom,
@@ -351,21 +359,32 @@ private fun SearchContent(
     onSetHome: () -> Unit,
     onSetWork: () -> Unit,
     onCustomRoute: () -> Unit,
-    onPlayRadio: () -> Unit,
-    onStopRadio: () -> Unit,
+    onToggleRadio: () -> Unit,
     onChooseRadio: () -> Unit,
     onManageRadio: () -> Unit,
     onSaveCustomRoute: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
+    val destinationSuggestionsRequester = remember { BringIntoViewRequester() }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
     var showDestinationStopPicker by remember(state.destinationPlace) {
         mutableStateOf(false)
     }
 
+    LaunchedEffect(
+        state.destinationQuery,
+        state.addressCandidates,
+        state.isSearchingDestinationAddresses
+    ) {
+        if (state.destinationPlace == null && state.destinationQuery.length >= 2) {
+            destinationSuggestionsRequester.bringIntoView()
+        }
+    }
+
     Column(
         modifier = modifier
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -410,11 +429,14 @@ private fun SearchContent(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Button(
-                        onClick = onPlayRadio,
+                        onClick = onToggleRadio,
                         enabled = !state.isSearching,
                         modifier = Modifier.weight(1f)
                     ) {
-                        Text("▶ Uruchom radio")
+                        Text(
+                            if (state.isRadioPlaying) "■ Zatrzymaj radio"
+                            else "▶ Uruchom radio"
+                        )
                     }
                     Spacer(Modifier.width(8.dp))
                     TextButton(onClick = onChooseRadio) {
@@ -423,9 +445,6 @@ private fun SearchContent(
                                 .firstOrNull { it.id == state.lastSelectedRadioId }
                                 ?.name ?: "Wybierz"
                         )
-                    }
-                    TextButton(onClick = onStopRadio) {
-                        Text("⏹")
                     }
                     TextButton(onClick = onManageRadio) {
                         Text("⚙")
@@ -551,18 +570,6 @@ private fun SearchContent(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
-                if (state.destinationPlace == null) {
-                    AddressSuggestionPicker(
-                        query = state.destinationQuery,
-                        recentPlaces = state.recentAddressPlaces,
-                        candidates = state.addressCandidates,
-                        isSearching = state.isSearchingDestinationAddresses,
-                        onSelect = onSelectAddress
-                    )
-                    state.destinationAddressSearchError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
-                }
                 if (state.destinationPlace != null) {
                     if (!state.destinationStopManuallySelected) {
                         TextButton(
@@ -595,12 +602,29 @@ private fun SearchContent(
                         }
                     }
                 } else {
-                    StopGroupPicker(
-                        query = state.destinationQuery,
-                        groups = stopGroups,
-                        recentStopNames = state.recentStopSearches,
-                        onSelectGroup = onSelectDestination
-                    )
+                    Column(
+                        modifier = Modifier.bringIntoViewRequester(
+                            destinationSuggestionsRequester
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        AddressSuggestionPicker(
+                            query = state.destinationQuery,
+                            recentPlaces = state.recentAddressPlaces,
+                            candidates = state.addressCandidates,
+                            isSearching = state.isSearchingDestinationAddresses,
+                            onSelect = onSelectAddress
+                        )
+                        state.destinationAddressSearchError?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
+                        StopGroupPicker(
+                            query = state.destinationQuery,
+                            groups = stopGroups,
+                            recentStopNames = state.recentStopSearches,
+                            onSelectGroup = onSelectDestination
+                        )
+                    }
                 }
                 state.destinationStop?.let { stop ->
                     Text(

@@ -3,6 +3,7 @@ package pl.wraven.mpkfastroute.core.audio
 import android.content.Context
 import android.content.ComponentName
 import android.content.Intent
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
@@ -11,7 +12,10 @@ import java.util.concurrent.ExecutionException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -20,6 +24,15 @@ class RadioManager @Inject constructor(
     private val radioPreferences: RadioPreferences
 ) {
     private val controllerLock = Any()
+    private val mutableIsPlaying = MutableStateFlow(false)
+    val isPlaying: StateFlow<Boolean> = mutableIsPlaying.asStateFlow()
+
+    private var observedController: MediaController? = null
+    private val playbackListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            mutableIsPlaying.value = isPlaying
+        }
+    }
 
     @Volatile
     private var mediaControllerFuture: ListenableFuture<MediaController>? = null
@@ -54,7 +67,8 @@ class RadioManager @Inject constructor(
         )
         val future = getOrCreateControllerFuture()
         try {
-            withContext(Dispatchers.IO) { future.get() }
+            val controller = withContext(Dispatchers.IO) { future.get() }
+            observePlayback(future, controller)
         } catch (exception: ExecutionException) {
             releaseControllerFuture(future)
             throw IllegalStateException(
@@ -73,10 +87,30 @@ class RadioManager @Inject constructor(
             Intent(context, RadioService::class.java).setAction(RadioService.ACTION_STOP)
         )
         val future = synchronized(controllerLock) {
+            observedController?.removeListener(playbackListener)
+            observedController = null
+            mutableIsPlaying.value = false
             mediaControllerFuture.also { mediaControllerFuture = null }
         }
         if (future != null) {
             MediaController.releaseFuture(future)
+        }
+    }
+
+    private fun observePlayback(
+        future: ListenableFuture<MediaController>,
+        controller: MediaController
+    ) {
+        synchronized(controllerLock) {
+            if (mediaControllerFuture !== future) {
+                return
+            }
+            if (observedController !== controller) {
+                observedController?.removeListener(playbackListener)
+                observedController = controller
+                controller.addListener(playbackListener)
+            }
+            mutableIsPlaying.value = controller.isPlaying
         }
     }
 

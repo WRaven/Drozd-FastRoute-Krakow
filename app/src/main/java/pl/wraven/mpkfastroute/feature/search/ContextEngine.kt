@@ -150,6 +150,7 @@ class ContextEngine @Inject constructor(
         val searchWindowSeconds = arrivalTarget?.let {
             Duration.between(searchStart, it).seconds.toInt()
         } ?: DEFAULT_SEARCH_WINDOW_SECONDS
+        val arrivalDeadline = serviceTime.timeSeconds + searchWindowSeconds
         val originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId }
         val destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId }
         val candidateJourneys = if (arrivalTarget == null) {
@@ -169,16 +170,15 @@ class ContextEngine @Inject constructor(
                 serviceDate = serviceTime.serviceDate,
                 startTimeSeconds = serviceTime.timeSeconds,
                 searchWindowSeconds = searchWindowSeconds,
-                maxResults = MAX_SCHEDULED_JOURNEYS
+                maxResults = 1,
+                arrivalDeadline = arrivalDeadline
             )
         }
-        val arrivalDeadline = serviceTime.timeSeconds + searchWindowSeconds
         val journey = if (arrivalTarget == null) {
             candidateJourneys.firstOrNull()
         } else {
             candidateJourneys
-                .filter { it.estimatedArrivalTime <= arrivalDeadline }
-                .maxByOrNull(CsaJourney::estimatedArrivalTime)
+                .firstOrNull()
                 ?.let { candidate ->
                     val firstTransit = candidate.steps
                         .filterIsInstance<JourneyStep.Transit>()
@@ -242,6 +242,5 @@ class ContextEngine @Inject constructor(
         const val ALREADY_THERE_DISTANCE_METERS = 100.0
         const val DEFAULT_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
         const val MAX_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
-        const val MAX_SCHEDULED_JOURNEYS = 100
     }
 }

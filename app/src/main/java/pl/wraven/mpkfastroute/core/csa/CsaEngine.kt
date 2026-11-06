@@ -91,12 +91,16 @@ class CsaEngine @Inject constructor() {
         destinationAccesses: List<StopAccess>,
         startTime: Int,
         maxResults: Int = DEFAULT_MAX_RESULTS,
+        arrivalDeadline: Int? = null,
         onProgress: (CsaProgress) -> Unit = {}
     ): List<CsaJourney> {
         require(startTime >= 0) { "Start time must not be negative." }
         require(originAccesses.isNotEmpty()) { "At least one origin stop is required." }
         require(destinationAccesses.isNotEmpty()) { "At least one destination stop is required." }
         require(maxResults > 0) { "At least one journey result is required." }
+        require(arrivalDeadline == null || arrivalDeadline >= startTime) {
+            "Arrival deadline must not be before the search start."
+        }
         require(connections.all { it.departureTime >= 0 && it.arrivalTime >= it.departureTime }) {
             "Connections must have non-negative, ordered times."
         }
@@ -275,16 +279,27 @@ class CsaEngine @Inject constructor() {
                     )
                 }
         }
-        val candidateComparator = compareBy<JourneyCandidate> { it.estimatedArrivalTime }
-            .thenBy { it.totalWalkingDistanceMeters }
-            .thenBy { it.state.transferCount }
-        val orderedCandidates = candidates.sortedWith(candidateComparator)
+        val eligibleCandidates = candidates.filter { candidate ->
+            arrivalDeadline == null ||
+                candidate.estimatedArrivalTime <= arrivalDeadline.toLong()
+        }
+        val candidateComparator: Comparator<JourneyCandidate> =
+            if (arrivalDeadline == null) {
+                compareBy<JourneyCandidate> { it.estimatedArrivalTime }
+                    .thenBy { it.totalWalkingDistanceMeters }
+                    .thenBy { it.state.transferCount }
+            } else {
+                compareByDescending<JourneyCandidate> { it.estimatedArrivalTime }
+                    .thenBy { it.totalWalkingDistanceMeters }
+                    .thenBy { it.state.transferCount }
+            }
+        val orderedCandidates = eligibleCandidates.sortedWith(candidateComparator)
         if (orderedCandidates.isEmpty()) {
             return emptyList()
         }
 
         val selectedCandidates = orderedCandidates.take(maxResults).toMutableList()
-        val leastWalkingCandidate = candidates.minWithOrNull(
+        val leastWalkingCandidate = eligibleCandidates.minWithOrNull(
             compareBy<JourneyCandidate> { it.totalWalkingDistanceMeters }
                 .thenBy { it.estimatedArrivalTime }
                 .thenBy { it.state.transferCount }

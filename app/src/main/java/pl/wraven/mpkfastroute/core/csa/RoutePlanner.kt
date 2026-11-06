@@ -56,12 +56,16 @@ class RoutePlanner @Inject constructor(
         serviceDate: LocalDate,
         startTimeSeconds: Int,
         searchWindowSeconds: Int = DEFAULT_SEARCH_WINDOW_SECONDS,
-        maxResults: Int = DEFAULT_MAX_RESULTS
+        maxResults: Int = DEFAULT_MAX_RESULTS,
+        arrivalDeadline: Int? = null
     ): List<CsaJourney> {
         require(startTimeSeconds >= 0) { "Start time must not be negative." }
         require(originAccesses.isNotEmpty()) { "At least one origin stop is required." }
         require(destinationAccesses.isNotEmpty()) { "At least one destination stop is required." }
         require(maxResults > 0) { "At least one journey result is required." }
+        require(arrivalDeadline == null || arrivalDeadline >= startTimeSeconds) {
+            "Arrival deadline must not be before the search start."
+        }
         require(searchWindowSeconds in 1..MAX_SEARCH_WINDOW_SECONDS) {
             "Search window must be between 1 second and 2 hours."
         }
@@ -152,6 +156,7 @@ class RoutePlanner @Inject constructor(
                 destinationAccesses = destinationAccesses,
                 startTime = startTimeSeconds,
                 maxResults = maxResults,
+                arrivalDeadline = arrivalDeadline,
                 onProgress = { progress ->
                     diagnostics.record(
                         "CSA: ${progress.scannedConnections}/${progress.totalConnections} " +
