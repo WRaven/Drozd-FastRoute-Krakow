@@ -452,6 +452,9 @@ private fun SearchContent(
                 Text("Zapisz jako pracę")
             }
         }
+        state.routeSearchMessage?.let { message ->
+            Text(message, color = MaterialTheme.colorScheme.error)
+        }
 
         val leastWalkingIndex = state.journeyOptions.indices.minByOrNull { index ->
             state.journeyOptions[index].totalWalkingDistanceMeters

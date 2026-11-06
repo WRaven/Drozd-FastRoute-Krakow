@@ -1,7 +1,10 @@
 package pl.wraven.mpkfastroute.core.gtfs
 
+import android.content.Context
 import androidx.room.withTransaction
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.BufferedReader
+import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -26,103 +29,165 @@ import pl.wraven.mpkfastroute.core.database.TripEntity
 const val GTFS_KRAKOW_URL = "https://gtfs.ztp.krakow.pl/GTFS_KRK.zip"
 
 private const val BATCH_SIZE = 5_000
+private const val PROGRESS_BATCH_SIZE = 50_000
+private const val DOWNLOAD_PROGRESS_INTERVAL_BYTES = 5_000_000L
 private const val CONNECT_TIMEOUT_MILLIS = 30_000
 private const val READ_TIMEOUT_MILLIS = 120_000
 
 class GtfsZipParser @Inject constructor(
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    @param:ApplicationContext private val context: Context
 ) {
     suspend fun importSchedule(
         onProgress: (String) -> Unit = {}
     ) = withContext(Dispatchers.IO) {
         onProgress("Pobieranie rozkładu ZTP Kraków...")
-        val archive = downloadArchive()
-
-        onProgress("Indeksowanie bazy...")
-        val stops = mutableListOf<StopEntity>()
-        val routes = mutableListOf<RouteEntity>()
-        val trips = mutableListOf<TripEntity>()
-        val calendars = mutableListOf<ServiceCalendarEntity>()
-        val calendarDates = mutableListOf<CalendarDateEntity>()
-        readLookupTables(archive, stops, routes, trips, calendars, calendarDates)
-
-        require(stops.isNotEmpty()) { "GTFS archive contains no stops." }
-        require(routes.isNotEmpty()) { "GTFS archive contains no routes." }
-        require(trips.isNotEmpty()) { "GTFS archive contains no trips." }
-        require(calendars.isNotEmpty() || calendarDates.isNotEmpty()) {
-            "GTFS archive contains no service calendar data."
-        }
-
-        val stopIds = stops.mapTo(HashSet(stops.size)) { it.stopId }
-        val tripIds = trips.mapTo(HashSet(trips.size)) { it.tripId }
-        val sqliteDatabase = database.openHelper.writableDatabase
-        sqliteDatabase.execSQL("PRAGMA foreign_keys = OFF")
-
+        val archive = downloadArchive(onProgress)
         try {
-            database.withTransaction {
-                val stopDao = database.stopDao()
-                val routeDao = database.routeDao()
-                val tripDao = database.tripDao()
-                val calendarDao = database.serviceCalendarDao()
-                val stopTimeDao = database.stopTimeDao()
+            onProgress("Odczytywanie przystanków, tras i kalendarza...")
+            val stops = mutableListOf<StopEntity>()
+            val routes = mutableListOf<RouteEntity>()
+            val trips = mutableListOf<TripEntity>()
+            val calendars = mutableListOf<ServiceCalendarEntity>()
+            val calendarDates = mutableListOf<CalendarDateEntity>()
+            readLookupTables(archive, stops, routes, trips, calendars, calendarDates)
 
-                stopTimeDao.deleteAll()
-                tripDao.deleteAll()
-                routeDao.deleteAll()
-                stopDao.deleteAll()
-                calendarDao.deleteAllExceptions()
-                calendarDao.deleteAll()
-
-                for (batch in stops.chunked(BATCH_SIZE)) {
-                    stopDao.insertAll(batch)
-                }
-                for (batch in routes.chunked(BATCH_SIZE)) {
-                    routeDao.insertAll(batch)
-                }
-                for (batch in trips.chunked(BATCH_SIZE)) {
-                    tripDao.insertAll(batch)
-                }
-                for (batch in calendars.chunked(BATCH_SIZE)) {
-                    calendarDao.insertAll(batch)
-                }
-                for (batch in calendarDates.chunked(BATCH_SIZE)) {
-                    calendarDao.insertAllExceptions(batch)
-                }
-
-                val stopTimeCount = readStopTimes(archive, stopIds, tripIds, stopTimeDao::insertAll)
-                check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
+            require(stops.isNotEmpty()) { "GTFS archive contains no stops." }
+            require(routes.isNotEmpty()) { "GTFS archive contains no routes." }
+            require(trips.isNotEmpty()) { "GTFS archive contains no trips." }
+            require(calendars.isNotEmpty() || calendarDates.isNotEmpty()) {
+                "GTFS archive contains no service calendar data."
             }
+
+            val stopIds = stops.mapTo(HashSet(stops.size)) { it.stopId }
+            val tripIds = trips.mapTo(HashSet(trips.size)) { it.tripId }
+            val sqliteDatabase = database.openHelper.writableDatabase
+            sqliteDatabase.execSQL("PRAGMA foreign_keys = OFF")
+
+            try {
+                onProgress("Zapisywanie danych i indeksowanie bazy...")
+                database.withTransaction {
+                    val stopDao = database.stopDao()
+                    val routeDao = database.routeDao()
+                    val tripDao = database.tripDao()
+                    val calendarDao = database.serviceCalendarDao()
+                    val stopTimeDao = database.stopTimeDao()
+
+                    stopTimeDao.deleteAll()
+                    tripDao.deleteAll()
+                    routeDao.deleteAll()
+                    stopDao.deleteAll()
+                    calendarDao.deleteAllExceptions()
+                    calendarDao.deleteAll()
+
+                    for (batch in stops.chunked(BATCH_SIZE)) {
+                        stopDao.insertAll(batch)
+                    }
+                    for (batch in routes.chunked(BATCH_SIZE)) {
+                        routeDao.insertAll(batch)
+                    }
+                    for (batch in trips.chunked(BATCH_SIZE)) {
+                        tripDao.insertAll(batch)
+                    }
+                    for (batch in calendars.chunked(BATCH_SIZE)) {
+                        calendarDao.insertAll(batch)
+                    }
+                    for (batch in calendarDates.chunked(BATCH_SIZE)) {
+                        calendarDao.insertAllExceptions(batch)
+                    }
+
+                    val stopTimeCount = readStopTimes(
+                        archive = archive,
+                        stopIds = stopIds,
+                        tripIds = tripIds,
+                        insertBatch = stopTimeDao::insertAll
+                    ) { count ->
+                        onProgress("Importowanie połączeń: $count")
+                    }
+                    check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
+                }
+            } finally {
+                sqliteDatabase.execSQL("PRAGMA foreign_keys = ON")
+            }
+            onProgress("Kończenie indeksowania rozkładu...")
         } finally {
-            sqliteDatabase.execSQL("PRAGMA foreign_keys = ON")
+            archive.delete()
         }
     }
 
-    private fun downloadArchive(): ByteArray {
-        val connection = URL(GTFS_KRAKOW_URL).openConnection() as HttpURLConnection
-        connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
-        connection.readTimeout = READ_TIMEOUT_MILLIS
-        connection.instanceFollowRedirects = true
+    private fun downloadArchive(onProgress: (String) -> Unit): File {
+        val archive = File.createTempFile("gtfs-krakow-", ".zip", context.cacheDir)
+        var downloadCompleted = false
+        try {
+            val connection = URL(GTFS_KRAKOW_URL).openConnection() as HttpURLConnection
+            connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
+            connection.readTimeout = READ_TIMEOUT_MILLIS
+            connection.instanceFollowRedirects = true
 
-        return try {
-            val responseCode = connection.responseCode
-            if (responseCode !in 200..299) {
-                throw IOException("GTFS download failed with HTTP $responseCode.")
+            try {
+                val responseCode = connection.responseCode
+                if (responseCode !in 200..299) {
+                    throw IOException("GTFS download failed with HTTP $responseCode.")
+                }
+
+                val contentLength = connection.contentLengthLong
+                var downloadedBytes = 0L
+                var nextProgressPercent = 5
+                var nextProgressBytes = DOWNLOAD_PROGRESS_INTERVAL_BYTES
+                onProgress("Pobieranie rozkładu: 0%")
+                connection.inputStream.buffered().use { input ->
+                    archive.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        while (true) {
+                            val bytesRead = input.read(buffer)
+                            if (bytesRead < 0) break
+                            output.write(buffer, 0, bytesRead)
+                            downloadedBytes += bytesRead
+
+                            if (contentLength > 0) {
+                                val progressPercent =
+                                    (downloadedBytes * 100L / contentLength)
+                                        .toInt()
+                                        .coerceAtMost(100)
+                                if (progressPercent >= nextProgressPercent) {
+                                    onProgress("Pobieranie rozkładu: $progressPercent%")
+                                    nextProgressPercent = (progressPercent / 5 + 1) * 5
+                                }
+                            } else if (downloadedBytes >= nextProgressBytes) {
+                                onProgress(
+                                    "Pobieranie rozkładu: ${downloadedBytes / 1_000_000} MB"
+                                )
+                                nextProgressBytes =
+                                    downloadedBytes + DOWNLOAD_PROGRESS_INTERVAL_BYTES
+                            }
+                        }
+                    }
+                }
+                if (downloadedBytes == 0L) {
+                    throw IOException("GTFS download returned an empty archive.")
+                }
+            } finally {
+                connection.disconnect()
             }
-            connection.inputStream.use { it.readBytes() }
+
+            downloadCompleted = true
+            return archive
         } finally {
-            connection.disconnect()
+            if (!downloadCompleted) {
+                archive.delete()
+            }
         }
     }
 
     private suspend fun readLookupTables(
-        archive: ByteArray,
+        archive: File,
         stops: MutableList<StopEntity>,
         routes: MutableList<RouteEntity>,
         trips: MutableList<TripEntity>,
         calendars: MutableList<ServiceCalendarEntity>,
         calendarDates: MutableList<CalendarDateEntity>
     ) {
-        ZipInputStream(archive.inputStream(), StandardCharsets.UTF_8).use { zip ->
+        ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 when (entry.name.substringAfterLast('/')) {
@@ -207,16 +272,17 @@ class GtfsZipParser @Inject constructor(
     }
 
     private suspend fun readStopTimes(
-        archive: ByteArray,
+        archive: File,
         stopIds: Set<String>,
         tripIds: Set<String>,
-        insertBatch: suspend (List<StopTimeEntity>) -> Unit
+        insertBatch: suspend (List<StopTimeEntity>) -> Unit,
+        onBatchProgress: (Int) -> Unit
     ): Int {
         var foundStopTimes = false
         var recordCount = 0
         val batch = ArrayList<StopTimeEntity>(BATCH_SIZE)
 
-        ZipInputStream(archive.inputStream(), StandardCharsets.UTF_8).use { zip ->
+        ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
             while (true) {
                 val entry = zip.nextEntry ?: break
                 if (entry.name.substringAfterLast('/') == "stop_times.txt") {
@@ -257,6 +323,9 @@ class GtfsZipParser @Inject constructor(
                         if (batch.size == BATCH_SIZE) {
                             insertBatch(batch.toList())
                             batch.clear()
+                            if (recordCount % PROGRESS_BATCH_SIZE == 0) {
+                                onBatchProgress(recordCount)
+                            }
                         }
                     }
                 }
@@ -269,6 +338,7 @@ class GtfsZipParser @Inject constructor(
         }
         if (batch.isNotEmpty()) {
             insertBatch(batch)
+            onBatchProgress(recordCount)
         }
         return recordCount
     }

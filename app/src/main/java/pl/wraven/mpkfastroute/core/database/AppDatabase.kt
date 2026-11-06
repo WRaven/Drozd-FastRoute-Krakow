@@ -14,7 +14,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CalendarDateEntity::class,
         StopTimeEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -71,6 +71,17 @@ abstract class AppDatabase : RoomDatabase() {
                     """
                     CREATE INDEX IF NOT EXISTS `index_stop_times_tripId_stopSequence`
                     ON `stop_times` (`tripId`, `stopSequence`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE INDEX IF NOT EXISTS `index_stop_times_departureTime_tripId_stopSequence`
+                    ON `stop_times` (`departureTime`, `tripId`, `stopSequence`)
                     """.trimIndent()
                 )
             }

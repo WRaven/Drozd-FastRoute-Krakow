@@ -174,15 +174,19 @@ class CsaEngine @Inject constructor() {
             )
         }
 
-        val sortedConnections = connections.sortedWith(
-            compareBy<Connection> { it.departureTime }
-                .thenBy { it.arrivalTime }
-                .thenBy { it.tripId }
-        )
+        val sortedConnections = if (isSortedByDepartureTime(connections)) {
+            connections
+        } else {
+            connections.sortedWith(
+                compareBy<Connection> { it.departureTime }
+                    .thenBy { it.arrivalTime }
+                    .thenBy { it.tripId }
+            )
+        }
         for (connection in sortedConnections) {
             val sourceLabels = labelsByStop[connection.departureStopId]
                 ?.values
-                ?.flatMap { it.toList() }
+                ?.flatMap { it }
                 .orEmpty()
 
             for (label in sourceLabels) {
@@ -223,7 +227,7 @@ class CsaEngine @Inject constructor() {
         val candidates = uniqueDestinations.flatMap { destinationAccess ->
             labelsByStop[destinationAccess.stopId]
                 ?.values
-                ?.flatMap { it.toList() }
+                ?.flatMap { it }
                 .orEmpty()
                 .map { state ->
                     JourneyCandidate(
@@ -291,6 +295,15 @@ class CsaEngine @Inject constructor() {
                     .thenBy { it.walkingDistanceMeters }
             ) ?: throw IllegalStateException("A stop access group cannot be empty.")
         }
+
+    private fun isSortedByDepartureTime(connections: List<Connection>): Boolean {
+        for (index in 1 until connections.size) {
+            if (connections[index - 1].departureTime > connections[index].departureTime) {
+                return false
+            }
+        }
+        return true
+    }
 
     private data class JourneyCandidate(
         val state: JourneyState,

@@ -6,12 +6,16 @@ the architecture and phases in the project specification.
 
 ## Implementation status
 
-- The Room v3 database stores GTFS stops, routes, trips, stop times, service
+- The Room v4 database stores GTFS stops, routes, trips, stop times, service
   calendars, and date exceptions. The importer downloads the official Kraków
-  feed and replaces its data transactionally in batches.
+  feed to a temporary cache file, reports download and import progress, and
+  replaces its data transactionally in batches. A departure-time index
+  accelerates route queries and is added to existing databases by migration.
 - The route planner filters services for the requested date, scans departures
   within a two-hour window, requires at least three minutes when changing
   vehicles, and includes walking transfers between stops up to 500 meters.
+  Its geographic grid limits footpath generation to nearby stops. Static route
+  results are displayed before the separate live-departure request completes.
 - The TTSS client maps stops by stop code or supplied normalized stop-name
   mapping, applies reported delay to static departures, and returns explicitly
   marked static estimates when live data is unavailable.

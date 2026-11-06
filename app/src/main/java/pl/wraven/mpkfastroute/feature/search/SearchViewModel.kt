@@ -61,6 +61,7 @@ data class SearchUiState(
     val isImporting: Boolean = false,
     val isSearching: Boolean = false,
     val progressMessage: String = "",
+    val routeSearchMessage: String? = null,
     val statusMessage: String? = null,
     val lastSelectedRadioIndex: Int = 0
 ) {
@@ -106,6 +107,7 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 liveDepartures = null,
+                routeSearchMessage = null,
                 statusMessage = null,
                 destinationStopManuallySelected = false
             )
@@ -124,6 +126,7 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 liveDepartures = null,
+                routeSearchMessage = null,
                 statusMessage = null,
                 originStopManuallySelected = false
             )
@@ -146,6 +149,7 @@ class SearchViewModel @Inject constructor(
                 nearbyOriginGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                routeSearchMessage = null,
                 originStopManuallySelected = true,
                 liveDepartures = null
             )
@@ -174,6 +178,7 @@ class SearchViewModel @Inject constructor(
                         nearbyOriginGroups = nearbyGroups,
                         journey = null,
                         journeyOptions = emptyList(),
+                        routeSearchMessage = null,
                         originStopManuallySelected = false,
                         liveDepartures = null
                     )
@@ -216,6 +221,7 @@ class SearchViewModel @Inject constructor(
                             nearbyOriginGroups = emptyList(),
                             journey = null,
                             journeyOptions = emptyList(),
+                            routeSearchMessage = null,
                             originStopManuallySelected = false,
                             liveDepartures = null
                         )
@@ -246,6 +252,7 @@ class SearchViewModel @Inject constructor(
                     originStopOptions = emptyList(),
                     journey = null,
                     journeyOptions = emptyList(),
+                    routeSearchMessage = null,
                     originStopManuallySelected = false,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
@@ -274,6 +281,7 @@ class SearchViewModel @Inject constructor(
                 nearbyDestinationGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                routeSearchMessage = null,
                 destinationStopManuallySelected = true,
                 liveDepartures = null
             )
@@ -303,6 +311,7 @@ class SearchViewModel @Inject constructor(
                             nearbyDestinationGroups = emptyList(),
                             journey = null,
                             journeyOptions = emptyList(),
+                            routeSearchMessage = null,
                             destinationStopManuallySelected = false,
                             liveDepartures = null
                         )
@@ -333,6 +342,7 @@ class SearchViewModel @Inject constructor(
                     destinationStopOptions = emptyList(),
                     journey = null,
                     journeyOptions = emptyList(),
+                    routeSearchMessage = null,
                     destinationStopManuallySelected = false,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
@@ -385,6 +395,7 @@ class SearchViewModel @Inject constructor(
             mutableUiState.update {
                 it.copy(
                     isSearching = true,
+                    routeSearchMessage = null,
                     statusMessage = null,
                     journey = null,
                     journeyOptions = emptyList(),
@@ -419,21 +430,18 @@ class SearchViewModel @Inject constructor(
                 val selectedDestination = lastTransitStopId?.let(stopsById::get)
                     ?: fastestJourney?.destinationAccess?.stopId?.let(stopsById::get)
                     ?: state.destinationStop
-                val liveDepartures = firstTransitStopId?.let { stopId ->
-                    ttssDepartureRepository.getDepartures(
-                        stopId = stopId,
-                        serviceDate = serviceTime.serviceDate,
-                        startTimeSeconds = serviceTime.timeSeconds,
-                        nowTimeSeconds = now.toLocalTime().toSecondOfDay()
-                    )
-                }
                 mutableUiState.update {
                     it.copy(
                         originStop = selectedOrigin,
                         destinationStop = selectedDestination,
                         journey = fastestJourney,
                         journeyOptions = journeyOptions,
-                        liveDepartures = liveDepartures,
+                        liveDepartures = null,
+                        routeSearchMessage = if (fastestJourney == null) {
+                            "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                        } else {
+                            null
+                        },
                         statusMessage = if (fastestJourney == null) {
                             "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
                         } else {
@@ -441,10 +449,59 @@ class SearchViewModel @Inject constructor(
                         }
                     )
                 }
+                if (fastestJourney != null && firstTransitStopId != null) {
+                    viewModelScope.launch {
+                        try {
+                            val liveDepartures = ttssDepartureRepository.getDepartures(
+                                stopId = firstTransitStopId,
+                                serviceDate = serviceTime.serviceDate,
+                                startTimeSeconds = serviceTime.timeSeconds,
+                                nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                            )
+                            mutableUiState.update { current ->
+                                if (current.journey !== fastestJourney) {
+                                    current
+                                } else {
+                                    current.copy(liveDepartures = liveDepartures)
+                                }
+                            }
+                        } catch (exception: SQLiteException) {
+                            mutableUiState.update { current ->
+                                if (current.journey !== fastestJourney) {
+                                    current
+                                } else {
+                                    current.copy(
+                                        statusMessage =
+                                            "Trasa jest gotowa, ale nie udało się odczytać odjazdów: " +
+                                                exception.message.orEmpty()
+                                    )
+                                }
+                            }
+                        } catch (exception: IllegalStateException) {
+                            mutableUiState.update { current ->
+                                if (current.journey !== fastestJourney) {
+                                    current
+                                } else {
+                                    current.copy(
+                                        statusMessage =
+                                            "Trasa jest gotowa, ale nie udało się odczytać odjazdów: " +
+                                                exception.message.orEmpty()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             } catch (exception: IllegalArgumentException) {
-                showMessage("Nie można wyszukać trasy: ${exception.message.orEmpty()}")
+                val message = "Nie można wyszukać trasy: ${exception.message.orEmpty()}"
+                mutableUiState.update {
+                    it.copy(routeSearchMessage = message, statusMessage = message)
+                }
             } catch (exception: SQLiteException) {
-                showMessage("Nie można odczytać rozkładu: ${exception.message.orEmpty()}")
+                val message = "Nie można odczytać rozkładu: ${exception.message.orEmpty()}"
+                mutableUiState.update {
+                    it.copy(routeSearchMessage = message, statusMessage = message)
+                }
             } finally {
                 mutableUiState.update { it.copy(isSearching = false) }
             }
