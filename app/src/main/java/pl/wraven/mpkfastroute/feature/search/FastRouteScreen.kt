@@ -364,7 +364,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             onCheckUpdates = viewModel::checkForUpdates,
             onOpenRelease = ::openExternalUrl,
             onOpenLatestRelease = {
-                openExternalUrl(GitHubUpdateChecker.LATEST_RELEASE_PAGE)
+                openExternalUrl(GitHubUpdateChecker.RELEASES_PAGE)
             },
             onContactAuthor = {
                 try {
@@ -1501,7 +1501,7 @@ private fun SettingsDialog(
 private fun ReleaseQrCode(modifier: Modifier = Modifier) {
     val qrBitmap = remember {
         val matrix = QRCodeWriter().encode(
-            GitHubUpdateChecker.LATEST_RELEASE_PAGE,
+            GitHubUpdateChecker.RELEASES_PAGE,
             BarcodeFormat.QR_CODE,
             360,
             360

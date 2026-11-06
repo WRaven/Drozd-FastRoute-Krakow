@@ -62,13 +62,14 @@ the architecture and phases in the project specification.
   but are not shown in user-facing stop labels.
 - Stop-name search ignores Polish diacritics and suggests up to three
   recently selected stop names from either search field.
-- Settings can check the latest public GitHub release, open its release page,
-  show a QR code for sharing that page, edit home/work arrival schedules, and
-  contact the author. The app checks for updates at startup and offers
+- Settings can check GitHub releases, open the releases page, show a QR code
+  for sharing it, edit home/work arrival schedules, and contact the author.
+  The test app checks the latest prerelease; the production app checks the
+  latest stable release. The app checks for updates at startup and offers
   "Aktualizuj" or "Pomiń"; skipping suppresses that release until a newer
   version appears. Updating opens the public release page and Android asks the
-  user to confirm installation. Until a stable release is published, the
-  updater reports that none is available. Radio settings support managing
+  user to confirm installation. If no matching release has been published,
+  the updater reports that none is available. Radio settings support managing
   streams, and the radio action toggles playback.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
