@@ -57,6 +57,8 @@ class GitHubUpdateChecker @Inject constructor(
     }
 
     companion object {
+        const val LATEST_RELEASE_PAGE =
+            "https://github.com/WRaven/MPK-Krakow-FastRoute/releases/latest"
         const val LATEST_RELEASE_API =
             "https://api.github.com/repos/WRaven/MPK-Krakow-FastRoute/releases/latest"
         private const val USER_AGENT = "MPK-Krakow-FastRoute"

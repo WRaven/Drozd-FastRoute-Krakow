@@ -16,6 +16,7 @@ media3 = "1.11.0"
 room = "2.8.5"
 work = "2.10.1"
 gtfsRealtimeBindings = "0.0.4"
+zxing = "3.5.4"
 ksp = "2.2.10-2.0.2"
 playServicesLocation = "21.4.0"
 
@@ -51,6 +52,7 @@ ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serializatio
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
 gtfs-realtime-bindings = { group = "com.google.transit", name = "gtfs-realtime-bindings", version.ref = "gtfsRealtimeBindings" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

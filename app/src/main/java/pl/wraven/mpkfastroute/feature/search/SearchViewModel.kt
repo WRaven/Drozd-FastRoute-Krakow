@@ -91,7 +91,8 @@ data class SearchUiState(
     val isRadioPlaying: Boolean = false,
     val isCheckingUpdates: Boolean = false,
     val updateCheckMessage: String? = null,
-    val updateCheckResult: UpdateCheckResult? = null
+    val updateCheckResult: UpdateCheckResult? = null,
+    val updatePrompt: UpdateCheckResult? = null
 ) {
     val isScheduleEmpty: Boolean
         get() = stops.isEmpty()
@@ -127,6 +128,7 @@ class SearchViewModel @Inject constructor(
         observePreferences()
         observeDiagnostics()
         ensureScheduleImported()
+        checkForUpdates(showStatus = false)
     }
 
     fun setDestinationQuery(query: String) {
@@ -741,49 +743,110 @@ class SearchViewModel @Inject constructor(
     }
 
     fun checkForUpdates() {
+        checkForUpdates(showStatus = true)
+    }
+
+    fun dismissUpdatePrompt() {
+        mutableUiState.update { it.copy(updatePrompt = null) }
+    }
+
+    fun skipUpdatePrompt() {
+        val version = mutableUiState.value.updatePrompt?.latestVersion ?: return
+        viewModelScope.launch {
+            try {
+                appPreferences.saveSkippedUpdateVersion(version)
+                mutableUiState.update {
+                    if (it.updatePrompt?.latestVersion == version) {
+                        it.copy(updatePrompt = null)
+                    } else {
+                        it
+                    }
+                }
+            } catch (exception: IOException) {
+                showMessage(
+                    "Nie udało się zapamiętać pominiętej wersji: ${exception.message.orEmpty()}"
+                )
+            }
+        }
+    }
+
+    private fun checkForUpdates(showStatus: Boolean) {
         viewModelScope.launch {
             mutableUiState.update {
-                it.copy(isCheckingUpdates = true, updateCheckMessage = null, updateCheckResult = null)
+                it.copy(
+                    isCheckingUpdates = true,
+                    updateCheckMessage = if (showStatus) null else it.updateCheckMessage,
+                    updateCheckResult = if (showStatus) null else it.updateCheckResult
+                )
             }
             try {
                 val result = updateChecker.checkForUpdates()
-                mutableUiState.update {
-                    it.copy(
-                        updateCheckMessage = if (result.updateAvailable) {
+                val skippedVersion = appPreferences.skippedUpdateVersion.first()
+                mutableUiState.update { state ->
+                    val message = if (showStatus) {
+                        if (result.updateAvailable) {
                             "Dostępna jest wersja ${result.latestVersion}."
                         } else {
                             "Masz aktualną wersję (${result.currentVersion})."
-                        },
-                        updateCheckResult = result
+                        }
+                    } else {
+                        state.updateCheckMessage
+                    }
+                    state.copy(
+                        updateCheckMessage = message,
+                        updateCheckResult = result,
+                        updatePrompt = result.takeIf {
+                            it.updateAvailable && it.latestVersion != skippedVersion
+                        }
                     )
                 }
             } catch (_: NoStableReleaseAvailableException) {
-                mutableUiState.update {
-                    it.copy(
-                        updateCheckMessage =
+                mutableUiState.update { state ->
+                    state.copy(
+                        updateCheckMessage = if (showStatus) {
                             "Nie opublikowano jeszcze stabilnego wydania na GitHub. " +
                                 "Sprawdź ponownie później."
+                        } else {
+                            state.updateCheckMessage
+                        },
+                        updateCheckResult = null,
+                        updatePrompt = null
                     )
                 }
             } catch (exception: IOException) {
-                mutableUiState.update {
-                    it.copy(
-                        updateCheckMessage =
+                mutableUiState.update { state ->
+                    state.copy(
+                        updateCheckMessage = if (showStatus) {
                             "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
+                        } else {
+                            state.updateCheckMessage
+                        },
+                        updateCheckResult = null,
+                        updatePrompt = null
                     )
                 }
             } catch (exception: IllegalArgumentException) {
-                mutableUiState.update {
-                    it.copy(
-                        updateCheckMessage =
+                mutableUiState.update { state ->
+                    state.copy(
+                        updateCheckMessage = if (showStatus) {
                             "Nie udało się porównać wersji: ${exception.message.orEmpty()}"
+                        } else {
+                            state.updateCheckMessage
+                        },
+                        updateCheckResult = null,
+                        updatePrompt = null
                     )
                 }
             } catch (exception: IllegalStateException) {
-                mutableUiState.update {
-                    it.copy(
-                        updateCheckMessage =
+                mutableUiState.update { state ->
+                    state.copy(
+                        updateCheckMessage = if (showStatus) {
                             "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
+                        } else {
+                            state.updateCheckMessage
+                        },
+                        updateCheckResult = null,
+                        updatePrompt = null
                     )
                 }
             } finally {

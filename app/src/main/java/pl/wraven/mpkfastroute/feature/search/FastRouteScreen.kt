@@ -7,12 +7,15 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color as AndroidColor
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -64,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -92,6 +96,10 @@ import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
+import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
+import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -355,6 +363,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             onRefresh = viewModel::refreshSchedule,
             onCheckUpdates = viewModel::checkForUpdates,
             onOpenRelease = ::openExternalUrl,
+            onOpenLatestRelease = {
+                openExternalUrl(GitHubUpdateChecker.LATEST_RELEASE_PAGE)
+            },
             onContactAuthor = {
                 try {
                     context.startActivity(
@@ -371,6 +382,18 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             onClearDiagnostics = viewModel::clearDiagnostics,
             onDiagnosticsCopied = viewModel::diagnosticsCopied,
             onDismiss = { settingsVisible = false }
+        )
+    }
+
+    state.updatePrompt?.takeIf { !settingsVisible }?.let { update ->
+        UpdateAvailableDialog(
+            update = update,
+            onUpdate = {
+                openExternalUrl(update.releaseUrl)
+                viewModel.dismissUpdatePrompt()
+            },
+            onSkip = viewModel::skipUpdatePrompt,
+            onDismiss = viewModel::dismissUpdatePrompt
         )
     }
 
@@ -1346,6 +1369,7 @@ private fun SettingsDialog(
     onRefresh: () -> Unit,
     onCheckUpdates: () -> Unit,
     onOpenRelease: (String) -> Unit,
+    onOpenLatestRelease: () -> Unit,
     onContactAuthor: () -> Unit,
     onEditHomeSchedule: () -> Unit,
     onEditWorkSchedule: () -> Unit,
@@ -1408,6 +1432,20 @@ private fun SettingsDialog(
                         Text("Otwórz wydanie ${updateCheckResult.latestVersion}")
                     }
                 }
+                HorizontalDivider()
+                Text("Udostępnij aplikację")
+                ReleaseQrCode(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(180.dp)
+                )
+                Text(
+                    "Zeskanuj kod, aby otworzyć najnowsze wydanie na GitHub.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                TextButton(onClick = onOpenLatestRelease) {
+                    Text("Otwórz stronę wydań")
+                }
                 TextButton(onClick = onContactAuthor) {
                     Text("Autor: lukasz@drozd.cc")
                 }
@@ -1454,6 +1492,63 @@ private fun SettingsDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text("Gotowe")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ReleaseQrCode(modifier: Modifier = Modifier) {
+    val qrBitmap = remember {
+        val matrix = QRCodeWriter().encode(
+            GitHubUpdateChecker.LATEST_RELEASE_PAGE,
+            BarcodeFormat.QR_CODE,
+            360,
+            360
+        )
+        Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).apply {
+            for (x in 0 until matrix.width) {
+                for (y in 0 until matrix.height) {
+                    setPixel(
+                        x,
+                        y,
+                        if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
+                    )
+                }
+            }
+        }.asImageBitmap()
+    }
+    Image(
+        bitmap = qrBitmap,
+        contentDescription = "Kod QR do najnowszego wydania MPK Kraków FastRoute",
+        modifier = modifier
+    )
+}
+
+@Composable
+private fun UpdateAvailableDialog(
+    update: UpdateCheckResult,
+    onUpdate: () -> Unit,
+    onSkip: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Dostępna aktualizacja") },
+        text = {
+            Text(
+                "Wersja ${update.latestVersion} jest dostępna " +
+                    "(zainstalowana: ${update.currentVersion})."
+            )
+        },
+        confirmButton = {
+            Button(onClick = onUpdate) {
+                Text("Aktualizuj")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onSkip) {
+                Text("Pomiń")
             }
         }
     )

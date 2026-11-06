@@ -180,6 +180,7 @@ dependencies {
     implementation(libs.coroutines.play.services)
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.gtfs.realtime.bindings)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)

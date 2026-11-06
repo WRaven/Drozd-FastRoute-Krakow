@@ -59,6 +59,10 @@ class AppPreferences @Inject constructor(
         preferences[WORK_COMMUTE_NOTIFICATION_OCCURRENCE]
     }
 
+    val skippedUpdateVersion: Flow<String?> = dataStore.data.map { preferences ->
+        preferences[SKIPPED_UPDATE_VERSION]
+    }
+
     val customRoute: Flow<SavedRoute?> = dataStore.data.map { preferences ->
         preferences[CUSTOM_ROUTE]?.let { json.decodeFromString<SavedRoute>(it) }
     }
@@ -139,6 +143,12 @@ class AppPreferences @Inject constructor(
     suspend fun markWorkCommuteNotificationOccurrence(occurrence: String) {
         dataStore.edit { preferences ->
             preferences[WORK_COMMUTE_NOTIFICATION_OCCURRENCE] = occurrence
+        }
+    }
+
+    suspend fun saveSkippedUpdateVersion(version: String) {
+        dataStore.edit { preferences ->
+            preferences[SKIPPED_UPDATE_VERSION] = version
         }
     }
 
@@ -293,6 +303,7 @@ class AppPreferences @Inject constructor(
             stringPreferencesKey("homeCommuteNotificationOccurrence")
         val WORK_COMMUTE_NOTIFICATION_OCCURRENCE =
             stringPreferencesKey("workCommuteNotificationOccurrence")
+        val SKIPPED_UPDATE_VERSION = stringPreferencesKey("skippedUpdateVersion")
         val CUSTOM_ROUTE = stringPreferencesKey("customRoute")
         val RECENT_ADDRESS_PLACES = stringPreferencesKey("recentAddressPlaces")
         val RADIO_STATIONS = stringPreferencesKey("radioStations")
