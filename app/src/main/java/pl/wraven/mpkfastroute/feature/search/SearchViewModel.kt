@@ -11,6 +11,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.DateTimeException
 import java.time.LocalDateTime
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +102,10 @@ data class SearchUiState(
     val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
     val isLoadingLiveVehicles: Boolean = false,
     val liveVehicleError: String? = null,
+    val selectedLiveMapStop: StopEntity? = null,
+    val liveMapStopDepartures: LiveDeparturesResult? = null,
+    val isLoadingLiveMapStopDepartures: Boolean = false,
+    val liveMapStopDeparturesError: String? = null,
     val isImporting: Boolean = false,
     val databaseUpdateProgressPercent: Int? = null,
     val isSearching: Boolean = false,
@@ -160,6 +165,8 @@ class SearchViewModel @Inject constructor(
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
     private var liveVehicleJob: Job? = null
+    private var liveMapStopDeparturesJob: Job? = null
+    private var liveMapStopRequestId = 0L
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
     private var lastServiceNewsAttemptAtMillis = 0L
@@ -333,6 +340,88 @@ class SearchViewModel @Inject constructor(
             } finally {
                 mutableUiState.update { it.copy(isLoadingLiveVehicles = false) }
             }
+        }
+    }
+
+    fun loadLiveMapStop(stop: StopEntity) {
+        val requestId = ++liveMapStopRequestId
+        liveMapStopDeparturesJob?.cancel()
+        mutableUiState.update {
+            it.copy(
+                selectedLiveMapStop = stop,
+                liveMapStopDepartures = null,
+                isLoadingLiveMapStopDepartures = true,
+                liveMapStopDeparturesError = null
+            )
+        }
+        liveMapStopDeparturesJob = viewModelScope.launch {
+            try {
+                val now = LocalDateTime.now()
+                val serviceTime = GtfsServiceClock.from(now)
+                val departures = ttssDepartureRepository.getDepartures(
+                    stopId = stop.stopId,
+                    serviceDate = serviceTime.serviceDate,
+                    startTimeSeconds = serviceTime.timeSeconds,
+                    nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                )
+                if (requestId == liveMapStopRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            liveMapStopDepartures = departures,
+                            liveMapStopDeparturesError = null
+                        )
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: SQLiteException) {
+                if (requestId == liveMapStopRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            liveMapStopDeparturesError =
+                                "Nie można odczytać odjazdów: ${exception.message.orEmpty()}"
+                        )
+                    }
+                }
+            } catch (exception: IllegalStateException) {
+                if (requestId == liveMapStopRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            liveMapStopDeparturesError =
+                                "Nie można pobrać odjazdów: ${exception.message.orEmpty()}"
+                        )
+                    }
+                }
+            } catch (exception: IOException) {
+                if (requestId == liveMapStopRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            liveMapStopDeparturesError =
+                                "Nie udało się pobrać odjazdów: ${exception.message.orEmpty()}"
+                        )
+                    }
+                }
+            } finally {
+                if (requestId == liveMapStopRequestId) {
+                    mutableUiState.update {
+                        it.copy(isLoadingLiveMapStopDepartures = false)
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearLiveMapStop() {
+        liveMapStopRequestId += 1
+        liveMapStopDeparturesJob?.cancel()
+        liveMapStopDeparturesJob = null
+        mutableUiState.update {
+            it.copy(
+                selectedLiveMapStop = null,
+                liveMapStopDepartures = null,
+                isLoadingLiveMapStopDepartures = false,
+                liveMapStopDeparturesError = null
+            )
         }
     }
 

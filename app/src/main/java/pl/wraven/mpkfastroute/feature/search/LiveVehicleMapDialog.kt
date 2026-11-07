@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,6 +50,8 @@ import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
 import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
 
@@ -59,15 +60,25 @@ internal fun LiveVehicleMapDialog(
     snapshot: LiveVehicleSnapshot?,
     isLoading: Boolean,
     error: String?,
+    stops: List<StopEntity>,
+    selectedStop: StopEntity?,
+    departures: LiveDeparturesResult?,
+    isLoadingDepartures: Boolean,
+    departureError: String?,
     onRefresh: () -> Unit,
+    onSelectStop: (StopEntity) -> Unit,
+    onClearSelectedStop: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnRefresh by rememberUpdatedState(onRefresh)
+    val latestOnSelectStop by rememberUpdatedState(onSelectStop)
+    val latestSelectedStop by rememberUpdatedState(selectedStop)
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
                 latestOnRefresh()
+                latestSelectedStop?.let(latestOnSelectStop)
                 delay(VEHICLE_REFRESH_INTERVAL_MILLIS)
             }
         }
@@ -130,6 +141,13 @@ internal fun LiveVehicleMapDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                val mappedStops = remember(stops) { stops.filter(::hasValidCoordinates) }
+                Text(
+                    "${mappedStops.size} przystanków · Dotknij zielonego znacznika, aby zobaczyć odjazdy.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
@@ -151,10 +169,23 @@ internal fun LiveVehicleMapDialog(
 
                 LiveVehicleMap(
                     snapshot = snapshot,
+                    stops = mappedStops,
+                    selectedStop = selectedStop,
+                    onSelectStop = onSelectStop,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 )
+
+                selectedStop?.let {
+                    SelectedStopDepartures(
+                        stop = it,
+                        departures = departures,
+                        isLoading = isLoadingDepartures,
+                        error = departureError,
+                        onClear = onClearSelectedStop
+                    )
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -168,6 +199,10 @@ internal fun LiveVehicleMapDialog(
                     VehicleLegend(
                         color = Color(TRAM_MARKER_COLOR),
                         label = "Tramwaj"
+                    )
+                    VehicleLegend(
+                        color = Color(STOP_MARKER_COLOR),
+                        label = "Przystanek"
                     )
                 }
                 Text(
@@ -183,6 +218,9 @@ internal fun LiveVehicleMapDialog(
 @Composable
 private fun LiveVehicleMap(
     snapshot: LiveVehicleSnapshot?,
+    stops: List<StopEntity>,
+    selectedStop: StopEntity?,
+    onSelectStop: (StopEntity) -> Unit,
     modifier: Modifier
 ) {
     val context = LocalContext.current
@@ -206,6 +244,22 @@ private fun LiveVehicleMap(
                     snippet = vehicle.vehicleLabel?.let { "Pojazd $it" }
                     icon = createVehicleMarkerIcon(context, vehicle.mode)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                }
+                view.overlays.add(marker)
+            }
+            stops.forEach { stop ->
+                val isSelected = stop.stopId == selectedStop?.stopId
+                val marker = Marker(view).apply {
+                    position = GeoPoint(stop.stopLat, stop.stopLon)
+                    title = stop.stopName
+                    snippet = "Dotknij, aby wyświetlić najbliższe odjazdy"
+                    icon = createStopMarkerIcon(context, isSelected)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setOnMarkerClickListener { clickedMarker, _ ->
+                        clickedMarker.showInfoWindow()
+                        onSelectStop(stop)
+                        true
+                    }
                 }
                 view.overlays.add(marker)
             }
@@ -256,6 +310,83 @@ private fun VehicleLegend(color: Color, label: String) {
     }
 }
 
+@Composable
+private fun SelectedStopDepartures(
+    stop: StopEntity,
+    departures: LiveDeparturesResult?,
+    isLoading: Boolean,
+    error: String?,
+    onClear: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "Najbliższe odjazdy",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        stop.stopName,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1
+                    )
+                }
+                TextButton(onClick = onClear) {
+                    Text("Wyczyść")
+                }
+            }
+            when {
+                isLoading -> Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    Text("Pobieranie odjazdów…", style = MaterialTheme.typography.bodySmall)
+                }
+                error != null -> Text(
+                    error,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+                departures == null -> Text(
+                    "Wybierz przystanek na mapie, aby sprawdzić odjazdy.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                departures.departures.isEmpty() -> Text(
+                    "Brak odjazdów w najbliższych dwóch godzinach.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                else -> {
+                    Text(
+                        "Czerwone +N oznacza opóźnienie.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (departures.fallbackReason != null) {
+                        Text(
+                            "Część odjazdów jest według rozkładu z powodu braku prognozy LIVE.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    departures.departures
+                        .sortedBy { it.estimatedDepartureTime }
+                        .take(MAX_DISPLAYED_STOP_DEPARTURES)
+                        .forEach { LiveDepartureRow(it) }
+                }
+            }
+        }
+    }
+}
+
 private fun createMapView(context: Context): MapView {
     val basePath = File(context.cacheDir, "osmdroid")
     val tileCache = File(basePath, "tiles")
@@ -269,6 +400,7 @@ private fun createMapView(context: Context): MapView {
     return MapView(context).apply {
         setTileSource(TileSourceFactory.MAPNIK)
         setMultiTouchControls(true)
+        setBuiltInZoomControls(true)
         controller.setZoom(DEFAULT_MAP_ZOOM)
         controller.setCenter(GeoPoint(KRAKOW_LATITUDE, KRAKOW_LONGITUDE))
     }
@@ -291,10 +423,31 @@ private fun createVehicleMarkerIcon(
     }
 }
 
+private fun createStopMarkerIcon(context: Context, selected: Boolean): GradientDrawable {
+    val density = context.resources.displayMetrics.density
+    return GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(if (selected) SELECTED_STOP_MARKER_COLOR else STOP_MARKER_COLOR)
+        setStroke((2 * density).toInt().coerceAtLeast(1), AndroidColor.WHITE)
+        val sizeDp = if (selected) 18 else 14
+        setSize((sizeDp * density).toInt(), (sizeDp * density).toInt())
+    }
+}
+
+private fun hasValidCoordinates(stop: StopEntity): Boolean =
+    stop.stopLat.isFinite() &&
+        stop.stopLon.isFinite() &&
+        stop.stopLat in -90.0..90.0 &&
+        stop.stopLon in -180.0..180.0 &&
+        (stop.stopLat != 0.0 || stop.stopLon != 0.0)
+
 private const val VEHICLE_REFRESH_INTERVAL_MILLIS = 30_000L
+private const val MAX_DISPLAYED_STOP_DEPARTURES = 5
 private const val DEFAULT_MAP_ZOOM = 12.0
 private const val KRAKOW_LATITUDE = 50.0647
 private const val KRAKOW_LONGITUDE = 19.9450
 private const val BUS_MARKER_COLOR = 0xFF1976D2.toInt()
 private const val TRAM_MARKER_COLOR = 0xFFD32F2F.toInt()
+private const val STOP_MARKER_COLOR = 0xFF388E3C.toInt()
+private const val SELECTED_STOP_MARKER_COLOR = 0xFFFFA000.toInt()
 private val UPDATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")

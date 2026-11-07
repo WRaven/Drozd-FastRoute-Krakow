@@ -101,6 +101,7 @@ import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.live.DepartureEstimate
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
@@ -470,8 +471,18 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             snapshot = state.liveVehicleSnapshot,
             isLoading = state.isLoadingLiveVehicles,
             error = state.liveVehicleError,
+            stops = state.stops,
+            selectedStop = state.selectedLiveMapStop,
+            departures = state.liveMapStopDepartures,
+            isLoadingDepartures = state.isLoadingLiveMapStopDepartures,
+            departureError = state.liveMapStopDeparturesError,
             onRefresh = viewModel::refreshLiveVehiclePositions,
-            onDismiss = { liveMapVisible = false }
+            onSelectStop = viewModel::loadLiveMapStop,
+            onClearSelectedStop = viewModel::clearLiveMapStop,
+            onDismiss = {
+                liveMapVisible = false
+                viewModel.clearLiveMapStop()
+            }
         )
     }
 
@@ -1557,38 +1568,43 @@ private fun LiveDeparturesSection(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
-                val delayMinutes = departure.delaySeconds
-                    ?.takeIf { departure.isLive && it > 0 }
-                    ?.let { ((it.toLong() + 59) / 60).toInt() }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        "${departure.routeShortName} → ${departure.direction}",
-                        modifier = Modifier.weight(1f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        "${formatGtfsTime(departure.estimatedDepartureTime)}" +
-                            if (departure.isLive) " · LIVE" else "",
-                        color = if (departure.isLive) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        }
-                    )
-                    delayMinutes?.let {
-                        Text(
-                            "+$it",
-                            color = MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
+                LiveDepartureRow(departure)
             }
+        }
+    }
+}
+
+@Composable
+internal fun LiveDepartureRow(departure: DepartureEstimate) {
+    val delayMinutes = departure.delaySeconds
+        ?.takeIf { departure.isLive && it > 0 }
+        ?.let { ((it.toLong() + 59) / 60).toInt() }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            "${departure.routeShortName} → ${departure.direction}",
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            "${formatGtfsTime(departure.estimatedDepartureTime)} · " +
+                if (departure.isLive) "LIVE" else "ROZKŁAD",
+            color = if (departure.isLive) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }
+        )
+        delayMinutes?.let {
+            Text(
+                "+$it",
+                color = MaterialTheme.colorScheme.error,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
