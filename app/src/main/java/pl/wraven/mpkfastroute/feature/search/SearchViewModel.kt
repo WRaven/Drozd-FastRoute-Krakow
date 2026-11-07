@@ -63,6 +63,7 @@ import pl.wraven.mpkfastroute.core.location.LocationUnavailableException
 import pl.wraven.mpkfastroute.core.settings.AppPreferences
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
 import pl.wraven.mpkfastroute.core.settings.SavedRoute
+import pl.wraven.mpkfastroute.core.update.AppUpdateDownloader
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
 import pl.wraven.mpkfastroute.core.update.NoReleaseAvailableException
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
@@ -132,6 +133,11 @@ data class SearchUiState(
     val updateCheckMessage: String? = null,
     val updateCheckResult: UpdateCheckResult? = null,
     val updatePrompt: UpdateCheckResult? = null,
+    val isDownloadingAppUpdate: Boolean = false,
+    val appUpdateDownloadProgressPercent: Int? = null,
+    val downloadedAppUpdatePath: String? = null,
+    val downloadedAppUpdateVersion: String? = null,
+    val appUpdateDownloadError: String? = null,
     val weatherForecast: WeatherForecast? = null,
     val isLoadingWeather: Boolean = false,
     val weatherError: String? = null,
@@ -167,6 +173,7 @@ class SearchViewModel @Inject constructor(
     private val radioManager: RadioManager,
     private val radioPreferences: RadioPreferences,
     private val updateChecker: GitHubUpdateChecker,
+    private val appUpdateDownloader: AppUpdateDownloader,
     private val diagnostics: SearchDiagnostics,
     private val currentLocationProvider: CurrentLocationProvider,
     private val openMeteoClient: OpenMeteoClient,
@@ -319,7 +326,7 @@ class SearchViewModel @Inject constructor(
                 showMessage(exception.message.orEmpty())
             } catch (exception: IllegalStateException) {
                 showMessage(exception.message.orEmpty())
-            } catch (exception: SecurityException) {
+            } catch (_: SecurityException) {
                 showMessage("Brak dostępu do lokalizacji.")
             } catch (exception: SQLiteException) {
                 showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
@@ -1210,6 +1217,70 @@ class SearchViewModel @Inject constructor(
 
     fun dismissUpdatePrompt() {
         mutableUiState.update { it.copy(updatePrompt = null) }
+    }
+
+    fun downloadAppUpdate(update: UpdateCheckResult) {
+        if (mutableUiState.value.isDownloadingAppUpdate) return
+        mutableUiState.update {
+            it.copy(
+                isDownloadingAppUpdate = true,
+                appUpdateDownloadProgressPercent = 0,
+                downloadedAppUpdatePath = null,
+                downloadedAppUpdateVersion = null,
+                appUpdateDownloadError = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                val apkFile = appUpdateDownloader.download(update) { progressPercent ->
+                    mutableUiState.update { state ->
+                        if (state.isDownloadingAppUpdate) {
+                            state.copy(appUpdateDownloadProgressPercent = progressPercent)
+                        } else {
+                            state
+                        }
+                    }
+                }
+                mutableUiState.update {
+                    it.copy(
+                        downloadedAppUpdatePath = apkFile.absolutePath,
+                        downloadedAppUpdateVersion = update.latestVersion,
+                        appUpdateDownloadError = null
+                    )
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: IOException) {
+                mutableUiState.update {
+                    it.copy(
+                        appUpdateDownloadError =
+                            "Nie udało się pobrać aktualizacji: ${exception.message.orEmpty()}"
+                    )
+                }
+            } catch (exception: SecurityException) {
+                mutableUiState.update {
+                    it.copy(
+                        appUpdateDownloadError = "Android zablokował dostęp do pliku aktualizacji."
+                    )
+                }
+            } finally {
+                mutableUiState.update {
+                    it.copy(
+                        isDownloadingAppUpdate = false,
+                        appUpdateDownloadProgressPercent = null
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearDownloadedAppUpdate() {
+        mutableUiState.update {
+            it.copy(
+                downloadedAppUpdatePath = null,
+                downloadedAppUpdateVersion = null
+            )
+        }
     }
 
     fun skipUpdatePrompt() {

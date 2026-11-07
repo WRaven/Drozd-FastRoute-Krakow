@@ -39,6 +39,23 @@ class GitHubUpdateCheckerTest {
     }
 
     @Test
+    fun selectsOnlyApkAssetsFromThisRepositoriesReleaseDownloads() {
+        val downloadUrl =
+            "https://github.com/WRaven/MPK-Krakow-FastRoute/releases/download/v1.2.3/app.apk"
+
+        assertEquals(
+            downloadUrl,
+            GitHubUpdateChecker.selectApkDownloadUrl(
+                listOf(
+                    "notes.txt" to "https://github.com/WRaven/MPK-Krakow-FastRoute/releases/download/v1.2.3/notes.txt",
+                    "foreign.apk" to "https://example.com/app.apk",
+                    "app.apk" to downloadUrl
+                )
+            )
+        )
+    }
+
+    @Test
     fun usesLegacyTestApkBuildNumberWhenVersionHasNoCiSuffix() {
         val legacyVersion = GitHubUpdateChecker.versionForRelease(
             tagName = "test-d1a45a3",

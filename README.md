@@ -92,11 +92,14 @@ the architecture and phases in the project specification.
   for sharing it, edit home/work arrival schedules, and contact the author.
   The test app checks the latest prerelease; the production app checks the
   latest stable release. The app checks for updates at startup and offers
-  "Aktualizuj" or "Pomiń"; skipping suppresses that release until a newer
-  version appears. Updating opens the public release page and Android asks the
-  user to confirm installation. If no matching release has been published,
-  the updater reports that none is available. Radio settings support managing
-  streams, and the radio action toggles playback.
+  "Pobierz i zainstaluj" or "Pomiń"; skipping suppresses that release until a
+  newer version appears. It downloads the APK from the matching GitHub release,
+  verifies that it belongs to this app, then opens Android's installer. Android
+  may require permission to install apps from this source and always asks the
+  user to confirm installation. The GitHub release page remains available for
+  details. If no matching APK release has been published, the updater reports
+  that none is available. Radio settings support managing streams, and the
+  radio action toggles playback.
 - TTSS predictions are matched to static departures at the selected origin;
   unmatched or unavailable live data remains visibly static.
 - Settings include an in-memory, bounded search diagnostic log with copy and
