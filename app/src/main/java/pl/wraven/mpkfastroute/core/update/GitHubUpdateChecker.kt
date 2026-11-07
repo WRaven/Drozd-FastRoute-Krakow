@@ -22,6 +22,11 @@ data class UpdateCheckResult(
     val updateAvailable: Boolean
 )
 
+private data class ReleaseCandidate(
+    val version: String,
+    val releaseUrl: String
+)
+
 class NoReleaseAvailableException : IOException()
 
 class GitHubUpdateChecker @Inject constructor(
@@ -42,19 +47,28 @@ class GitHubUpdateChecker @Inject constructor(
             throw IOException("GitHub returned an invalid releases response.", exception)
         }
         val isTestBuild = context.packageName.endsWith(".debug")
-        val release = releases.firstOrNull { element ->
+        val releaseCandidates = releases.mapNotNull { element ->
             val candidate = element.jsonObject
-            candidate["draft"]?.jsonPrimitive?.boolean != true &&
-                candidate["prerelease"]?.jsonPrimitive?.boolean == isTestBuild
-        }?.jsonObject ?: throw NoReleaseAvailableException()
-        val tagName = release["tag_name"]?.jsonPrimitive?.content
-            ?: throw IOException("GitHub release response has no tag name.")
-        val releaseUrl = release["html_url"]?.jsonPrimitive?.content
-            ?: throw IOException("GitHub release response has no release URL.")
-        val assetNames = release["assets"]?.jsonArray
-            ?.mapNotNull { asset -> asset.jsonObject["name"]?.jsonPrimitive?.content }
-            .orEmpty()
-        val latestVersion = versionForRelease(tagName, assetNames)
+            if (candidate["draft"]?.jsonPrimitive?.boolean == true ||
+                candidate["prerelease"]?.jsonPrimitive?.boolean != isTestBuild
+            ) {
+                return@mapNotNull null
+            }
+            val tagName = candidate["tag_name"]?.jsonPrimitive?.content
+                ?: throw IOException("GitHub release response has no tag name.")
+            val releaseUrl = candidate["html_url"]?.jsonPrimitive?.content
+                ?: throw IOException("GitHub release response has no release URL.")
+            val assetNames = candidate["assets"]?.jsonArray
+                ?.mapNotNull { asset -> asset.jsonObject["name"]?.jsonPrimitive?.content }
+                .orEmpty()
+            ReleaseCandidate(
+                version = versionForRelease(tagName, assetNames),
+                releaseUrl = releaseUrl
+            )
+        }
+        val latestVersion = latestVersion(releaseCandidates.map(ReleaseCandidate::version))
+            ?: throw NoReleaseAvailableException()
+        val releaseUrl = releaseCandidates.first { it.version == latestVersion }.releaseUrl
         val currentVersion = context.packageManager
             .getPackageInfo(context.packageName, 0)
             .versionName
@@ -105,6 +119,9 @@ class GitHubUpdateChecker @Inject constructor(
                 else -> leftCiBuild.compareTo(rightCiBuild)
             }
         }
+
+        internal fun latestVersion(versions: List<String>): String? =
+            versions.maxWithOrNull { left, right -> compareVersions(left, right) }
 
         internal fun versionForRelease(tagName: String, assetNames: List<String>): String {
             if (VERSION_PATTERN.matches(tagName)) {

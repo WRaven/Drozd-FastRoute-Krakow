@@ -16,6 +16,16 @@ class GitHubUpdateCheckerTest {
     }
 
     @Test
+    fun selectsNewestReleaseIndependentOfGitHubApiOrdering() {
+        assertEquals(
+            "0.1.0-ci.47",
+            GitHubUpdateChecker.latestVersion(
+                listOf("0.1.0-ci.44", "0.1.0-ci.47", "0.1.0-ci.46", "0.1.0-ci.45")
+            )
+        )
+    }
+
+    @Test
     fun extractsVersionFromTestReleaseApkName() {
         assertEquals(
             "0.1.0-ci.42",
