@@ -6,6 +6,9 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import java.io.IOException
+import java.net.URI
+import java.net.URISyntaxException
 import javax.inject.Inject
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
@@ -13,18 +16,19 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import java.io.IOException
 
 data class UpdateCheckResult(
     val currentVersion: String,
     val latestVersion: String,
     val releaseUrl: String,
+    val downloadUrl: String,
     val updateAvailable: Boolean
 )
 
 private data class ReleaseCandidate(
     val version: String,
-    val releaseUrl: String
+    val releaseUrl: String,
+    val downloadUrl: String
 )
 
 class NoReleaseAvailableException : IOException()
@@ -58,17 +62,24 @@ class GitHubUpdateChecker @Inject constructor(
                 ?: throw IOException("GitHub release response has no tag name.")
             val releaseUrl = candidate["html_url"]?.jsonPrimitive?.content
                 ?: throw IOException("GitHub release response has no release URL.")
-            val assetNames = candidate["assets"]?.jsonArray
-                ?.mapNotNull { asset -> asset.jsonObject["name"]?.jsonPrimitive?.content }
+            val assets = candidate["assets"]?.jsonArray
+                ?.mapNotNull { asset ->
+                    val assetObject = asset.jsonObject
+                    val assetName = assetObject["name"]?.jsonPrimitive?.content
+                        ?: return@mapNotNull null
+                    assetName to assetObject["browser_download_url"]?.jsonPrimitive?.content
+                }
                 .orEmpty()
+            val downloadUrl = selectApkDownloadUrl(assets) ?: return@mapNotNull null
             ReleaseCandidate(
-                version = versionForRelease(tagName, assetNames),
-                releaseUrl = releaseUrl
+                version = versionForRelease(tagName, assets.map { it.first }),
+                releaseUrl = releaseUrl,
+                downloadUrl = downloadUrl
             )
         }
         val latestVersion = latestVersion(releaseCandidates.map(ReleaseCandidate::version))
             ?: throw NoReleaseAvailableException()
-        val releaseUrl = releaseCandidates.first { it.version == latestVersion }.releaseUrl
+        val latestRelease = releaseCandidates.first { it.version == latestVersion }
         val currentVersion = context.packageManager
             .getPackageInfo(context.packageName, 0)
             .versionName
@@ -77,7 +88,8 @@ class GitHubUpdateChecker @Inject constructor(
         return UpdateCheckResult(
             currentVersion = currentVersion,
             latestVersion = latestVersion,
-            releaseUrl = releaseUrl,
+            releaseUrl = latestRelease.releaseUrl,
+            downloadUrl = latestRelease.downloadUrl,
             updateAvailable = compareVersions(latestVersion, currentVersion) > 0
         )
     }
@@ -94,6 +106,28 @@ class GitHubUpdateChecker @Inject constructor(
             Regex("""(?i)(?:^|[-_])v?(\d+\.\d+\.\d+(?:-ci\.\d+)?)\b""")
         private val APK_BUILD_NUMBER_PATTERN =
             Regex("""(?i)(?:^|[-_])build(\d+)(?:[-_.]|$)""")
+
+        internal fun selectApkDownloadUrl(assets: List<Pair<String, String?>>): String? =
+            assets.firstNotNullOfOrNull { (assetName, downloadUrl) ->
+                downloadUrl?.takeIf {
+                    assetName.endsWith(".apk", ignoreCase = true) &&
+                        isTrustedDownloadUrl(it)
+                }
+            }
+
+        internal fun isTrustedDownloadUrl(downloadUrl: String): Boolean =
+            try {
+                val uri = URI(downloadUrl)
+                uri.scheme.equals("https", ignoreCase = true) &&
+                    uri.host?.equals("github.com", ignoreCase = true) == true &&
+                    (uri.port == -1 || uri.port == 443) &&
+                    uri.userInfo == null &&
+                    uri.path?.startsWith(
+                        "/WRaven/MPK-Krakow-FastRoute/releases/download/"
+                    ) == true
+            } catch (_: URISyntaxException) {
+                false
+            }
 
         internal fun ensureSuccessfulResponse(statusCode: Int) {
             when {

@@ -23,7 +23,10 @@ class ZtpVehiclePositionsRepositoryTest {
                             .setTrip(
                                 GtfsRealtime.TripDescriptor.newBuilder()
                                     .setRouteId("route-52")
+                                    .setTripId("trip-52-1")
                             )
+                            .setCurrentStopSequence(3)
+                            .setStopId("stop-3")
                             .setVehicle(
                                 GtfsRealtime.VehicleDescriptor.newBuilder()
                                     .setId("fleet-123")
@@ -42,6 +45,10 @@ class ZtpVehiclePositionsRepositoryTest {
         assertEquals(TransitVehicleMode.TRAM, position.mode)
         assertEquals("52", position.routeShortName)
         assertEquals("123", position.vehicleLabel)
+        assertEquals("route-52", position.routeId)
+        assertEquals("trip-52-1", position.tripId)
+        assertEquals(3, position.currentStopSequence)
+        assertEquals("stop-3", position.currentStopId)
         assertEquals(50.061, position.latitude, 0.001)
         assertEquals(19.937, position.longitude, 0.001)
     }

@@ -27,6 +27,7 @@ import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.CalendarDateEntity
 import pl.wraven.mpkfastroute.core.database.RouteEntity
 import pl.wraven.mpkfastroute.core.database.ServiceCalendarEntity
+import pl.wraven.mpkfastroute.core.database.ShapePointEntity
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.database.StopTimeEntity
 import pl.wraven.mpkfastroute.core.database.TripEntity
@@ -42,9 +43,12 @@ private const val CONNECT_TIMEOUT_MILLIS = 30_000
 private const val READ_TIMEOUT_MILLIS = 120_000
 private const val GTFS_ETAG_KEY = "etag"
 private const val GTFS_LAST_MODIFIED_KEY = "last_modified"
+private const val GTFS_SHAPES_IMPORTED_KEY = "shapes_imported"
 private const val DOWNLOAD_START_PERCENT = 0
 private const val DOWNLOAD_END_PERCENT = 25
-private const val STOP_TIMES_START_PERCENT = 40
+private const val SHAPES_START_PERCENT = 40
+private const val SHAPES_END_PERCENT = 42
+private const val STOP_TIMES_START_PERCENT = SHAPES_END_PERCENT
 private const val STOP_TIMES_END_PERCENT = 82
 
 data class GtfsScheduleProgress(
@@ -74,9 +78,14 @@ class GtfsZipParser @Inject constructor(
         forceDownload: Boolean,
         onProgress: suspend (GtfsScheduleProgress) -> Unit
     ): Boolean = updateMutex.withLock {
+        val schedulePreferences = context.getSharedPreferences(
+            GTFS_UPDATE_PREFERENCES,
+            Context.MODE_PRIVATE
+        )
         val hasUsableSchedule = database.stopDao().count() > 0 &&
             database.stopTimeDao().count() > 0 &&
-            database.connectionDao().count() > 0
+            database.connectionDao().count() > 0 &&
+            schedulePreferences.getBoolean(GTFS_SHAPES_IMPORTED_KEY, false)
         importScheduleInternal(
             onlyIfUpdated = !forceDownload && hasUsableSchedule,
             onProgress = onProgress
@@ -131,9 +140,11 @@ class GtfsZipParser @Inject constructor(
                     val stopDao = database.stopDao()
                     val routeDao = database.routeDao()
                     val tripDao = database.tripDao()
+                    val shapePointDao = database.shapePointDao()
                     val calendarDao = database.serviceCalendarDao()
                     val stopTimeDao = database.stopTimeDao()
 
+                    shapePointDao.deleteAll()
                     stopTimeDao.deleteAll()
                     tripDao.deleteAll()
                     routeDao.deleteAll()
@@ -156,7 +167,32 @@ class GtfsZipParser @Inject constructor(
                     for (batch in calendarDates.chunked(BATCH_SIZE)) {
                         calendarDao.insertAllExceptions(batch)
                     }
-                    onProgress(GtfsScheduleProgress(40, "Importuję godziny odjazdów..."))
+                    onProgress(
+                        GtfsScheduleProgress(
+                            SHAPES_START_PERCENT,
+                            "Importuję geometrię tras..."
+                        )
+                    )
+                    val shapeIds = trips.mapNotNullTo(HashSet<String>()) { it.shapeId }
+                    readShapePoints(
+                        archive = archive,
+                        shapeIds = shapeIds,
+                        totalBytes = archiveEntrySize(archive, "shapes.txt"),
+                        insertBatch = shapePointDao::insertAll
+                    ) { count, percent ->
+                        onProgress(
+                            GtfsScheduleProgress(
+                                percent,
+                                "Import GTFS: $count punktów geometrii tras."
+                            )
+                        )
+                    }
+                    onProgress(
+                        GtfsScheduleProgress(
+                            STOP_TIMES_START_PERCENT,
+                            "Importuję godziny odjazdów..."
+                        )
+                    )
 
                     val stopTimeCount = readStopTimes(
                         archive = archive,
@@ -314,6 +350,7 @@ class GtfsZipParser @Inject constructor(
             .putString(GTFS_ETAG_KEY, downloadedArchive.eTag)
             .putLong(GTFS_LAST_MODIFIED_KEY, downloadedArchive.lastModified)
             .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
+            .putBoolean(GTFS_SHAPES_IMPORTED_KEY, true)
             .apply()
     }
 
@@ -362,7 +399,8 @@ class GtfsZipParser @Inject constructor(
                             tripId = values.required(columns, "trip_id", entry.name, rowNumber),
                             routeId = values.required(columns, "route_id", entry.name, rowNumber),
                             serviceId = values.required(columns, "service_id", entry.name, rowNumber),
-                            tripHeadsign = values.optional(columns, "trip_headsign")
+                            tripHeadsign = values.optional(columns, "trip_headsign"),
+                            shapeId = values.optional(columns, "shape_id")
                         )
                     }
 
@@ -494,6 +532,89 @@ class GtfsZipParser @Inject constructor(
             insertBatch(batch)
         }
         onBatchProgress(recordCount, STOP_TIMES_END_PERCENT)
+        return recordCount
+    }
+
+    private suspend fun readShapePoints(
+        archive: File,
+        shapeIds: Set<String>,
+        totalBytes: Long,
+        insertBatch: suspend (List<ShapePointEntity>) -> Unit,
+        onBatchProgress: suspend (Int, Int) -> Unit
+    ): Int {
+        var foundShapes = false
+        var recordCount = 0
+        val batch = ArrayList<ShapePointEntity>(BATCH_SIZE)
+
+        if (shapeIds.isNotEmpty()) {
+            ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
+                while (true) {
+                    val entry = zip.nextEntry ?: break
+                    if (entry.name.substringAfterLast('/') == "shapes.txt") {
+                        foundShapes = true
+                        val countingInput = CountingInputStream(zip)
+                        readCsv(countingInput, entry.name) { columns, values, rowNumber ->
+                            val shapeId = values.required(columns, "shape_id", entry.name, rowNumber)
+                            if (shapeId in shapeIds) {
+                                val latitude = values.required(
+                                    columns,
+                                    "shape_pt_lat",
+                                    entry.name,
+                                    rowNumber
+                                ).toDoubleOrInvalid(entry.name, "shape_pt_lat", rowNumber)
+                                val longitude = values.required(
+                                    columns,
+                                    "shape_pt_lon",
+                                    entry.name,
+                                    rowNumber
+                                ).toDoubleOrInvalid(entry.name, "shape_pt_lon", rowNumber)
+                                if (
+                                    !latitude.isFinite() || latitude !in -90.0..90.0 ||
+                                    !longitude.isFinite() || longitude !in -180.0..180.0
+                                ) {
+                                    throw IOException(
+                                        "${entry.name} row $rowNumber has invalid shape coordinates."
+                                    )
+                                }
+                                batch += ShapePointEntity(
+                                    shapeId = shapeId,
+                                    shapePtSequence = values.required(
+                                        columns,
+                                        "shape_pt_sequence",
+                                        entry.name,
+                                        rowNumber
+                                    ).toIntOrInvalid(entry.name, "shape_pt_sequence", rowNumber),
+                                    shapeLat = latitude,
+                                    shapeLon = longitude
+                                )
+                                recordCount++
+                                if (batch.size == BATCH_SIZE) {
+                                    insertBatch(batch.toList())
+                                    batch.clear()
+                                    if (recordCount % PROGRESS_BATCH_SIZE == 0) {
+                                        onBatchProgress(
+                                            recordCount,
+                                            scaleProgress(
+                                                SHAPES_START_PERCENT,
+                                                SHAPES_END_PERCENT,
+                                                countingInput.bytesRead,
+                                                totalBytes
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        zip.closeEntry()
+                    }
+                }
+            }
+        }
+
+        if (foundShapes && batch.isNotEmpty()) {
+            insertBatch(batch)
+        }
+        onBatchProgress(recordCount, SHAPES_END_PERCENT)
         return recordCount
     }
 

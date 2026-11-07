@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.graphics.drawable.GradientDrawable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,10 +12,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
@@ -42,18 +46,30 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
+import java.time.Duration
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.math.abs
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polyline
+import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
+import pl.wraven.mpkfastroute.core.live.LiveVehiclePosition
 import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
+import pl.wraven.mpkfastroute.core.live.ScheduledVehicleStop
 import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
+import pl.wraven.mpkfastroute.core.live.VehicleTripSchedule
 
 @Composable
 internal fun LiveVehicleMapDialog(
@@ -65,9 +81,18 @@ internal fun LiveVehicleMapDialog(
     departures: LiveDeparturesResult?,
     isLoadingDepartures: Boolean,
     departureError: String?,
+    selectedVehicle: LiveVehiclePosition?,
+    selectedVehicleTrip: VehicleTripSchedule?,
+    selectedVehicleTripUpdate: LiveTripUpdate?,
+    isLoadingVehicleTrip: Boolean,
+    isLoadingVehicleTripUpdate: Boolean,
+    vehicleTripError: String?,
+    vehicleTripUpdateError: String?,
     onRefresh: () -> Unit,
     onSelectStop: (StopEntity) -> Unit,
+    onSelectVehicle: (LiveVehiclePosition) -> Unit,
     onClearSelectedStop: () -> Unit,
+    onClearSelectedVehicle: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -143,7 +168,8 @@ internal fun LiveVehicleMapDialog(
 
                 val mappedStops = remember(stops) { stops.filter(::hasValidCoordinates) }
                 Text(
-                    "${mappedStops.size} przystanków · Dotknij zielonego znacznika, aby zobaczyć odjazdy.",
+                    "${mappedStops.size} przystanków · Dotknij zielonego znacznika po odjazdy " +
+                        "lub pojazdu po trasę i rozkład.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -171,13 +197,27 @@ internal fun LiveVehicleMapDialog(
                     snapshot = snapshot,
                     stops = mappedStops,
                     selectedStop = selectedStop,
+                    selectedVehicle = selectedVehicle,
+                    selectedVehicleTrip = selectedVehicleTrip,
                     onSelectStop = onSelectStop,
+                    onSelectVehicle = onSelectVehicle,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
                 )
 
-                selectedStop?.let {
+                selectedVehicle?.let {
+                    SelectedVehicleTripPanel(
+                        vehicle = it,
+                        schedule = selectedVehicleTrip,
+                        liveUpdate = selectedVehicleTripUpdate,
+                        isLoadingSchedule = isLoadingVehicleTrip,
+                        isLoadingLiveUpdate = isLoadingVehicleTripUpdate,
+                        scheduleError = vehicleTripError,
+                        liveUpdateError = vehicleTripUpdateError,
+                        onClear = onClearSelectedVehicle
+                    )
+                } ?: selectedStop?.let {
                     SelectedStopDepartures(
                         stop = it,
                         departures = departures,
@@ -220,12 +260,17 @@ private fun LiveVehicleMap(
     snapshot: LiveVehicleSnapshot?,
     stops: List<StopEntity>,
     selectedStop: StopEntity?,
+    selectedVehicle: LiveVehiclePosition?,
+    selectedVehicleTrip: VehicleTripSchedule?,
     onSelectStop: (StopEntity) -> Unit,
+    onSelectVehicle: (LiveVehiclePosition) -> Unit,
     modifier: Modifier
 ) {
     val context = LocalContext.current
     val mapView = remember(context) { createMapView(context) }
     var centeredOnVehicles by remember(mapView) { mutableStateOf(false) }
+    var fittedTripId by remember(mapView) { mutableStateOf<String?>(null) }
+    var previousSelectedVehicleId by remember(mapView) { mutableStateOf<String?>(null) }
 
     AndroidView(
         factory = { mapView },
@@ -236,16 +281,44 @@ private fun LiveVehicleMap(
         update = { view ->
             view.overlays.clear()
             val vehicles = snapshot?.vehicles.orEmpty()
-            vehicles.forEach { vehicle ->
-                val marker = Marker(view).apply {
-                    position = GeoPoint(vehicle.latitude, vehicle.longitude)
-                    title = vehicle.routeShortName?.let { "${vehicle.mode.label} $it" }
-                        ?: vehicle.mode.label
-                    snippet = vehicle.vehicleLabel?.let { "Pojazd $it" }
-                    icon = createVehicleMarkerIcon(context, vehicle.mode)
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+            val routePoints = selectedVehicleTrip?.let(::tripRoutePoints).orEmpty()
+            if (selectedVehicle?.id != previousSelectedVehicleId) {
+                previousSelectedVehicleId = selectedVehicle?.id
+                fittedTripId = null
+                if (selectedVehicle != null && selectedVehicleTrip == null) {
+                    view.controller.setCenter(
+                        GeoPoint(selectedVehicle.latitude, selectedVehicle.longitude)
+                    )
+                    view.controller.setZoom(SELECTED_VEHICLE_MAP_ZOOM)
                 }
-                view.overlays.add(marker)
+            }
+            if (selectedVehicleTrip == null) {
+                fittedTripId = null
+            } else if (fittedTripId != selectedVehicleTrip.tripId) {
+                if (routePoints.size >= 2) {
+                    val padding = (ROUTE_MAP_PADDING_DP * context.resources.displayMetrics.density)
+                        .toInt()
+                    view.zoomToBoundingBox(
+                        BoundingBox.fromGeoPoints(routePoints),
+                        true,
+                        padding
+                    )
+                } else {
+                    selectedVehicle?.let {
+                        view.controller.setCenter(GeoPoint(it.latitude, it.longitude))
+                        view.controller.setZoom(SELECTED_VEHICLE_MAP_ZOOM)
+                    }
+                }
+                fittedTripId = selectedVehicleTrip.tripId
+            }
+            if (selectedVehicle != null && routePoints.size >= 2) {
+                view.overlays.add(
+                    Polyline(view).apply {
+                        setPoints(routePoints)
+                        setColor(markerColor(selectedVehicle.mode))
+                        setWidth(ROUTE_LINE_WIDTH_DP * context.resources.displayMetrics.density)
+                    }
+                )
             }
             stops.forEach { stop ->
                 val isSelected = stop.stopId == selectedStop?.stopId
@@ -258,6 +331,29 @@ private fun LiveVehicleMap(
                     setOnMarkerClickListener { clickedMarker, _ ->
                         clickedMarker.showInfoWindow()
                         onSelectStop(stop)
+                        true
+                    }
+                }
+                view.overlays.add(marker)
+            }
+            vehicles.forEach { vehicle ->
+                val marker = Marker(view).apply {
+                    position = GeoPoint(vehicle.latitude, vehicle.longitude)
+                    title = vehicle.routeShortName?.let { "${vehicle.mode.label} $it" }
+                        ?: vehicle.mode.label
+                    snippet = listOfNotNull(
+                        vehicle.vehicleLabel?.let { "Pojazd $it" },
+                        "Dotknij, aby zobaczyć trasę i rozkład"
+                    ).joinToString(" · ")
+                    icon = createVehicleMarkerIcon(
+                        context,
+                        vehicle.mode,
+                        vehicle.id == selectedVehicle?.id
+                    )
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    setOnMarkerClickListener { clickedMarker, _ ->
+                        clickedMarker.showInfoWindow()
+                        onSelectVehicle(vehicle)
                         true
                     }
                 }
@@ -387,6 +483,238 @@ private fun SelectedStopDepartures(
     }
 }
 
+@Composable
+private fun SelectedVehicleTripPanel(
+    vehicle: LiveVehiclePosition,
+    schedule: VehicleTripSchedule?,
+    liveUpdate: LiveTripUpdate?,
+    isLoadingSchedule: Boolean,
+    isLoadingLiveUpdate: Boolean,
+    scheduleError: String?,
+    liveUpdateError: String?,
+    onClear: () -> Unit
+) {
+    val routeName = vehicle.routeShortName
+        ?: schedule?.routeShortName
+        ?: "?"
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "${vehicle.mode.label} $routeName · rozkład kursu",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    schedule?.direction?.takeIf(String::isNotBlank)?.let {
+                        Text(
+                            "Kierunek: $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                TextButton(onClick = onClear) {
+                    Text("Wyczyść")
+                }
+            }
+
+            vehicle.vehicleLabel?.let {
+                Text("Pojazd $it", style = MaterialTheme.typography.bodySmall)
+            }
+            if (isLoadingSchedule) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp))
+                    Text("Pobieranie trasy i rozkładu…", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            scheduleError?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            schedule?.let { trip ->
+                if (trip.shapePoints.size < 2) {
+                    Text(
+                        "Brak geometrii GTFS — pokazano przybliżony przebieg po przystankach.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                when {
+                    isLoadingLiveUpdate -> Text(
+                        "Pobieranie opóźnień na żywo…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    liveUpdate != null -> Text(
+                        "Prognoza LIVE · aktualizacja " +
+                            liveUpdate.fetchedAt.format(UPDATE_TIME_FORMATTER),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    liveUpdateError != null -> Text(
+                        liveUpdateError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    else -> Text(
+                        "Brak prognozy LIVE; wyświetlam rozkład.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                if (liveUpdate != null && liveUpdateError != null) {
+                    Text(
+                        liveUpdateError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+                val firstStopIndex = upcomingStopIndex(vehicle, trip)
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = MAX_TRIP_STOPS_PANEL_HEIGHT_DP.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    trip.stops
+                        .drop(firstStopIndex)
+                        .take(MAX_DISPLAYED_TRIP_STOPS)
+                        .forEach { stop ->
+                            VehicleTripStopRow(
+                                scheduledStop = stop,
+                                currentStopSequence = vehicle.currentStopSequence,
+                                serviceDate = trip.serviceDate,
+                                liveUpdate = liveUpdate
+                            )
+                        }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun VehicleTripStopRow(
+    scheduledStop: ScheduledVehicleStop,
+    currentStopSequence: Int?,
+    serviceDate: LocalDate,
+    liveUpdate: LiveTripUpdate?
+) {
+    val stopUpdate = liveUpdate?.stopTimeUpdates?.firstOrNull { update ->
+        if (update.stopSequence != null) {
+            update.stopSequence == scheduledStop.stopSequence
+        } else {
+            update.stopId == scheduledStop.stop.stopId
+        }
+    }
+    val delaySeconds = stopUpdate?.departureDelaySeconds
+        ?: stopUpdate?.arrivalDelaySeconds
+        ?: stopUpdate?.departureTimeEpochSeconds?.let { epochSeconds ->
+            val scheduledDeparture = serviceDate.atStartOfDay()
+                .plusSeconds(scheduledStop.departureTime.toLong())
+            val predictedDeparture = Instant.ofEpochSecond(epochSeconds)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDateTime()
+            Duration.between(scheduledDeparture, predictedDeparture).seconds
+                .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
+                .toInt()
+        }
+        ?: liveUpdate?.tripDelaySeconds
+    val estimatedDepartureTime = delaySeconds?.let {
+        (scheduledStop.departureTime.toLong() + it)
+            .coerceIn(0L, Int.MAX_VALUE.toLong())
+            .toInt()
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                scheduledStop.stop.stopName +
+                    if (scheduledStop.stopSequence == currentStopSequence) " · pojazd" else "",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text(
+                when {
+                    delaySeconds == null ->
+                        "${formatGtfsTime(scheduledStop.departureTime)} · ROZKŁAD"
+                    delaySeconds == 0 ->
+                        "${formatGtfsTime(scheduledStop.departureTime)} · LIVE"
+                    else ->
+                        "${formatGtfsTime(scheduledStop.departureTime)} → " +
+                            "${formatGtfsTime(estimatedDepartureTime ?: scheduledStop.departureTime)} · LIVE"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        delaySeconds?.takeIf { it != 0 }?.let {
+            val delayMinutes = (abs(it.toLong()) + 59) / 60
+            Text(
+                "${if (it > 0) "+" else "-"}$delayMinutes min",
+                color = if (it > 0) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.tertiary
+                },
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+    }
+}
+
+private fun upcomingStopIndex(
+    vehicle: LiveVehiclePosition,
+    schedule: VehicleTripSchedule
+): Int {
+    vehicle.currentStopSequence?.let { sequence ->
+        schedule.stops.indexOfFirst { it.stopSequence >= sequence }
+            .takeIf { it >= 0 }
+            ?.let { return it }
+    }
+    vehicle.currentStopId?.let { stopId ->
+        schedule.stops.indexOfFirst { it.stop.stopId == stopId }
+            .takeIf { it >= 0 }
+            ?.let { return it }
+    }
+    return schedule.stops.indices.minByOrNull { index ->
+        val stop = schedule.stops[index].stop
+        Haversine.distanceMeters(
+            vehicle.latitude,
+            vehicle.longitude,
+            stop.stopLat,
+            stop.stopLon
+        )
+    } ?: 0
+}
+
+private fun tripRoutePoints(schedule: VehicleTripSchedule): List<GeoPoint> =
+    if (schedule.shapePoints.size >= 2) {
+        schedule.shapePoints.map { GeoPoint(it.shapeLat, it.shapeLon) }
+    } else {
+        schedule.stops.map { GeoPoint(it.stop.stopLat, it.stop.stopLon) }
+    }
+
 private fun createMapView(context: Context): MapView {
     val basePath = File(context.cacheDir, "osmdroid")
     val tileCache = File(basePath, "tiles")
@@ -408,26 +736,31 @@ private fun createMapView(context: Context): MapView {
 
 private fun createVehicleMarkerIcon(
     context: Context,
-    mode: TransitVehicleMode
+    mode: TransitVehicleMode,
+    selected: Boolean
 ): GradientDrawable {
     val density = context.resources.displayMetrics.density
-    val markerColor = when (mode) {
-        TransitVehicleMode.BUS -> BUS_MARKER_COLOR
-        TransitVehicleMode.TRAM -> TRAM_MARKER_COLOR
-    }
     return GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(markerColor)
-        setStroke((2 * density).toInt().coerceAtLeast(1), AndroidColor.WHITE)
-        setSize((22 * density).toInt(), (22 * density).toInt())
+        setColor(markerColor(mode))
+        val strokeColor = if (selected) SELECTED_MARKER_COLOR else AndroidColor.WHITE
+        val strokeSize = if (selected) 3 else 2
+        val markerSize = if (selected) 28 else 22
+        setStroke((strokeSize * density).toInt().coerceAtLeast(1), strokeColor)
+        setSize((markerSize * density).toInt(), (markerSize * density).toInt())
     }
+}
+
+private fun markerColor(mode: TransitVehicleMode): Int = when (mode) {
+    TransitVehicleMode.BUS -> BUS_MARKER_COLOR
+    TransitVehicleMode.TRAM -> TRAM_MARKER_COLOR
 }
 
 private fun createStopMarkerIcon(context: Context, selected: Boolean): GradientDrawable {
     val density = context.resources.displayMetrics.density
     return GradientDrawable().apply {
         shape = GradientDrawable.OVAL
-        setColor(if (selected) SELECTED_STOP_MARKER_COLOR else STOP_MARKER_COLOR)
+        setColor(if (selected) SELECTED_MARKER_COLOR else STOP_MARKER_COLOR)
         setStroke((2 * density).toInt().coerceAtLeast(1), AndroidColor.WHITE)
         val sizeDp = if (selected) 18 else 14
         setSize((sizeDp * density).toInt(), (sizeDp * density).toInt())
@@ -443,11 +776,16 @@ private fun hasValidCoordinates(stop: StopEntity): Boolean =
 
 private const val VEHICLE_REFRESH_INTERVAL_MILLIS = 30_000L
 private const val MAX_DISPLAYED_STOP_DEPARTURES = 5
+private const val MAX_DISPLAYED_TRIP_STOPS = 8
+private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 190
 private const val DEFAULT_MAP_ZOOM = 12.0
+private const val SELECTED_VEHICLE_MAP_ZOOM = 14.5
+private const val ROUTE_MAP_PADDING_DP = 48
+private const val ROUTE_LINE_WIDTH_DP = 5f
 private const val KRAKOW_LATITUDE = 50.0647
 private const val KRAKOW_LONGITUDE = 19.9450
 private const val BUS_MARKER_COLOR = 0xFF1976D2.toInt()
 private const val TRAM_MARKER_COLOR = 0xFFD32F2F.toInt()
 private const val STOP_MARKER_COLOR = 0xFF388E3C.toInt()
-private const val SELECTED_STOP_MARKER_COLOR = 0xFFFFA000.toInt()
+private const val SELECTED_MARKER_COLOR = 0xFFFFA000.toInt()
 private val UPDATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")

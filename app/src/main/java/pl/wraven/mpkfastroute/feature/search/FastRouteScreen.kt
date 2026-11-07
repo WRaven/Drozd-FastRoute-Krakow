@@ -84,6 +84,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import java.io.File
 import java.net.URI
 import java.net.URISyntaxException
 import java.time.DayOfWeek
@@ -105,6 +106,7 @@ import pl.wraven.mpkfastroute.core.live.DepartureEstimate
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
+import pl.wraven.mpkfastroute.core.update.AppUpdateInstaller
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
@@ -130,6 +132,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
     var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
     var permissionStateRevision by remember { mutableStateOf(0) }
+    val canInstallAppUpdates = remember(permissionStateRevision) {
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+            context.packageManager.canRequestPackageInstalls()
+    }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -289,6 +295,49 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         }
     }
 
+    fun requestAppUpdateInstallPermission() {
+        if (canInstallAppUpdates) return
+        try {
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}")
+                )
+            )
+        } catch (_: ActivityNotFoundException) {
+            viewModel.showMessage("Nie można otworzyć ustawień instalacji aplikacji.")
+        } catch (_: SecurityException) {
+            viewModel.showMessage("Brak dostępu do ustawień instalacji aplikacji.")
+        }
+    }
+
+    fun installDownloadedAppUpdate() {
+        val apkPath = state.downloadedAppUpdatePath
+        if (apkPath == null) {
+            viewModel.showMessage("Najpierw pobierz plik aktualizacji.")
+            return
+        }
+        if (!canInstallAppUpdates) {
+            requestAppUpdateInstallPermission()
+            return
+        }
+        val apkFile = File(apkPath)
+        if (!apkFile.isFile || !apkFile.canRead()) {
+            viewModel.clearDownloadedAppUpdate()
+            viewModel.showMessage("Pobrany plik APK jest niedostępny. Pobierz go ponownie.")
+            return
+        }
+        try {
+            context.startActivity(AppUpdateInstaller.createInstallIntent(context, apkFile))
+        } catch (_: ActivityNotFoundException) {
+            viewModel.showMessage("Nie znaleziono systemowego instalatora pakietów.")
+        } catch (_: SecurityException) {
+            viewModel.showMessage("Android zablokował otwarcie instalatora aplikacji.")
+        } catch (exception: IllegalArgumentException) {
+            viewModel.showMessage("Nie można udostępnić pliku APK: ${exception.message.orEmpty()}")
+        }
+    }
+
     LaunchedEffect(state.statusMessage) {
         val message = state.statusMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(message)
@@ -392,8 +441,20 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             updateCheckMessage = state.updateCheckMessage,
             updateCheckResult = state.updateCheckResult,
             isCheckingUpdates = state.isCheckingUpdates,
+            isDownloadingAppUpdate = state.isDownloadingAppUpdate,
+            appUpdateDownloadProgressPercent = state.appUpdateDownloadProgressPercent,
+            appUpdateDownloadError = state.appUpdateDownloadError,
+            isAppUpdateDownloaded = state.downloadedAppUpdatePath != null &&
+                state.downloadedAppUpdateVersion == state.updateCheckResult?.latestVersion,
+            canInstallAppUpdates = canInstallAppUpdates,
             onRefresh = viewModel::refreshSchedule,
             onCheckUpdates = viewModel::checkForUpdates,
+            onDownloadUpdate = {
+                state.updateCheckResult?.takeIf { it.updateAvailable }
+                    ?.let(viewModel::downloadAppUpdate)
+            },
+            onInstallUpdate = ::installDownloadedAppUpdate,
+            onRequestInstallPermission = ::requestAppUpdateInstallPermission,
             onOpenRelease = ::openExternalUrl,
             onOpenLatestRelease = {
                 openExternalUrl(GitHubUpdateChecker.RELEASES_PAGE)
@@ -422,10 +483,16 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     state.updatePrompt?.takeIf { !settingsVisible }?.let { update ->
         UpdateAvailableDialog(
             update = update,
-            onUpdate = {
-                openExternalUrl(update.releaseUrl)
-                viewModel.dismissUpdatePrompt()
-            },
+            isDownloading = state.isDownloadingAppUpdate,
+            downloadProgressPercent = state.appUpdateDownloadProgressPercent,
+            downloadError = state.appUpdateDownloadError,
+            isDownloaded = state.downloadedAppUpdatePath != null &&
+                state.downloadedAppUpdateVersion == update.latestVersion,
+            canInstall = canInstallAppUpdates,
+            onDownload = { viewModel.downloadAppUpdate(update) },
+            onInstall = ::installDownloadedAppUpdate,
+            onRequestInstallPermission = ::requestAppUpdateInstallPermission,
+            onOpenRelease = { openExternalUrl(update.releaseUrl) },
             onSkip = viewModel::skipUpdatePrompt,
             onDismiss = viewModel::dismissUpdatePrompt
         )
@@ -476,12 +543,22 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             departures = state.liveMapStopDepartures,
             isLoadingDepartures = state.isLoadingLiveMapStopDepartures,
             departureError = state.liveMapStopDeparturesError,
+            selectedVehicle = state.selectedLiveVehicle,
+            selectedVehicleTrip = state.selectedLiveVehicleTrip,
+            selectedVehicleTripUpdate = state.selectedLiveVehicleTripUpdate,
+            isLoadingVehicleTrip = state.isLoadingSelectedLiveVehicleTrip,
+            isLoadingVehicleTripUpdate = state.isLoadingSelectedLiveVehicleTripUpdate,
+            vehicleTripError = state.selectedLiveVehicleTripError,
+            vehicleTripUpdateError = state.selectedLiveVehicleTripUpdateError,
             onRefresh = viewModel::refreshLiveVehiclePositions,
             onSelectStop = viewModel::loadLiveMapStop,
+            onSelectVehicle = viewModel::selectLiveVehicle,
             onClearSelectedStop = viewModel::clearLiveMapStop,
+            onClearSelectedVehicle = viewModel::clearSelectedLiveVehicle,
             onDismiss = {
                 liveMapVisible = false
                 viewModel.clearLiveMapStop()
+                viewModel.clearSelectedLiveVehicle()
             }
         )
     }
@@ -1623,8 +1700,16 @@ private fun SettingsDialog(
     updateCheckMessage: String?,
     updateCheckResult: pl.wraven.mpkfastroute.core.update.UpdateCheckResult?,
     isCheckingUpdates: Boolean,
+    isDownloadingAppUpdate: Boolean,
+    appUpdateDownloadProgressPercent: Int?,
+    appUpdateDownloadError: String?,
+    isAppUpdateDownloaded: Boolean,
+    canInstallAppUpdates: Boolean,
     onRefresh: () -> Unit,
     onCheckUpdates: () -> Unit,
+    onDownloadUpdate: () -> Unit,
+    onInstallUpdate: () -> Unit,
+    onRequestInstallPermission: () -> Unit,
     onOpenRelease: (String) -> Unit,
     onOpenLatestRelease: () -> Unit,
     onContactAuthor: () -> Unit,
@@ -1691,8 +1776,39 @@ private fun SettingsDialog(
                 }
                 updateCheckMessage?.let { Text(it) }
                 if (updateCheckResult?.updateAvailable == true) {
+                    Button(
+                        onClick = {
+                            when {
+                                isDownloadingAppUpdate -> Unit
+                                isAppUpdateDownloaded && canInstallAppUpdates -> onInstallUpdate()
+                                isAppUpdateDownloaded -> onRequestInstallPermission()
+                                else -> onDownloadUpdate()
+                            }
+                        },
+                        enabled = !isDownloadingAppUpdate
+                    ) {
+                        Text(
+                            when {
+                                isDownloadingAppUpdate -> appUpdateDownloadProgressPercent
+                                    ?.let { "Pobieranie APK: $it%" }
+                                    ?: "Pobieranie APK..."
+                                isAppUpdateDownloaded && canInstallAppUpdates -> "Zainstaluj"
+                                isAppUpdateDownloaded -> "Zezwól na instalowanie"
+                                else -> "Pobierz i zainstaluj"
+                            }
+                        )
+                    }
+                    if (isAppUpdateDownloaded && !canInstallAppUpdates) {
+                        Text(
+                            "Android wymaga zgody na instalację aplikacji pobranych spoza sklepu.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    appUpdateDownloadError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
                     TextButton(onClick = { onOpenRelease(updateCheckResult.releaseUrl) }) {
-                        Text("Otwórz wydanie ${updateCheckResult.latestVersion}")
+                        Text("Szczegóły wydania ${updateCheckResult.latestVersion}")
                     }
                 }
                 HorizontalDivider()
@@ -1791,7 +1907,15 @@ private fun ReleaseQrCode(modifier: Modifier = Modifier) {
 @Composable
 private fun UpdateAvailableDialog(
     update: UpdateCheckResult,
-    onUpdate: () -> Unit,
+    isDownloading: Boolean,
+    downloadProgressPercent: Int?,
+    downloadError: String?,
+    isDownloaded: Boolean,
+    canInstall: Boolean,
+    onDownload: () -> Unit,
+    onInstall: () -> Unit,
+    onRequestInstallPermission: () -> Unit,
+    onOpenRelease: () -> Unit,
     onSkip: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1799,14 +1923,52 @@ private fun UpdateAvailableDialog(
         onDismissRequest = onDismiss,
         title = { Text("Dostępna aktualizacja") },
         text = {
-            Text(
-                "Wersja ${update.latestVersion} jest dostępna " +
-                    "(zainstalowana: ${update.currentVersion})."
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Wersja ${update.latestVersion} jest dostępna " +
+                        "(zainstalowana: ${update.currentVersion})."
+                )
+                if (isDownloading) {
+                    Text(
+                        downloadProgressPercent?.let { "Pobieranie APK: $it%" }
+                            ?: "Pobieranie APK..."
+                    )
+                } else if (isDownloaded) {
+                    Text("APK pobrano i sprawdzono. Możesz przejść do instalacji.")
+                    if (!canInstall) {
+                        Text(
+                            "Android wymaga zgody na instalację aplikacji pobranych spoza sklepu."
+                        )
+                    }
+                }
+                downloadError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+                TextButton(onClick = onOpenRelease) {
+                    Text("Szczegóły wydania na GitHubie")
+                }
+            }
         },
         confirmButton = {
-            Button(onClick = onUpdate) {
-                Text("Aktualizuj")
+            Button(
+                onClick = {
+                    when {
+                        isDownloading -> Unit
+                        isDownloaded && canInstall -> onInstall()
+                        isDownloaded -> onRequestInstallPermission()
+                        else -> onDownload()
+                    }
+                },
+                enabled = !isDownloading
+            ) {
+                Text(
+                    when {
+                        isDownloading -> "Pobieranie..."
+                        isDownloaded && canInstall -> "Zainstaluj"
+                        isDownloaded -> "Zezwól na instalowanie"
+                        else -> "Pobierz i zainstaluj"
+                    }
+                )
             }
         },
         dismissButton = {
@@ -2295,7 +2457,7 @@ private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =
         Haversine.distanceMeters(place.latitude, place.longitude, stop.stopLat, stop.stopLon)
     } ?: throw IllegalStateException("A stop group cannot be empty.")
 
-private fun formatGtfsTime(seconds: Int): String {
+internal fun formatGtfsTime(seconds: Int): String {
     val totalMinutes = seconds / 60
     return "%02d:%02d".format(totalMinutes / 60, totalMinutes % 60)
 }

@@ -29,7 +29,19 @@ data class TripEntity(
     @PrimaryKey val tripId: String,
     val routeId: String,
     val serviceId: String,
-    val tripHeadsign: String?
+    val tripHeadsign: String?,
+    val shapeId: String? = null
+)
+
+@Entity(
+    tableName = "shape_points",
+    primaryKeys = ["shapeId", "shapePtSequence"]
+)
+data class ShapePointEntity(
+    val shapeId: String,
+    val shapePtSequence: Int,
+    val shapeLat: Double,
+    val shapeLon: Double
 )
 
 @Entity(tableName = "calendar")

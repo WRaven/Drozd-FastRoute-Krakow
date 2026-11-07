@@ -34,6 +34,9 @@ interface StopDao {
 
 @Dao
 interface RouteDao {
+    @Query("SELECT * FROM routes WHERE routeId = :routeId LIMIT 1")
+    suspend fun getById(routeId: String): RouteEntity?
+
     @Query("SELECT * FROM routes ORDER BY routeShortName, routeId")
     suspend fun getAll(): List<RouteEntity>
 
@@ -55,6 +58,18 @@ interface TripDao {
     suspend fun insertAll(trips: List<TripEntity>)
 
     @Query("DELETE FROM trips")
+    suspend fun deleteAll()
+}
+
+@Dao
+interface ShapePointDao {
+    @Query("SELECT * FROM shape_points WHERE shapeId = :shapeId ORDER BY shapePtSequence")
+    suspend fun getForShape(shapeId: String): List<ShapePointEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(points: List<ShapePointEntity>)
+
+    @Query("DELETE FROM shape_points")
     suspend fun deleteAll()
 }
 
