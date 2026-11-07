@@ -3,4 +3,7 @@
     <cache-path
         name="app_updates"
         path="updates/" />
+    <cache-path
+        name="bug_reports"
+        path="bug-reports/" />
 </paths>

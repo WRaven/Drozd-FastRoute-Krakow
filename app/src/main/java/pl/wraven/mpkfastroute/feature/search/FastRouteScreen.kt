@@ -72,6 +72,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.contentDescription
@@ -122,8 +123,10 @@ import pl.wraven.mpkfastroute.R
 fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val appView = LocalView.current
     val snackbarHostState = remember { SnackbarHostState() }
     var settingsVisible by remember { mutableStateOf(false) }
+    var bugReportVisible by rememberSaveable { mutableStateOf(false) }
     var radioSelectionVisible by remember { mutableStateOf(false) }
     var radioManagementVisible by remember { mutableStateOf(false) }
     var scheduleTarget by remember { mutableStateOf<SavedDestination?>(null) }
@@ -482,6 +485,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     viewModel.showMessage("Nie można otworzyć aplikacji pocztowej.")
                 }
             },
+            onReportBug = {
+                settingsVisible = false
+                bugReportVisible = true
+            },
             onEditHomeSchedule = { requestScheduleEdit(SavedDestination.HOME) },
             onEditWorkSchedule = { requestScheduleEdit(SavedDestination.WORK) },
             hasHomeDestination = state.hasHomeDestination,
@@ -492,7 +499,11 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         )
     }
 
-    state.updatePrompt?.takeIf { !settingsVisible }?.let { update ->
+    if (bugReportVisible) {
+        BugReportDialog(appView = appView, onDismiss = { bugReportVisible = false })
+    }
+
+    state.updatePrompt?.takeIf { !settingsVisible && !bugReportVisible }?.let { update ->
         UpdateAvailableDialog(
             update = update,
             isDownloading = state.isDownloadingAppUpdate,
@@ -1753,6 +1764,7 @@ private fun SettingsDialog(
     onOpenRelease: (String) -> Unit,
     onOpenLatestRelease: () -> Unit,
     onContactAuthor: () -> Unit,
+    onReportBug: () -> Unit,
     onEditHomeSchedule: () -> Unit,
     onEditWorkSchedule: () -> Unit,
     onClearDiagnostics: () -> Unit,
@@ -1914,6 +1926,9 @@ private fun SettingsDialog(
                 }
                 TextButton(onClick = onContactAuthor) {
                     Text("Autor: lukasz@drozd.cc")
+                }
+                Button(onClick = onReportBug) {
+                    Text("Zgłoś błąd")
                 }
                 Text("Terminal diagnostyczny wyszukiwania")
                 Box(

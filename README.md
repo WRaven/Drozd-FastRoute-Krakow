@@ -45,6 +45,13 @@ GTFS hours such as `25:06` (displayed as `01:06`). Route times show `(+1)` only
 when that time is on the calendar day after the journey starts. GTFS service-day
 values remain unchanged internally, preserving night-trip order and durations.
 
+**Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
+and optional reproduction steps. Add a screenshot of the app screen underneath
+the form or choose an existing image with Android's photo picker. Preview or
+remove the attachment, then **Otwórz pocztę (Open email)** to prepare a message
+to the author with app/Android versions. Send it yourself in your mail app.
+This needs no GitHub login and does not automatically create a GitHub Issue.
+
 To update an existing installation, open **Ustawienia → Sprawdź aktualizacje**
 (Settings → Check for updates), then **Pobierz i zainstaluj** (Download and install).
 If required, use **Zezwól na instalowanie** to grant this app installation permission
@@ -100,8 +107,21 @@ color-profile selector.
   in memory, not permanent location histories. Matching bus/tram GTFS archives
   are cached in the app's cache directory for an hour; they contain public
   schedules, not the user's location history.
+- Bug reporting does not upload anything automatically. Only the text and image
+  you review are handed to the chosen mail app, which sends them on your command.
+  GPS coordinates, saved destinations and diagnostic logs are not automatically
+  included; a screenshot may show private information, so review it before sending.
+  No gallery/storage permission is requested. Images up to 10 MiB are accepted
+  and normalized to PNG at up to 2 megapixels, without original image metadata.
+  Attachments stay in a private cache (shared read-only with the chosen mail app);
+  files older than seven days are cleaned on the next attachment operation.
+  Existing mail drafts are not guaranteed to retain cache files indefinitely.
 
 ## Implementation status
+
+Email/URI tests use Robolectric on Android API 26 and 36. The FileProvider cases
+require Unix filesystem paths and run in Linux GitHub Actions; those cases are
+skipped on Windows, where Android's path handling cannot be emulated directly.
 
 - The Room v6 database stores GTFS stops, routes, trips, stop times, route
   shapes, service calendars, date exceptions, and a materialized index of

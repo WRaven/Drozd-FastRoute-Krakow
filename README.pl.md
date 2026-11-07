@@ -46,6 +46,13 @@ pojawia się tylko przy godzinie z dnia kalendarzowego po rozpoczęciu podróży
 Wewnętrzne czasy dnia kursowania pozostają bez zmian, aby zachować kolejność
 nocnych kursów i prawidłowy czas przejazdu.
 
+**Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
+krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
+wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
+załącznik, następnie wybierz **Otwórz pocztę**. Gotowy email do autora zawiera
+wersje aplikacji i Androida; wysyłkę potwierdzasz samodzielnie w poczcie.
+Nie wymaga logowania do GitHuba i nie tworzy automatycznie GitHub Issue.
+
 Aktualizacja istniejącej instalacji: **Ustawienia → Sprawdź aktualizacje →
 Pobierz i zainstaluj**. Jeśli Android tego wymaga, użyj **Zezwól na instalowanie**
 i potwierdź instalację. Nie odinstalowuj aplikacji przed zgodną aktualizacją:
@@ -100,8 +107,20 @@ nie ma osobnego przełącznika profilu kolorystycznego.
   tramwajowych również działa w pamięci, nie stanowi trwałej historii lokalizacji.
   Pasujące archiwa GTFS autobusów i tramwajów są przechowywane przez godzinę
   w katalogu cache aplikacji; zawierają publiczny rozkład, nie historię użytkownika.
+- Zgłaszanie błędów nie wysyła nic automatycznie. Wybrana poczta otrzymuje
+  sprawdzony przez Ciebie opis i obraz, a wysyła je dopiero po Twoim poleceniu.
+  Nie dołączamy automatycznie GPS, zapisanych celów ani logów; zrzut może ujawniać
+  prywatne dane, dlatego sprawdź go przed wysyłką. Nie jest wymagane uprawnienie
+  do całej galerii/pamięci. Obrazy do 10 MiB są przekształcane do PNG do 2 megapikseli,
+  bez metadanych oryginału. Załączniki pozostają w prywatnym cache i są udostępniane
+  poczcie tylko do odczytu. Pliki starsze niż siedem dni są usuwane przy kolejnym
+  dodaniu załącznika; szkic w poczcie nie gwarantuje trwałego zachowania pliku cache.
 
 ## Stan implementacji
+
+Testy email/URI używają Robolectric dla Android API 26 i 36. Przypadki FileProvider
+wymagają ścieżek uniksowych i działają w GitHub Actions na Linuksie; na Windows
+są pomijane, ponieważ androidowej obsługi ścieżek nie da się tam odtworzyć wprost.
 
 - Baza Room v6 przechowuje przystanki, linie, kursy, czasy na przystankach,
   przebiegi tras, kalendarze kursowania, wyjątki dat i zmaterializowany indeks
