@@ -16,8 +16,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -32,8 +34,6 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -240,6 +240,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permissionStateRevision += 1
+        viewModel.refreshServiceNews()
         CommuteReminderScheduler.synchronize(
             context,
             hasSavedCommuteSchedule && hasCommuteReminderPermissions(context)
@@ -320,6 +321,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onSearch = viewModel::searchRoute,
                 onGoHome = { runWithLocationPermission(viewModel::routeHome) },
                 onGoToWork = { runWithLocationPermission(viewModel::routeToWork) },
+                onEditWorkSchedule = { requestScheduleEdit(SavedDestination.WORK) },
                 onSetHome = { requestScheduleSetup(SavedDestination.HOME) },
                 onSetWork = { requestScheduleSetup(SavedDestination.WORK) },
                 onCustomRoute = viewModel::routeCustom,
@@ -337,6 +339,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onOpenServiceAlerts = {
                     openExternalUrl("https://ztp.krakow.pl/kmk/komunikaty")
                 },
+                onOpenServiceNews = ::openExternalUrl,
+                onRefreshServiceNews = { viewModel.refreshServiceNews(force = true) },
                 onOpenWeather = {
                     weatherVisible = true
                     runWithLocationPermission(viewModel::loadWeather)
@@ -385,6 +389,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             },
             onEditHomeSchedule = { requestScheduleEdit(SavedDestination.HOME) },
             onEditWorkSchedule = { requestScheduleEdit(SavedDestination.WORK) },
+            hasHomeDestination = state.hasHomeDestination,
+            hasWorkDestination = state.hasWorkDestination,
             onClearDiagnostics = viewModel::clearDiagnostics,
             onDiagnosticsCopied = viewModel::diagnosticsCopied,
             onDismiss = { settingsVisible = false }
@@ -569,6 +575,7 @@ private fun SearchContent(
     onSearch: () -> Unit,
     onGoHome: () -> Unit,
     onGoToWork: () -> Unit,
+    onEditWorkSchedule: () -> Unit,
     onSetHome: () -> Unit,
     onSetWork: () -> Unit,
     onCustomRoute: () -> Unit,
@@ -578,44 +585,35 @@ private fun SearchContent(
     onSaveCustomRoute: () -> Unit,
     onEditRoutePlan: () -> Unit,
     onOpenServiceAlerts: () -> Unit,
+    onOpenServiceNews: (String) -> Unit,
+    onRefreshServiceNews: () -> Unit,
     onOpenWeather: () -> Unit,
     remindersEnabled: Boolean,
     onEnableCommuteReminders: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
-    val destinationSuggestionsRequester = remember { BringIntoViewRequester() }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
     var showDestinationStopPicker by remember(state.destinationPlace) {
         mutableStateOf(false)
-    }
-
-    LaunchedEffect(
-        state.destinationQuery,
-        state.addressCandidates,
-        state.isSearchingDestinationAddresses
-    ) {
-        if (state.destinationPlace == null && state.destinationQuery.length >= 2) {
-            destinationSuggestionsRequester.bringIntoView()
-        }
     }
 
     Column(
         modifier = modifier
             .imePadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Szybkie akcje", style = MaterialTheme.typography.titleMedium)
+                Text("Szybkie akcje", style = MaterialTheme.typography.titleSmall)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -641,6 +639,13 @@ private fun SearchContent(
                             Text(if (state.hasWorkDestination) "🏢 Do pracy" else "🏢 Ustaw do pracy")
                         }
                     )
+                    if (state.hasWorkDestination) {
+                        AssistChip(
+                            onClick = onEditWorkSchedule,
+                            enabled = !state.isImporting,
+                            label = { Text("🕒 Harmonogram pracy") }
+                        )
+                    }
                     AssistChip(
                         onClick = onCustomRoute,
                         enabled = !state.isSearching && !state.isImporting,
@@ -692,6 +697,12 @@ private fun SearchContent(
                         Text("⚙")
                     }
                 }
+                ServiceNewsTicker(
+                    state = state,
+                    onOpenAlerts = onOpenServiceAlerts,
+                    onOpenArticle = onOpenServiceNews,
+                    onRefresh = onRefreshServiceNews
+                )
             }
         }
         if (state.isImporting && state.progressMessage.isNotBlank()) {
@@ -707,61 +718,71 @@ private fun SearchContent(
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
 
-        Text("Znajdź połączenie", style = MaterialTheme.typography.headlineSmall)
+        Text("Znajdź połączenie", style = MaterialTheme.typography.titleLarge)
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Początek", style = MaterialTheme.typography.titleMedium)
-                Button(
-                    onClick = onUseCurrentLocation,
-                    enabled = !state.isSearching && !state.isImporting,
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("📍 Użyj mojej lokalizacji")
+                    Text(
+                        "Początek",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = onUseCurrentLocation,
+                        enabled = !state.isSearching && !state.isImporting
+                    ) {
+                        Text("📍 Moja lokalizacja")
+                    }
                 }
-                Text(
-                    "albo wpisz adres lub nazwę przystanku",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
                 OutlinedTextField(
                     value = state.originQuery,
                     onValueChange = onOriginQueryChange,
-                    label = { Text("Adres lub nazwa przystanku") },
+                    label = { Text("Adres lub przystanek") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (state.originPlace == null) {
-                    AddressSuggestionPicker(
-                        query = state.originQuery,
-                        recentPlaces = state.recentAddressPlaces,
-                        candidates = state.originAddressCandidates,
-                        isSearching = state.isSearchingOriginAddresses,
-                        onSelect = onSelectOriginAddress
-                    )
-                    state.originAddressSearchError?.let {
-                        Text(it, color = MaterialTheme.colorScheme.error)
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        AddressSuggestionPicker(
+                            query = state.originQuery,
+                            recentPlaces = state.recentAddressPlaces,
+                            candidates = state.originAddressCandidates,
+                            isSearching = state.isSearchingOriginAddresses,
+                            onSelect = onSelectOriginAddress
+                        )
+                        state.originAddressSearchError?.let {
+                            Text(it, color = MaterialTheme.colorScheme.error)
+                        }
+                        StopGroupPicker(
+                            query = state.originQuery,
+                            groups = stopGroups,
+                            recentStopNames = state.recentStopSearches,
+                            onSelectGroup = onSelectOrigin
+                        )
                     }
                 }
-                if (state.originPlace == null) {
-                    StopGroupPicker(
-                        query = state.originQuery,
-                        groups = stopGroups,
-                        recentStopNames = state.recentStopSearches,
-                        onSelectGroup = onSelectOrigin
-                    )
-                }
                 state.originPlace?.let { place ->
-                    if (!state.originStopManuallySelected) {
+                    if (
+                        !state.originStopManuallySelected &&
+                        state.nearbyOriginGroups.isNotEmpty()
+                    ) {
                         TextButton(
                             onClick = { showOriginStopPicker = !showOriginStopPicker },
-                            enabled = state.nearbyOriginGroups.isNotEmpty() &&
-                                !state.isSearching && !state.isImporting
+                            enabled = !state.isSearching && !state.isImporting
                         ) {
                             Text(
                                 if (showOriginStopPicker) "Ukryj przystanki"
@@ -787,9 +808,9 @@ private fun SearchContent(
                 }
                 state.originStop?.let { stop ->
                     Text(
-                        "Wybrany przystanek: " +
+                        "Przystanek: " +
                             StopNameGrouper.mainName(stop.stopName),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -801,25 +822,27 @@ private fun SearchContent(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Cel", style = MaterialTheme.typography.titleMedium)
+                Text("Cel", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = state.destinationQuery,
                     onValueChange = onDestinationQueryChange,
-                    label = { Text("Adres lub nazwa przystanku") },
+                    label = { Text("Adres lub przystanek") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
                 if (state.destinationPlace != null) {
-                    if (!state.destinationStopManuallySelected) {
+                    if (
+                        !state.destinationStopManuallySelected &&
+                        state.nearbyDestinationGroups.isNotEmpty()
+                    ) {
                         TextButton(
                             onClick = {
                                 showDestinationStopPicker = !showDestinationStopPicker
                             },
-                            enabled = state.nearbyDestinationGroups.isNotEmpty() &&
-                                !state.isSearching && !state.isImporting
+                            enabled = !state.isSearching && !state.isImporting
                         ) {
                             Text(
                                 if (showDestinationStopPicker) "Ukryj przystanki"
@@ -845,9 +868,9 @@ private fun SearchContent(
                     }
                 } else {
                     Column(
-                        modifier = Modifier.bringIntoViewRequester(
-                            destinationSuggestionsRequester
-                        ),
+                        modifier = Modifier
+                            .heightIn(max = 220.dp)
+                            .verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         AddressSuggestionPicker(
@@ -870,9 +893,9 @@ private fun SearchContent(
                 }
                 state.destinationStop?.let { stop ->
                     Text(
-                        "Wybrany przystanek: " +
+                        "Przystanek: " +
                             StopNameGrouper.mainName(stop.stopName),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -884,8 +907,8 @@ private fun SearchContent(
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 TextButton(
                     onClick = onEditRoutePlan,
@@ -975,6 +998,62 @@ private fun SearchContent(
                 stop = state.originStop,
                 departures = departures
             )
+        }
+    }
+}
+
+private const val MAX_SERVICE_NEWS_HEADLINES = 5
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ServiceNewsTicker(
+    state: SearchUiState,
+    onOpenAlerts: () -> Unit,
+    onOpenArticle: (String) -> Unit,
+    onRefresh: () -> Unit
+) {
+    val items = state.serviceNews.take(MAX_SERVICE_NEWS_HEADLINES)
+    val headlines = items.joinToString(separator = "   •   ") { it.title }
+    val message = when {
+        headlines.isNotBlank() && state.serviceNewsError != null ->
+            "Brak aktualizacji • $headlines"
+        headlines.isNotBlank() -> headlines
+        state.isLoadingServiceNews -> "Pobieranie komunikatów ZTP..."
+        state.serviceNewsError != null -> "Komunikaty ZTP niedostępne"
+        else -> "Brak najnowszych komunikatów"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = MaterialTheme.shapes.small
+            )
+            .clickable {
+                items.firstOrNull()?.let { onOpenArticle(it.url) } ?: onOpenAlerts()
+            }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("ZTP", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            text = message,
+            modifier = Modifier
+                .weight(1f)
+                .basicMarquee(iterations = Int.MAX_VALUE),
+            maxLines = 1,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (state.serviceNewsError != null) {
+            TextButton(
+                onClick = onRefresh,
+                enabled = !state.isLoadingServiceNews
+            ) {
+                Text("Ponów")
+            }
         }
     }
 }
@@ -1387,6 +1466,8 @@ private fun SettingsDialog(
     isImporting: Boolean,
     homeStopName: String?,
     workStopName: String?,
+    hasHomeDestination: Boolean,
+    hasWorkDestination: Boolean,
     homeSchedule: DestinationSchedule?,
     workSchedule: DestinationSchedule?,
     diagnosticEntries: List<String>,
@@ -1428,7 +1509,10 @@ private fun SettingsDialog(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    TextButton(onClick = onEditHomeSchedule, enabled = homeStopName != null) {
+                    TextButton(
+                        onClick = onEditHomeSchedule,
+                        enabled = hasHomeDestination
+                    ) {
                         Text("Zmień")
                     }
                 }
@@ -1440,7 +1524,10 @@ private fun SettingsDialog(
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
-                    TextButton(onClick = onEditWorkSchedule, enabled = workStopName != null) {
+                    TextButton(
+                        onClick = onEditWorkSchedule,
+                        enabled = hasWorkDestination
+                    ) {
                         Text("Zmień")
                     }
                 }

@@ -34,7 +34,11 @@ the architecture and phases in the project specification.
   typed-address/name origin, debounced address and stop suggestions, recent
   address/stop selections, an optional "Wybierz przystanek" control, grouped
   stop names with automatic platform selection, and home/work/custom/radio
-  quick actions.
+  quick actions. A separate work-schedule action opens its saved arrival-time
+  and weekday editor; long suggestion lists scroll within a bounded area so
+  they do not push the active search field off screen. The start screen keeps
+  its search controls compact and displays recent ZTP service notices from the
+  official RSS feed in a tappable scrolling ticker.
 - Address routes compare up to six nearby stop-name groups within 1.5 km.
   Walking to the first stop, between transfer stops, and from the final stop
   is included in door-to-door arrival estimates; results include the fastest

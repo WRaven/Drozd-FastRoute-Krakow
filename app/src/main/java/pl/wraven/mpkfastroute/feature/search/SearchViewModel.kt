@@ -38,6 +38,8 @@ import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
+import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsClient
+import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsItem
 import pl.wraven.mpkfastroute.core.location.AddressGeocoder
 import pl.wraven.mpkfastroute.core.location.CurrentLocationProvider
 import pl.wraven.mpkfastroute.core.location.GeoPlace
@@ -102,7 +104,10 @@ data class SearchUiState(
     val updatePrompt: UpdateCheckResult? = null,
     val weatherForecast: WeatherForecast? = null,
     val isLoadingWeather: Boolean = false,
-    val weatherError: String? = null
+    val weatherError: String? = null,
+    val serviceNews: List<ZtpServiceNewsItem> = emptyList(),
+    val isLoadingServiceNews: Boolean = false,
+    val serviceNewsError: String? = null
 ) {
     val isScheduleEmpty: Boolean
         get() = stops.isEmpty()
@@ -128,13 +133,16 @@ class SearchViewModel @Inject constructor(
     private val updateChecker: GitHubUpdateChecker,
     private val diagnostics: SearchDiagnostics,
     private val currentLocationProvider: CurrentLocationProvider,
-    private val openMeteoClient: OpenMeteoClient
+    private val openMeteoClient: OpenMeteoClient,
+    private val ztpServiceNewsClient: ZtpServiceNewsClient
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(SearchUiState())
     val uiState = mutableUiState.asStateFlow()
     private var originAddressSearchJob: Job? = null
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
+    private var serviceNewsJob: Job? = null
+    private var lastServiceNewsAttemptAtMillis = 0L
 
     init {
         observeStops()
@@ -142,6 +150,7 @@ class SearchViewModel @Inject constructor(
         observeDiagnostics()
         ensureScheduleImported()
         checkForUpdates(showStatus = false)
+        refreshServiceNews()
     }
 
     fun setDestinationQuery(query: String) {
@@ -322,6 +331,37 @@ class SearchViewModel @Inject constructor(
         mutableUiState.update {
             it.copy(weatherError = message)
         }
+    }
+
+    fun refreshServiceNews(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (mutableUiState.value.isLoadingServiceNews) return
+        if (!force && now - lastServiceNewsAttemptAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS) {
+            return
+        }
+        lastServiceNewsAttemptAtMillis = now
+        serviceNewsJob?.cancel()
+        serviceNewsJob = viewModelScope.launch {
+            mutableUiState.update {
+                it.copy(isLoadingServiceNews = true, serviceNewsError = null)
+            }
+            try {
+                val items = ztpServiceNewsClient.getLatestItems()
+                mutableUiState.update {
+                    it.copy(serviceNews = items, serviceNewsError = null)
+                }
+            } catch (exception: HttpRequestTimeoutException) {
+                showServiceNewsError("Komunikaty ZTP nie odpowiadają. Spróbuj ponownie.")
+            } catch (exception: IOException) {
+                showServiceNewsError("Nie można pobrać komunikatów ZTP. Sprawdź internet.")
+            } finally {
+                mutableUiState.update { it.copy(isLoadingServiceNews = false) }
+            }
+        }
+    }
+
+    private fun showServiceNewsError(message: String) {
+        mutableUiState.update { it.copy(serviceNewsError = message) }
     }
 
     fun selectOriginAddress(place: GeoPlace) {
@@ -1444,6 +1484,7 @@ class SearchViewModel @Inject constructor(
     }
 
     private companion object {
+        const val SERVICE_NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1_000L
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3
         const val MAX_NEARBY_STOPS = 6
