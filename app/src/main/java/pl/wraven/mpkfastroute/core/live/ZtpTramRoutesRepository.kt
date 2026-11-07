@@ -1,28 +1,20 @@
 package pl.wraven.mpkfastroute.core.live
 
-import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.plugins.HttpRequestTimeoutException
-import io.ktor.client.plugins.timeout
-import io.ktor.client.request.get
-import io.ktor.http.isSuccess
 import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.gtfs.readCsv
 import pl.wraven.mpkfastroute.core.gtfs.required
 
 @Singleton
 class ZtpTramRoutesRepository @Inject constructor(
-    private val httpClient: HttpClient
+    private val archiveRepository: ZtpGtfsArchiveRepository
 ) {
     private val mutex = Mutex()
     private var cachedRoutes: Map<String, String>? = null
@@ -35,18 +27,7 @@ class ZtpTramRoutesRepository @Inject constructor(
             nowMillis - cachedAtMillis in 0 until CACHE_DURATION_MILLIS
         }?.let { return@withLock it }
 
-        val response = try {
-            httpClient.get(TRAM_GTFS_URL) {
-                timeout { requestTimeoutMillis = ARCHIVE_TIMEOUT_MILLIS }
-            }
-        } catch (exception: HttpRequestTimeoutException) {
-            throw IOException("Przekroczono czas pobierania numerów linii tramwajowych.", exception)
-        }
-        if (!response.status.isSuccess()) {
-            throw IOException("ZTP zwrócił HTTP ${response.status.value} dla rozkładu tramwajowego.")
-        }
-        val archive = response.body<ByteArray>()
-        val routes = withContext(Dispatchers.Default) {
+        val routes = archiveRepository.withArchive(TransitVehicleMode.TRAM, nowMillis) { archive ->
             parseTramRouteShortNames(archive.inputStream())
         }
         cachedRoutes = routes
@@ -57,7 +38,6 @@ class ZtpTramRoutesRepository @Inject constructor(
     companion object {
         const val TRAM_GTFS_URL = "https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip"
         private const val CACHE_DURATION_MILLIS = 60 * 60 * 1_000L
-        private const val ARCHIVE_TIMEOUT_MILLIS = 60_000L
     }
 }
 

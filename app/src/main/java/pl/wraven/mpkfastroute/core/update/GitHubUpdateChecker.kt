@@ -100,9 +100,9 @@ class GitHubUpdateChecker @Inject constructor(
 
     companion object {
         const val RELEASES_PAGE =
-            "https://github.com/WRaven/MPK-Krakow-FastRoute/releases"
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases"
         const val RELEASES_API =
-            "https://api.github.com/repos/WRaven/MPK-Krakow-FastRoute/releases?per_page=100"
+            "https://api.github.com/repos/WRaven/Drozd-FastRoute-Krakow/releases?per_page=100"
         private const val USER_AGENT = "Drozd-FastRoute"
         private val TRUSTED_RELEASE_PATHS = listOf(
             "/WRaven/MPK-Krakow-FastRoute/releases/download/",

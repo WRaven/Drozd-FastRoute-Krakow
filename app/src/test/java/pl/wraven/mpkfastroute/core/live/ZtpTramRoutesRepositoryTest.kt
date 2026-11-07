@@ -16,8 +16,12 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Test
+import org.junit.Rule
+import org.junit.rules.TemporaryFolder
 
 class ZtpTramRoutesRepositoryTest {
+    @get:Rule val temporary = TemporaryFolder()
+
     @Test
     fun resolvesTramWithoutRouteIdUsingTheMatchingStaticFeed() = runBlocking {
         val routes = parseTramRouteShortNames(archive().inputStream())
@@ -62,7 +66,7 @@ class ZtpTramRoutesRepositoryTest {
             respond(archive(), headers = headersOf(HttpHeaders.ContentType, "application/zip"))
         })
         try {
-            val repository = ZtpTramRoutesRepository(client)
+            val repository = ZtpTramRoutesRepository(ZtpGtfsArchiveRepository(client, temporary.newFolder()))
             val first = repository.getRouteShortNamesByTripId(nowMillis = 0)
             assertEquals(mapOf("block_138_trip_21_service_2" to "17"), first)
             assertEquals(first, repository.getRouteShortNamesByTripId(nowMillis = 59 * 60 * 1_000L))
@@ -86,7 +90,7 @@ class ZtpTramRoutesRepositoryTest {
             }
         })
         try {
-            val repository = ZtpTramRoutesRepository(client)
+            val repository = ZtpTramRoutesRepository(ZtpGtfsArchiveRepository(client, temporary.newFolder()))
             assertThrows(IOException::class.java) {
                 runBlocking { repository.getRouteShortNamesByTripId(nowMillis = 0) }
             }

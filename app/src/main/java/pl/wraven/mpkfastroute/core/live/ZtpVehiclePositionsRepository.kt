@@ -8,6 +8,9 @@ import io.ktor.client.request.get
 import io.ktor.http.isSuccess
 import java.io.IOException
 import java.time.LocalDateTime
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import javax.inject.Inject
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 
@@ -31,7 +34,8 @@ data class LiveVehiclePosition(
     val routeId: String? = null,
     val tripId: String? = null,
     val currentStopSequence: Int? = null,
-    val currentStopId: String? = null
+    val currentStopId: String? = null,
+    val serviceDate: LocalDate? = null
 )
 
 data class LiveVehicleSnapshot(
@@ -186,7 +190,14 @@ internal fun mapVehiclePositions(
             currentStopSequence = vehicle.currentStopSequence.takeIf {
                 vehicle.hasCurrentStopSequence()
             },
-            currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() }
+            currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() },
+            serviceDate = trip?.startDate?.takeIf { trip.hasStartDate() && it.isNotBlank() }?.let {
+                try {
+                    LocalDate.parse(it, DateTimeFormatter.BASIC_ISO_DATE)
+                } catch (exception: DateTimeParseException) {
+                    throw IOException("ZTP przekazał nieprawidłową datę kursu pojazdu.", exception)
+                }
+            }
         )
     }
 }

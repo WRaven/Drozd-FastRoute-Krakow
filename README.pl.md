@@ -17,7 +17,7 @@ nie zmienia istniejącej instalacji ani zapisanych danych.
 ## Instalacja i pierwszy start
 
 1. Wymagany jest Android 8.0 lub nowszy i internet do pierwszego pobrania rozkładu.
-2. Otwórz [wydania na GitHub](https://github.com/WRaven/MPK-Krakow-FastRoute/releases)
+2. Otwórz [wydania na GitHub](https://github.com/WRaven/Drozd-FastRoute-Krakow/releases)
    i pobierz APK z wybranego kanału. Publiczne wersje testowe są oznaczone jako
    prerelease i **Test build N**, a zwykłe wydania mają tag `vMAJOR.MINOR.PATCH`.
    W kanale testowym wybierz najwyższy numer buildu, nie tylko pierwszą pozycję
@@ -36,6 +36,10 @@ Prerelease `upgrade-v1.0.0` zawiera ten sam stabilny APK dla starszych
 aktualizatorów, które szukają tylko wersji testowych. Po instalacji aplikacja
 release sprawdza wydania stabilne.
 
+Od **1.0.1** aktualizator, link wydań i kod QR korzystają bezpośrednio z nowej
+nazwy repozytorium. Zainstalowane 1.0.0 wykryje aktualizację przez przekierowanie
+GitHub ze starego adresu; pakiet, podpis i dane lokalne pozostają bez zmian.
+
 Aktualizacja istniejącej instalacji: **Ustawienia → Sprawdź aktualizacje →
 Pobierz i zainstaluj**. Jeśli Android tego wymaga, użyj **Zezwól na instalowanie**
 i potwierdź instalację. Nie odinstalowuj aplikacji przed zgodną aktualizacją:
@@ -50,7 +54,7 @@ stałą tożsamość pakietu; do normalnego korzystania wybierz stabilny APK.
 | Dom i praca | Użyj **Ustaw: Do domu** / **Ustaw: Do pracy**, aby zapisać cel, godzinę przyjazdu i dni tygodnia. Kolejne kliknięcia szukają trasy na najbliższy termin harmonogramu. Zapisane harmonogramy zmienisz w Ustawieniach lub szybką akcją harmonogramu pracy. |
 | Nazwy skrótów | W Ustawieniach zmień **Nazwa skrótu do domu** i **Nazwa skrótu do pracy**, następnie wybierz **Zapisz nazwy skrótów**. Nazwy nie mogą być puste. Pozostają po restarcie i pojawiają się również w nagłówkach harmonogramów oraz powiadomieniach. Zmiana nazwy nie zmienia celu ani harmonogramu. |
 | Własna trasa | Przytrzymaj wynik, aby zapisać jego początek i cel jako pojedynczy skrót **Własny**. Zapis kolejnej własnej trasy zastępuje poprzednią. |
-| Mapa Live | Wybierz **Live**. Mapa startuje na Krakowie, a następnie centruje się na dostępnej lokalizacji użytkownika. Znaczniki pojazdów pokazują numery linii i zgłoszony kierunek. Kliknij pojazd lub przystanek, aby zobaczyć szczegóły; mapę można przesuwać i przybliżać. **Pojazd** oznacza numer taborowy, nie numer linii. Ograniczenia szczegółów kursu opisano niżej. |
+| Mapa Live | Wybierz **Live**. Mapa startuje na Krakowie i centruje się na dostępnej lokalizacji. Kliknij pojazd po całą trasę i przewijaną listę wszystkich przystanków z godziną przyjazdu i minutami do przyjazdu. Kliknij przystanek, wybierz linię/kierunek i dni robocze, sobotę lub niedzielę/święta po pełny rozkład godzinowy. **Pojazd** oznacza numer taborowy, nie numer linii. |
 | Komunikaty ZTP | Czytaj przewijany pasek ZTP/aktywnych utrudnień albo kliknij go, aby otworzyć komunikat lub szczegóły. Prędkość wynosi 36 dp/s, o 20% więcej niż wcześniej. Dostępne są również **Komunikaty MPK** oraz skrót do profilu MPK Kraków w X. |
 | Pogoda | Wybierz **Pogoda**, aby zobaczyć aktualne warunki i prognozę na najbliższe 24 godziny dla swojej okolicy. Widok pokazuje temperaturę, opady, wiatr i temperaturę gruntu. Ciśnienie usunięto; godzinowy wiersz temperatury gruntu i wiatru jest krótszy. |
 | Radio | Użyj **Uruchom radio** / **Zatrzymaj radio**, wybierz stację lub zarządzaj strumieniami przyciskiem z kołem zębatym. Podczas odtwarzania działają systemowe kontrolki multimediów. |
@@ -88,6 +92,8 @@ nie ma osobnego przełącznika profilu kolorystycznego.
 - Dziennik diagnostyczny jest ograniczony i przechowywany w pamięci; nie zapisuje
   wpisanych adresów ani współrzędnych GPS. Cache pogody i mapowania linii
   tramwajowych również działa w pamięci, nie stanowi trwałej historii lokalizacji.
+  Pasujące archiwa GTFS autobusów i tramwajów są przechowywane przez godzinę
+  w katalogu cache aplikacji; zawierają publiczny rozkład, nie historię użytkownika.
 
 ## Stan implementacji
 
@@ -108,8 +114,10 @@ nie ma osobnego przełącznika profilu kolorystycznego.
 - Mapa Live korzysta z pozycji autobusów i tramwajów ZTP na mapie OpenStreetMap.
   Pozycje i prognozy wybranego kursu odświeżają się co 30 sekund, gdy mapa jest
   otwarta. Znaczniki pokazują linię oraz strzałkę kierunku, jeśli ZTP ją zgłasza.
-  Kliknięcie przystanku pokazuje najbliższe odjazdy; kliknięcie pojazdu próbuje
-  pokazać przebieg i rozkład kursu z dostępnymi opóźnieniami GTFS-Realtime.
+  Kliknięcie pojazdu pokazuje cały przebieg i przewijaną listę wszystkich
+  przystanków od początku do końca, z godziną i minutami do przyjazdu, oznaczeniem
+  miniętych/bieżącego przystanku oraz dostępną prognozą GTFS-Realtime.
+  Lista startuje przy bieżącym przystanku, ale można ją przewinąć wstecz.
   Szacunki statyczne i dane na żywo są odróżnione. Mapa obsługuje przesuwanie,
   gesty i przyciski powiększania. Startuje na Krakowie, następnie centruje i
   oznacza bieżącą lokalizację, jeśli uprawnienie oraz pozycja są dostępne.
@@ -119,10 +127,23 @@ nie ma osobnego przełącznika profilu kolorystycznego.
   pozycji tramwajowych, w przeciwieństwie do zbiorczego `GTFS_KRK.zip` planera.
   Mapowanie tramwajowe jest przechowywane w pamięci przez godzinę. Brak numerów
   jest jawnie sygnalizowany. Numery taborowe **Pojazd** pozostają osobnym polem.
-  Mapa i pojazdy mają widoczne oznaczenia źródeł. Naprawa nazw linii nie migruje
-  geometrii ani szczegółowego rozkładu wybranego kursu na osobne feedy A/T.
+  Mapa i pojazdy mają widoczne oznaczenia źródeł. Szczegóły kursu korzystają
+  z pasującego `GTFS_KRK_A.zip` lub `GTFS_KRK_T.zip`, nie z bazy planera.
+  Obaj odbiorcy współdzielą cache archiwum na dysku; brak kursu powoduje jedną
+  wymuszoną aktualizację przed zgłoszeniem błędu. Znaczniki czasu przyjazdu mają
+  pierwszeństwo przed opóźnieniem; opóźnienie jest przekazywane kolejnym
+  przystankom zgodnie z GTFS-Realtime. Pominięcie przystanku, odwołanie kursu
+  i brak danych nie tworzą zmyślonych prognoz. Dane Live starsze niż 90 sekund
+  są zastępowane wyraźnie oznaczonym czasem rozkładowym.
   Znaczniki przystanków rosną od małych kropek w widoku miasta do zwykłego rozmiaru
   przy zbliżeniu; rozmiary pojazdów i znacznika użytkownika pozostają bez zmian.
+- Wybranie przystanku w Live odczytuje pełny rozkład z lokalnego GTFS planera,
+  bez oczekiwania na TTSS. Wybierz linię i kierunek, a następnie dni robocze,
+  sobotę albo niedzielę/święta. Godziny i minuty obejmują całą dobę kursowania;
+  `(+1)` oznacza godziny po północy następnego dnia. Każdy typ pokazuje konkretną
+  wzorcową datę z najbliższych 35 dni, z uwzględnieniem kalendarza i wyjątków GTFS.
+  Polskie święta są oddzielone od dni roboczych. To tablica rozkładowa, nie prognoza
+  Live; szczególne daty i warianty linii mogą różnić się od pokazanego wzorca.
 - Radio działa w usłudze MediaSession, obsługuje systemowe kontrolki odtwarzania
   i zapamiętuje wybraną stację. Domyślna edytowalna lista zawiera Eska Rock,
   Antyradio, Radio Pogoda i Radio Kraków.
@@ -205,10 +226,12 @@ nie ma osobnego przełącznika profilu kolorystycznego.
   wszystkich możliwych połączeń.
 - Marsz jest szacowany po odległości w linii prostej przy 4,5 km/h, nie po sieci
   dróg pieszych; przeszkody i rzeczywiste czasy mogą zmieniać wynik.
-- Zbiorczy GTFS planera oraz feedy autobusowe/tramwajowe mają różne identyfikatory.
-  Numery linii tramwajowych są rozwiązywane z pasującego `GTFS_KRK_T.zip`, lecz
-  wybrany kurs Live może nadal zgłaszać brak w bazie GTFS planera. Poprawny numer
-  linii nie gwarantuje dostępności szczegółowego rozkładu ani geometrii kursu.
+- Zbiorczy GTFS planera i feedy pojazdów mają różne identyfikatory; szczegóły
+  Live używają zatem pasującego archiwum A/T. Nowy lub specjalny kurs może
+  nie występować w opublikowanym archiwum ZTP; po odświeżeniu jest zgłaszany błąd.
+  Bez geometrii mapa łączy przystanki i oznacza przebieg jako przybliżony.
+  Tablica przystanku wymaga aktualnego importu GTFS planera; przy starych danych
+  zaktualizuj bazę w ustawieniach.
 - Brak metadanych Live/linii jest sygnalizowany jako dane niedostępne lub
   niepełne. Szacunki rozkładowe nie są przedstawiane jako potwierdzone dane Live.
 - Przy braku lokalizacji włącz systemową usługę lokalizacji i sprawdź uprawnienia
@@ -226,7 +249,7 @@ nie ma osobnego przełącznika profilu kolorystycznego.
 | Dane | Źródło |
 | --- | --- |
 | Rozkład planera | [Zbiorczy GTFS ZTP](https://gtfs.ztp.krakow.pl/GTFS_KRK.zip) |
-| Pojazdy Live i opóźnienia | [Feedy GTFS-Realtime ZTP](https://gtfs.ztp.krakow.pl/) i pasujący [GTFS tramwajowy](https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip) |
+| Pojazdy Live i rozkład kursu | [Feedy GTFS-Realtime ZTP](https://gtfs.ztp.krakow.pl/), pasujący [GTFS autobusowy](https://gtfs.ztp.krakow.pl/GTFS_KRK_A.zip) i [tramwajowy](https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip) |
 | Prognozy odjazdów z przystanków | [TTSS Kraków](http://www.ttss.krakow.pl/) |
 | Komunikaty | [Feed komunikatów ZTP](https://ztp.krakow.pl/feed?post_type=komunikat) |
 | Mapa | [Autorzy OpenStreetMap](https://www.openstreetmap.org/copyright) |
@@ -247,7 +270,7 @@ JDK zgodnego z projektem, Android SDK Platform 36 i Build Tools 36.0.0.
 Przykład dla Windows/PowerShell:
 
 ```powershell
-git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git Drozd-FastRoute-Krakow
+git clone https://github.com/WRaven/Drozd-FastRoute-Krakow.git Drozd-FastRoute-Krakow
 Set-Location '.\Drozd-FastRoute-Krakow'
 $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
@@ -284,6 +307,12 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
 4. Zmień obie nazwy skrótów, zapisz i zrestartuj; sprawdź nazwy, cele i harmonogramy.
 5. Sprawdź ruch paska ZTP i wiersz gruntu/wiatru w pogodzie, także przy większej
    czcionce.
+6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
+   do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
+   ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.
+7. Kliknij przystanek (np. Sołtysowska Zakłady), wybierz linię/kierunek i każdy
+   typ dnia. Przewiń tabelę godzin do końca; sprawdź wpisy wieczorne i po północy,
+   datę wzorca i jawny komunikat dla linii niekursującej w wybranym dniu.
 
 ## Wersjonowanie i zgodne aktualizacje
 
@@ -354,23 +383,21 @@ zarówno do stabilnego wydania `v1.0.0`, jak i niedraftowego prerelease
 `upgrade-v1.0.0`. To drugie pozwala starym instalacjom pobrać ten sam APK bez
 zmiany ich dotychczasowego kodu aktualizatora. Nie zastępuj go APK debug.
 
-## Etapowa zmiana nazwy repozytorium
+## Zmiana nazwy repozytorium i zgodność
 
-Na czas wersji przejściowej repo pozostaje pod nazwą `WRaven/MPK-Krakow-FastRoute`.
-Planowana nowa nazwa to `WRaven/Drozd-FastRoute-Krakow`.
+To samo repozytorium GitHub zmieniło nazwę z `WRaven/MPK-Krakow-FastRoute` na
+[WRaven/Drozd-FastRoute-Krakow](https://github.com/WRaven/Drozd-FastRoute-Krakow)
+po potwierdzeniu instalacji stabilnego 1.0.0. Dotychczasowe wydania, historia,
+konfiguracja Actions i sekrety podpisu pozostały w tym repozytorium.
 
-1. Opublikuj i zainstaluj przejściowy APK, gdy repo ma jeszcze starą nazwę.
-   Aktualizator tej wersji akceptuje adresy pobierania wydań dokładnie z tych dwóch
-   repozytoriów. Główne API, link wydań i kod QR pozostają przy obecnym adresie
-   do czasu zmiany nazwy.
-2. Potwierdź instalację przed zmianą nazwy tego samego repozytorium GitHub.
-   Sekrety repo, konfiguracja Actions i klucze podpisu pozostają w tym repozytorium;
-   nie twórz nowego repo i nie generuj nowych kluczy podpisu.
-3. Po zmianie nazwy zaktualizuj git remote, główne adresy aktualizatora,
-   dokumentację i linki wydań. Sprawdź API, pobranie APK i zgodną aktualizację
-   z zainstalowanej wersji przejściowej.
-4. Nie używaj ponownie starej nazwy repo: przekierowania GitHub wymagają, aby
-   pozostała wolna. Zobacz [instrukcję zmiany nazwy repozytorium GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
+Git remote, dokumentacja oraz główne adresy aktualizatora i QR używają nowej nazwy.
+Aktualizator zainstalowanego 1.0.0 korzysta z przekierowania GitHub ze starego API
+i już akceptuje pobrania z obu dokładnych ścieżek repozytorium. Wersja 1.0.1
+korzysta bezpośrednio z nowego adresu, zachowując tę zgodność.
+
+Nie używaj ponownie starej nazwy repo: przekierowania GitHub wymagają, aby
+pozostała wolna. Nie twórz zastępczego repo ani nowych kluczy podpisu.
+Zobacz [instrukcję zmiany nazwy repozytorium GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
 
 Starsze APK akceptują wyłącznie starą ścieżkę pobierania wydań. Same przekierowania
 GitHub nie sprawią, że ich aktualizator zaakceptuje pliki pod nową nazwą;

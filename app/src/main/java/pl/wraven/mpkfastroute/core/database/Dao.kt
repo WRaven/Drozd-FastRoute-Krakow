@@ -90,6 +90,12 @@ interface ShapePointDao {
 
 @Dao
 interface ServiceCalendarDao {
+    @Query("SELECT * FROM calendar")
+    suspend fun getAll(): List<ServiceCalendarEntity>
+
+    @Query("SELECT * FROM calendar_dates")
+    suspend fun getAllExceptions(): List<CalendarDateEntity>
+
     @Query("SELECT * FROM calendar WHERE startDate <= :date AND endDate >= :date")
     suspend fun getForDate(date: String): List<ServiceCalendarEntity>
 
@@ -130,6 +136,28 @@ data class GtfsDepartureRow(
 
 @Dao
 interface StopTimeDao {
+    @Query(
+        """
+        SELECT route.routeShortName AS routeShortName,
+               COALESCE(NULLIF(trip.tripHeadsign, ''),
+                   (SELECT stop.stopName FROM stop_times AS lastTime
+                    JOIN stops AS stop ON stop.stopId = lastTime.stopId
+                    WHERE lastTime.tripId = trip.tripId
+                    ORDER BY lastTime.stopSequence DESC LIMIT 1)) AS direction,
+               stopTime.departureTime AS departureTime,
+               trip.serviceId AS serviceId
+        FROM stop_times AS stopTime
+        JOIN trips AS trip ON trip.tripId = stopTime.tripId
+        JOIN routes AS route ON route.routeId = trip.routeId
+        WHERE stopTime.stopId = :stopId
+          AND EXISTS (SELECT 1 FROM stop_times AS nextTime
+                      WHERE nextTime.tripId = trip.tripId
+                        AND nextTime.stopSequence > stopTime.stopSequence)
+        ORDER BY stopTime.departureTime, route.routeShortName, trip.tripId
+        """
+    )
+    suspend fun getTimetableAtStop(stopId: String): List<GtfsDepartureRow>
+
     @Query("SELECT COUNT(*) FROM stop_times")
     suspend fun count(): Int
 

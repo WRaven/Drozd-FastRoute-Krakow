@@ -10,6 +10,8 @@ import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,13 +21,16 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,12 +58,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
-import java.time.Duration
 import java.time.Instant
-import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -72,15 +73,21 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
-import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.database.StopEntity
-import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
 import pl.wraven.mpkfastroute.core.live.LiveVehiclePosition
 import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
-import pl.wraven.mpkfastroute.core.live.ScheduledVehicleStop
 import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
 import pl.wraven.mpkfastroute.core.live.VehicleTripSchedule
+import pl.wraven.mpkfastroute.core.live.KRAKOW_ZONE
+import pl.wraven.mpkfastroute.core.live.StopTimetable
+import pl.wraven.mpkfastroute.core.live.TimetableDayType
+import pl.wraven.mpkfastroute.core.live.VehicleStopTiming
+import pl.wraven.mpkfastroute.core.live.minutesUntil
+import pl.wraven.mpkfastroute.core.live.timetableHours
+import pl.wraven.mpkfastroute.core.live.upcomingVehicleStopIndex
+import pl.wraven.mpkfastroute.core.live.vehicleStopTimings
+import pl.wraven.mpkfastroute.core.live.isLiveTripUpdateFresh
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 
 @Composable
@@ -92,9 +99,9 @@ internal fun LiveVehicleMapDialog(
     userLocationError: String?,
     stops: List<StopEntity>,
     selectedStop: StopEntity?,
-    departures: LiveDeparturesResult?,
-    isLoadingDepartures: Boolean,
-    departureError: String?,
+    stopTimetable: StopTimetable?,
+    isLoadingStopTimetable: Boolean,
+    stopTimetableError: String?,
     selectedVehicle: LiveVehiclePosition?,
     selectedVehicleTrip: VehicleTripSchedule?,
     selectedVehicleTripUpdate: LiveTripUpdate?,
@@ -111,13 +118,10 @@ internal fun LiveVehicleMapDialog(
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val latestOnRefresh by rememberUpdatedState(onRefresh)
-    val latestOnSelectStop by rememberUpdatedState(onSelectStop)
-    val latestSelectedStop by rememberUpdatedState(selectedStop)
     LaunchedEffect(lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
                 latestOnRefresh()
-                latestSelectedStop?.let(latestOnSelectStop)
                 delay(VEHICLE_REFRESH_INTERVAL_MILLIS)
             }
         }
@@ -153,7 +157,10 @@ internal fun LiveVehicleMapDialog(
                     if (isLoading) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp))
                     }
-                    TextButton(onClick = onRefresh, enabled = !isLoading) {
+                    TextButton(onClick = {
+                        onRefresh()
+                        selectedStop?.let(onSelectStop)
+                    }, enabled = !isLoading) {
                         Text("Odśwież")
                     }
                     TextButton(onClick = onDismiss) {
@@ -239,11 +246,11 @@ internal fun LiveVehicleMapDialog(
                         onClear = onClearSelectedVehicle
                     )
                 } ?: selectedStop?.let {
-                    SelectedStopDepartures(
+                    SelectedStopTimetable(
                         stop = it,
-                        departures = departures,
-                        isLoading = isLoadingDepartures,
-                        error = departureError,
+                        timetable = stopTimetable,
+                        isLoading = isLoadingStopTimetable,
+                        error = stopTimetableError,
                         onClear = onClearSelectedStop
                     )
                 }
@@ -349,7 +356,7 @@ private fun LiveVehicleMap(
                 val marker = Marker(view).apply {
                     position = GeoPoint(stop.stopLat, stop.stopLon)
                     title = stop.stopName
-                    snippet = "Dotknij, aby wyświetlić najbliższe odjazdy"
+                    snippet = "Dotknij, aby wybrać linię i rozkład godzinowy"
                     icon = createStopMarkerIcon(context, isSelected, view.zoomLevelDouble)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     setOnMarkerClickListener { clickedMarker, _ ->
@@ -450,13 +457,19 @@ private fun VehicleLegend(color: Color, label: String) {
 }
 
 @Composable
-private fun SelectedStopDepartures(
+private fun SelectedStopTimetable(
     stop: StopEntity,
-    departures: LiveDeparturesResult?,
+    timetable: StopTimetable?,
     isLoading: Boolean,
     error: String?,
     onClear: () -> Unit
 ) {
+    var selectedLine by remember(stop.stopId) { mutableStateOf(timetable?.lines?.firstOrNull()) }
+    var dayType by remember(stop.stopId) { mutableStateOf(TimetableDayType.WORKDAY) }
+    val line = selectedLine?.takeIf { it in timetable?.lines.orEmpty() }
+        ?: timetable?.lines?.firstOrNull()
+    val day = timetable?.days?.get(dayType)
+    val hours = remember(day, line) { timetableHours(day, line) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -468,7 +481,7 @@ private fun SelectedStopDepartures(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        "Najbliższe odjazdy",
+                        "Rozkład przystanku",
                         style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -488,38 +501,87 @@ private fun SelectedStopDepartures(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp))
-                    Text("Pobieranie odjazdów…", style = MaterialTheme.typography.bodySmall)
+                    Text("Odczytywanie rozkładu…", style = MaterialTheme.typography.bodySmall)
                 }
                 error != null -> Text(
                     error,
                     color = MaterialTheme.colorScheme.error,
                     style = MaterialTheme.typography.bodySmall
                 )
-                departures == null -> Text(
-                    "Wybierz przystanek na mapie, aby sprawdzić odjazdy.",
+                timetable == null -> Text(
+                    "Wybierz przystanek na mapie, aby sprawdzić rozkład.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                departures.departures.isEmpty() -> Text(
-                    "Brak odjazdów w najbliższych dwóch godzinach.",
+                timetable.lines.isEmpty() -> Text(
+                    "Brak kursów z tego stanowiska w dostępnym rozkładzie GTFS.",
                     style = MaterialTheme.typography.bodySmall
                 )
                 else -> {
-                    Text(
-                        "Czerwone +N oznacza opóźnienie.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    if (departures.fallbackReason != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        timetable.lines.forEach { option ->
+                            FilterChip(
+                                selected = line == option,
+                                onClick = { selectedLine = option },
+                                label = { Text("${option.routeShortName} → ${option.direction}") }
+                            )
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        TimetableDayType.entries.forEach { type ->
+                            FilterChip(selected = dayType == type, onClick = { dayType = type },
+                                label = { Text(type.label) })
+                        }
+                    }
+                    line?.let {
+                        Text("Linia ${it.routeShortName} → ${it.direction}",
+                            style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                    }
+                    day?.date?.let {
                         Text(
-                            "Część odjazdów jest według rozkładu z powodu braku prognozy LIVE.",
+                            "Wzorzec dla ${it.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))} · ROZKŁAD",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    departures.departures
-                        .sortedBy { it.estimatedDepartureTime }
-                        .take(MAX_DISPLAYED_STOP_DEPARTURES)
-                        .forEach { LiveDepartureRow(it) }
+                    if (hours.isEmpty()) {
+                        Text("Brak odjazdów tej linii w wybranym typie dnia.",
+                            style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxWidth().heightIn(max = 200.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(4.dp))
+                        ) {
+                            item {
+                                Row(modifier = Modifier.fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant).padding(6.dp)) {
+                                    Text("Godzina", modifier = Modifier.weight(0.25f),
+                                        style = MaterialTheme.typography.labelMedium)
+                                    Text("Minuty", modifier = Modifier.weight(0.75f),
+                                        style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+                            items(hours, key = { it.hour }) { hour ->
+                                Row(modifier = Modifier.fillMaxWidth().padding(6.dp)) {
+                                    Text("%02d".format(hour.hour % 24) +
+                                        if (hour.hour >= 24) " (+${hour.hour / 24})" else "",
+                                        modifier = Modifier.weight(0.25f), fontWeight = FontWeight.Bold,
+                                        style = MaterialTheme.typography.bodySmall)
+                                    Text(hour.minutes.joinToString("  ") { "%02d".format(it) },
+                                        modifier = Modifier.weight(0.75f),
+                                        style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+                    }
+                    Text("Pełna doba; (+1) = następny dzień. Warianty i święta mogą różnić się od wzorca.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -589,6 +651,27 @@ private fun SelectedVehicleTripPanel(
                 )
             }
             schedule?.let { trip ->
+                var now by remember(trip.tripId) { mutableStateOf(Instant.now()) }
+                LaunchedEffect(trip.tripId) {
+                    while (isActive) {
+                        now = Instant.now()
+                        delay(1_000L)
+                    }
+                }
+                val currentUpdate = liveUpdate?.takeIf {
+                    isLiveTripUpdateFresh(it, now) &&
+                        (it.serviceDate == null || it.serviceDate == trip.serviceDate)
+                }
+                val timings = remember(vehicle, trip, currentUpdate) {
+                    vehicleStopTimings(vehicle, trip, currentUpdate)
+                }
+                val listState = rememberLazyListState()
+                LaunchedEffect(trip.tripId) {
+                    listState.scrollToItem(upcomingVehicleStopIndex(vehicle, trip))
+                }
+                Text("${trip.stops.size} przystanków · cały kurs · " +
+                    trip.serviceDate.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                    style = MaterialTheme.typography.labelSmall)
                 if (trip.shapePoints.size < 2) {
                     Text(
                         "Brak geometrii GTFS — pokazano przybliżony przebieg po przystankach.",
@@ -602,9 +685,15 @@ private fun SelectedVehicleTripPanel(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    liveUpdate != null -> Text(
+                    currentUpdate?.isCanceled == true -> Text(
+                        "ZTP oznaczył ten kurs jako odwołany.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    currentUpdate != null && timings.any { it.predictedArrival != null } -> Text(
                         "Prognoza LIVE · aktualizacja " +
-                            liveUpdate.fetchedAt.format(UPDATE_TIME_FORMATTER),
+                            (currentUpdate.sourceTimestamp?.atZone(KRAKOW_ZONE)?.format(UPDATE_TIME_FORMATTER)
+                                ?: currentUpdate.fetchedAt.format(UPDATE_TIME_FORMATTER)),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -626,25 +715,16 @@ private fun SelectedVehicleTripPanel(
                         color = MaterialTheme.colorScheme.error
                     )
                 }
-                val firstStopIndex = upcomingStopIndex(vehicle, trip)
-                Column(
+                LazyColumn(
+                    state = listState,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = MAX_TRIP_STOPS_PANEL_HEIGHT_DP.dp)
-                        .verticalScroll(rememberScrollState()),
+                        .heightIn(max = MAX_TRIP_STOPS_PANEL_HEIGHT_DP.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    trip.stops
-                        .drop(firstStopIndex)
-                        .take(MAX_DISPLAYED_TRIP_STOPS)
-                        .forEach { stop ->
-                            VehicleTripStopRow(
-                                scheduledStop = stop,
-                                currentStopSequence = vehicle.currentStopSequence,
-                                serviceDate = trip.serviceDate,
-                                liveUpdate = liveUpdate
-                            )
-                        }
+                    items(timings, key = { it.scheduledStop.stopSequence }) { timing ->
+                        VehicleTripStopRow(timing, now, currentUpdate?.isCanceled == true)
+                    }
                 }
             }
         }
@@ -653,102 +733,53 @@ private fun SelectedVehicleTripPanel(
 
 @Composable
 private fun VehicleTripStopRow(
-    scheduledStop: ScheduledVehicleStop,
-    currentStopSequence: Int?,
-    serviceDate: LocalDate,
-    liveUpdate: LiveTripUpdate?
+    timing: VehicleStopTiming,
+    now: Instant,
+    isCanceled: Boolean
 ) {
-    val stopUpdate = liveUpdate?.stopTimeUpdates?.firstOrNull { update ->
-        if (update.stopSequence != null) {
-            update.stopSequence == scheduledStop.stopSequence
-        } else {
-            update.stopId == scheduledStop.stop.stopId
-        }
-    }
-    val delaySeconds = stopUpdate?.departureDelaySeconds
-        ?: stopUpdate?.arrivalDelaySeconds
-        ?: stopUpdate?.departureTimeEpochSeconds?.let { epochSeconds ->
-            val scheduledDeparture = serviceDate.atStartOfDay()
-                .plusSeconds(scheduledStop.departureTime.toLong())
-            val predictedDeparture = Instant.ofEpochSecond(epochSeconds)
-                .atZone(ZoneId.systemDefault())
-                .toLocalDateTime()
-            Duration.between(scheduledDeparture, predictedDeparture).seconds
-                .coerceIn(Int.MIN_VALUE.toLong(), Int.MAX_VALUE.toLong())
-                .toInt()
-        }
-        ?: liveUpdate?.tripDelaySeconds
-    val estimatedDepartureTime = delaySeconds?.let {
-        (scheduledStop.departureTime.toLong() + it)
-            .coerceIn(0L, Int.MAX_VALUE.toLong())
-            .toInt()
+    val target = timing.predictedArrival ?: timing.scheduledArrival
+    val remaining = minutesUntil(target, now)
+    val timeLabel = if (timing.predictedArrival == null) {
+        formatGtfsTime(timing.scheduledStop.arrivalTime)
+    } else {
+        target.atZone(KRAKOW_ZONE).format(DateTimeFormatter.ofPattern("HH:mm"))
     }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                scheduledStop.stop.stopName +
-                    if (scheduledStop.stopSequence == currentStopSequence) " · pojazd" else "",
-                maxLines = 1,
+                timing.scheduledStop.stop.stopName + if (timing.isCurrent) " · pojazd" else "",
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                style = MaterialTheme.typography.bodySmall
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = if (timing.isCurrent) FontWeight.Bold else FontWeight.Normal,
+                color = if (timing.isPassed) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.onSurface
             )
             Text(
-                when {
-                    delaySeconds == null ->
-                        "${formatGtfsTime(scheduledStop.departureTime)} · ROZKŁAD"
-                    delaySeconds == 0 ->
-                        "${formatGtfsTime(scheduledStop.departureTime)} · LIVE"
-                    else ->
-                        "${formatGtfsTime(scheduledStop.departureTime)} → " +
-                            "${formatGtfsTime(estimatedDepartureTime ?: scheduledStop.departureTime)} · LIVE"
-                },
+                "$timeLabel · " + if (timing.predictedArrival != null) "LIVE" else "ROZKŁAD",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        delaySeconds?.takeIf { it != 0 }?.let {
-            val delayMinutes = (abs(it.toLong()) + 59) / 60
-            Text(
-                "${if (it > 0) "+" else "-"}$delayMinutes min",
-                color = if (it > 0) {
-                    MaterialTheme.colorScheme.error
-                } else {
-                    MaterialTheme.colorScheme.tertiary
-                },
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-    }
-}
-
-private fun upcomingStopIndex(
-    vehicle: LiveVehiclePosition,
-    schedule: VehicleTripSchedule
-): Int {
-    vehicle.currentStopSequence?.let { sequence ->
-        schedule.stops.indexOfFirst { it.stopSequence >= sequence }
-            .takeIf { it >= 0 }
-            ?.let { return it }
-    }
-    vehicle.currentStopId?.let { stopId ->
-        schedule.stops.indexOfFirst { it.stop.stopId == stopId }
-            .takeIf { it >= 0 }
-            ?.let { return it }
-    }
-    return schedule.stops.indices.minByOrNull { index ->
-        val stop = schedule.stops[index].stop
-        Haversine.distanceMeters(
-            vehicle.latitude,
-            vehicle.longitude,
-            stop.stopLat,
-            stop.stopLon
+        Text(
+            when {
+                isCanceled -> "odwołany"
+                timing.isSkipped -> "pomija"
+                timing.isPassed -> "minął"
+                remaining > 0 -> "za $remaining min"
+                remaining == 0L -> "teraz"
+                else -> "${-remaining} min temu"
+            },
+            color = if (timing.isCurrent) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodySmall
         )
-    } ?: 0
+    }
 }
 
 private fun tripRoutePoints(schedule: VehicleTripSchedule): List<GeoPoint> =
@@ -963,9 +994,7 @@ private fun hasValidCoordinates(stop: StopEntity): Boolean =
         (stop.stopLat != 0.0 || stop.stopLon != 0.0)
 
 private const val VEHICLE_REFRESH_INTERVAL_MILLIS = 30_000L
-private const val MAX_DISPLAYED_STOP_DEPARTURES = 5
-private const val MAX_DISPLAYED_TRIP_STOPS = 8
-private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 190
+private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 240
 private const val DEFAULT_MAP_ZOOM = 12.0
 private const val USER_LOCATION_MAP_ZOOM = 14.5
 private const val SELECTED_VEHICLE_MAP_ZOOM = 14.5

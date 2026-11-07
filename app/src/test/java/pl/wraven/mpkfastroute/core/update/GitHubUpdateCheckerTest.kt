@@ -7,6 +7,32 @@ import org.junit.Test
 
 class GitHubUpdateCheckerTest {
     @Test
+    fun primaryUpdateAndQrAddressesUseTheRenamedRepository() {
+        assertEquals(
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases",
+            GitHubUpdateChecker.RELEASES_PAGE
+        )
+        assertEquals(
+            "https://api.github.com/repos/WRaven/Drozd-FastRoute-Krakow/releases?per_page=100",
+            GitHubUpdateChecker.RELEASES_API
+        )
+    }
+
+    @Test
+    fun stablePatchUnderTheNewRepositoryUpdatesVersionOneWithoutChangingChannel() {
+        val downloadUrl =
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/v1.0.1/app.apk"
+        assertEquals(
+            downloadUrl,
+            GitHubUpdateChecker.selectApkDownloadUrl(listOf("app.apk" to downloadUrl))
+        )
+        val version = GitHubUpdateChecker.versionForRelease("v1.0.1", listOf("app.apk"))
+        assertTrue(GitHubUpdateChecker.releaseMatchesChannel(false, false, isTestBuild = false))
+        assertTrue(GitHubUpdateChecker.compareVersions(version, "1.0.0") > 0)
+        assertEquals(0, GitHubUpdateChecker.compareVersions(version, "1.0.1"))
+    }
+
+    @Test
     fun stableBuildsSelectStableReleasesAndDebugBuildsSelectPrereleases() {
         assertTrue(GitHubUpdateChecker.releaseMatchesChannel(false, false, isTestBuild = false))
         assertTrue(!GitHubUpdateChecker.releaseMatchesChannel(true, false, isTestBuild = false))

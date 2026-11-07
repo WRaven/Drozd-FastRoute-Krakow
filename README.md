@@ -18,7 +18,7 @@ the new display name does not change existing installations or saved data.
 
 1. Use Android 8.0 or newer and an internet connection for the first timetable
    download.
-2. Open [GitHub Releases](https://github.com/WRaven/MPK-Krakow-FastRoute/releases)
+2. Open [GitHub Releases](https://github.com/WRaven/Drozd-FastRoute-Krakow/releases)
    and download the APK from the desired channel. Public test builds are
    prereleases named **Test build N**; regular releases use `vMAJOR.MINOR.PATCH`.
    Within the test channel, choose the highest build number, not just the first
@@ -36,6 +36,10 @@ An `upgrade-v1.0.0` prerelease carries the identical stable APK for older
 updaters that only search prereleases. After installing it, the release app
 checks stable releases.
 
+From **1.0.1**, the updater, release link and QR code use the renamed repository
+directly. Installed 1.0.0 can discover this update through GitHub's old-address
+redirect; the Android package, signing key and local data remain unchanged.
+
 To update an existing installation, open **Ustawienia → Sprawdź aktualizacje**
 (Settings → Check for updates), then **Pobierz i zainstaluj** (Download and install).
 If required, use **Zezwól na instalowanie** to grant this app installation permission
@@ -51,7 +55,7 @@ the permanent package identity; use the stable APK for normal use.
 | Home and work | Use **Ustaw: Do domu** / **Ustaw: Do pracy** to configure a destination, arrival time and weekdays. Subsequent taps plan arrival for the next scheduled occurrence. Edit saved schedules in Settings or the work-schedule quick action. |
 | Shortcut names | In Settings, edit **Nazwa skrótu do domu** and **Nazwa skrótu do pracy**, then tap **Zapisz nazwy skrótów**. Names cannot be blank. Both persist after restart and also appear in schedule headings and commute notifications. Renaming does not change the destinations or schedules. |
 | Custom route | Long-press a result to store its endpoints as the single **Własny** shortcut. Saving another custom route replaces the previous one. |
-| Live map | Tap **Live**. The map initially opens on Kraków and centers on your location when available. Vehicle markers show line numbers and reported direction. Tap a vehicle or stop for details; pan or zoom the map as needed. The **Pojazd** value is a fleet number, not a line number. See the limitations below for selected-trip details. |
+| Live map | Tap **Live**. The map initially opens on Kraków and centers on your location when available. Tap a vehicle for its whole route and scrollable list of all stops with arrival time and minutes remaining. Tap a stop, choose a line/direction and workday, Saturday or Sunday/holiday for a full hourly timetable. The **Pojazd** value is a fleet number, not a line number. |
 | ZTP notices | Read the scrolling ZTP/active-disruption ticker or tap it to open the corresponding notice/details. It scrolls at 36 dp/s, 20% faster than the previous default. **Komunikaty MPK** and the MPK Kraków X quick action provide additional information. |
 | Weather | Tap **Pogoda** for current conditions and the next 24 hours near your location. The view includes temperature, precipitation, wind and soil temperature. Pressure is omitted; the hourly soil-temperature/wind line remains compact. |
 | Radio | Use **Uruchom radio** / **Zatrzymaj radio**, choose a station, or use the gear button to manage streams. Android media controls remain available while playing. |
@@ -88,7 +92,9 @@ color-profile selector.
   provider; these features are not entirely offline.
 - The diagnostic log is kept in memory, is bounded, and does not record entered
   addresses or GPS coordinates. Weather and tram-line lookup caches are also
-  in memory, not permanent location histories.
+  in memory, not permanent location histories. Matching bus/tram GTFS archives
+  are cached in the app's cache directory for an hour; they contain public
+  schedules, not the user's location history.
 
 ## Implementation status
 
@@ -112,9 +118,11 @@ color-profile selector.
 - The "Live" quick action displays ZTP bus and tram vehicle-position feeds on
   an OpenStreetMap map, refreshing positions and selected-trip predictions
   every 30 seconds while the map is open. Vehicle markers show the line number
-  and a direction arrow when ZTP reports a bearing. Tap a stop for its next
-  departures, or a vehicle to highlight its GTFS route and see the trip
-  timetable with ZTP real-time delay updates when available. Scheduled
+  and a direction arrow when ZTP reports a bearing. Tap a vehicle to highlight
+  its whole GTFS route and browse all stops from start to terminus, with arrival
+  time, minutes remaining, passed/current-stop status and ZTP real-time updates
+  when available. The list starts at the current stop but can be scrolled back.
+  Scheduled
   estimates and live delays are clearly distinguished. The map supports pan
   and pinch/button zoom. It opens centered on Kraków, then centers and marks
   the user's current location when location permission is granted; without
@@ -124,10 +132,23 @@ color-profile selector.
   the route planner). The tram mapping is cached in memory for an hour, and
   unavailable line numbers are reported explicitly. Fleet numbers shown as
   "Pojazd" are separate from line numbers. Map tiles and vehicle positions
-  include visible source attribution. The line-label mapping does not migrate
-  selected-trip geometry/timetables to the separate A/T feeds; see the limitations.
+  include visible source attribution. Trip details use the matching `GTFS_KRK_A.zip`
+  or `GTFS_KRK_T.zip`, not the planner database. Both consumers share a disk
+  archive cache, and a missing trip triggers one forced refresh before reporting
+  an error. Arrival timestamps take priority over delay values; delays propagate
+  to following stops according to GTFS-Realtime. Skipped, canceled and no-data
+  statuses do not invent arrival predictions. Live data older than 90 seconds
+  falls back to explicitly labeled scheduled times.
   Stop markers scale from small city-view dots to their normal close-up size;
   vehicle and user-location markers retain their existing sizes.
+- Selecting a stop in Live loads its full timetable from the local planner GTFS
+  without waiting for TTSS. Choose the line and destination, then workday,
+  Saturday or Sunday/holiday. Hours/minutes include the whole service day;
+  `(+1)` indicates after-midnight times on the following calendar day. A concrete
+  representative date from the next 35 days is shown for each day type, applying
+  the GTFS calendar and date exceptions. Polish public holidays are classified
+  separately from workdays. This is a scheduled board, not a live prediction;
+  unusual dates and route variants may differ from the displayed pattern.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,
@@ -230,11 +251,12 @@ color-profile selector.
   planner for every possible connection.
 - Walking distances use straight-line Haversine estimates at 4.5 km/h, not
   pedestrian street routing; obstacles and actual walking times can differ.
-- The combined planner feed and the bus/tram realtime feeds use different ID
-  namespaces. Tram line labels are resolved from the matching `GTFS_KRK_T.zip`,
-  but a selected Live trip may still report that it is absent from the planner
-  GTFS database. A correct line label does not guarantee that its detailed
-  timetable or route geometry can be displayed.
+- The combined planner feed and bus/tram realtime feeds use different IDs; Live
+  trip details therefore use the matching A/T archive. A newly changed or special
+  trip may still be absent from ZTP's published archive; this is reported explicitly
+  after refreshing. Without shape data, the map joins the trip's stops and labels
+  the line as approximate. The stop board depends on the imported planner timetable
+  being current; update the database in Settings if it is outdated.
 - Missing live/line metadata is shown as an unavailable/incomplete-data warning.
   Scheduled estimates are not presented as confirmed live data.
 - If location is unavailable, enable phone location services and check the app's
@@ -252,7 +274,7 @@ color-profile selector.
 | Data | Source |
 | --- | --- |
 | Planner timetable | [ZTP combined GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK.zip) |
-| Live vehicles and delays | [ZTP GTFS-Realtime feeds](https://gtfs.ztp.krakow.pl/) and the matching [tram GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip) |
+| Live vehicles and trip schedules | [ZTP GTFS-Realtime feeds](https://gtfs.ztp.krakow.pl/), matching [bus GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK_A.zip) and [tram GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip) |
 | Stop departure predictions | [Kraków TTSS](http://www.ttss.krakow.pl/) |
 | Service notices | [ZTP notices feed](https://ztp.krakow.pl/feed?post_type=komunikat) |
 | Map | [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) |
@@ -273,7 +295,7 @@ The [CI workflow](./.github/workflows/release.yml) uses Java 17.
 Windows/PowerShell example:
 
 ```powershell
-git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git Drozd-FastRoute-Krakow
+git clone https://github.com/WRaven/Drozd-FastRoute-Krakow.git Drozd-FastRoute-Krakow
 Set-Location '.\Drozd-FastRoute-Krakow'
 $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
@@ -309,6 +331,12 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
 4. Rename both shortcuts, save and restart; check names, destinations and schedules.
 5. Check ticker movement and the weather soil-temperature/wind line on the phone,
    including a larger font setting.
+6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
+   the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
+   labels. Reopen the same trip and check that passed stops remain accessible.
+7. Tap a stop (for example Sołtysowska Zakłady): choose a line/direction and each
+   day type. Scroll the hours to the end; check evening and after-midnight entries,
+   the reference date, and an explicit message for lines not running that day.
 
 ## Versioning and in-place updates
 
@@ -382,23 +410,21 @@ to the stable `v1.0.0` release and to the non-draft `upgrade-v1.0.0` prerelease.
 The latter lets old installations discover the same APK without changing their
 old updater code. Do not substitute a debug APK for this transition.
 
-## Staged repository rename
+## Repository rename and compatibility
 
-The repository remains `WRaven/MPK-Krakow-FastRoute` during the bridge release.
-The planned name is `WRaven/Drozd-FastRoute-Krakow`.
+The same GitHub repository was renamed from `WRaven/MPK-Krakow-FastRoute` to
+[WRaven/Drozd-FastRoute-Krakow](https://github.com/WRaven/Drozd-FastRoute-Krakow)
+after installation of stable 1.0.0 was confirmed. Existing releases, history,
+Actions configuration and signing secrets remain in that repository.
 
-1. Publish and install the bridge APK while the repository still has its old name.
-   The bridge updater trusts release-download URLs from exactly these two
-   repositories. Its primary API, release link and QR code still point to the
-   current repository until the rename.
-2. Confirm installation before renaming the same GitHub repository. Repository
-   secrets, Actions configuration and signing keys remain with that repository;
-   do not create a replacement repository or regenerate signing keys.
-3. After renaming, update the git remote, the updater's primary URLs, documentation
-   and release links to the new name. Verify the API, APK download and an in-place
-   update using the installed bridge version.
-4. Do not reuse the old repository name: GitHub's redirects depend on it remaining
-   unused. See [GitHub's repository-renaming guidance](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
+The git remote, documentation, and primary updater/QR URLs now use the new name.
+The installed 1.0.0 updater follows GitHub's redirect from the old API address
+and already trusts downloads from both exact repository paths. Version 1.0.1
+uses the new address directly and retains this compatibility.
+
+Do not reuse the old repository name: GitHub's redirects depend on it remaining
+unused. Do not create a replacement repository or regenerate signing keys.
+See [GitHub's repository-renaming guidance](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
 
 Earlier APKs only trust the old release-download path. GitHub redirects alone do
 not make their updater accept assets under the new name; users still running

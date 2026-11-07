@@ -51,6 +51,9 @@ import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
 import pl.wraven.mpkfastroute.core.live.LiveVehiclePosition
 import pl.wraven.mpkfastroute.core.live.VehicleTripSchedule
 import pl.wraven.mpkfastroute.core.live.VehicleTripScheduleRepository
+import pl.wraven.mpkfastroute.core.live.KRAKOW_ZONE
+import pl.wraven.mpkfastroute.core.live.StopTimetable
+import pl.wraven.mpkfastroute.core.live.StopTimetableRepository
 import pl.wraven.mpkfastroute.core.live.ZtpTripUpdatesRepository
 import pl.wraven.mpkfastroute.core.live.ZtpVehiclePositionsRepository
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsClient
@@ -115,9 +118,9 @@ data class SearchUiState(
     val liveMapUserLocation: GeoPlace? = null,
     val liveMapLocationError: String? = null,
     val selectedLiveMapStop: StopEntity? = null,
-    val liveMapStopDepartures: LiveDeparturesResult? = null,
-    val isLoadingLiveMapStopDepartures: Boolean = false,
-    val liveMapStopDeparturesError: String? = null,
+    val liveMapStopTimetable: StopTimetable? = null,
+    val isLoadingLiveMapStopTimetable: Boolean = false,
+    val liveMapStopTimetableError: String? = null,
     val selectedLiveVehicle: LiveVehiclePosition? = null,
     val selectedLiveVehicleTrip: VehicleTripSchedule? = null,
     val selectedLiveVehicleTripUpdate: LiveTripUpdate? = null,
@@ -172,6 +175,7 @@ class SearchViewModel @Inject constructor(
     private val ttssDepartureRepository: TtssDepartureRepository,
     private val liveVehiclePositionsRepository: ZtpVehiclePositionsRepository,
     private val vehicleTripScheduleRepository: VehicleTripScheduleRepository,
+    private val stopTimetableRepository: StopTimetableRepository,
     private val ztpTripUpdatesRepository: ZtpTripUpdatesRepository,
     private val contextEngine: ContextEngine,
     private val addressGeocoder: AddressGeocoder,
@@ -192,7 +196,7 @@ class SearchViewModel @Inject constructor(
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
     private var liveVehicleJob: Job? = null
-    private var liveMapStopDeparturesJob: Job? = null
+    private var liveMapStopTimetableJob: Job? = null
     private var liveMapStopRequestId = 0L
     private var selectedVehicleTripJob: Job? = null
     private var selectedVehicleTripUpdateJob: Job? = null
@@ -364,7 +368,8 @@ class SearchViewModel @Inject constructor(
                 }
                 if (
                     refreshedSelectedVehicle != null &&
-                    refreshedSelectedVehicle.tripId != selectedVehicle?.tripId
+                    (refreshedSelectedVehicle.tripId != selectedVehicle?.tripId ||
+                        refreshedSelectedVehicle.serviceDate != selectedVehicle?.serviceDate)
                 ) {
                     selectLiveVehicle(refreshedSelectedVehicle)
                 }
@@ -466,14 +471,11 @@ class SearchViewModel @Inject constructor(
         }
         if (tripId.isNullOrBlank()) return
 
-        val stopsById = mutableUiState.value.stops.associateBy(StopEntity::stopId)
-        val serviceDate = GtfsServiceClock.from(LocalDateTime.now()).serviceDate
         selectedVehicleTripJob = viewModelScope.launch {
             try {
                 val schedule = vehicleTripScheduleRepository.getSchedule(
-                    tripId = tripId,
-                    stopsById = stopsById,
-                    serviceDate = serviceDate
+                    vehicle = vehicle,
+                    now = LocalDateTime.now(KRAKOW_ZONE)
                 )
                 if (requestId == selectedVehicleTripRequestId) {
                     mutableUiState.update {
@@ -485,6 +487,13 @@ class SearchViewModel @Inject constructor(
                 }
             } catch (exception: CancellationException) {
                 throw exception
+            } catch (exception: IOException) {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(selectedLiveVehicleTripError =
+                            "Nie udało się pobrać rozkładu kursu: ${exception.message.orEmpty()}")
+                    }
+                }
             } catch (exception: SQLiteException) {
                 if (requestId == selectedVehicleTripRequestId) {
                     mutableUiState.update {
@@ -548,7 +557,9 @@ class SearchViewModel @Inject constructor(
         }
         selectedVehicleTripUpdateJob = viewModelScope.launch {
             try {
-                val update = ztpTripUpdatesRepository.getTripUpdate(vehicle.mode, tripId)
+                val update = ztpTripUpdatesRepository.getTripUpdate(
+                    vehicle.mode, tripId, vehicle.serviceDate
+                )
                 if (
                     requestId == selectedVehicleTripRequestId &&
                     mutableUiState.value.selectedLiveVehicle?.tripId == tripId
@@ -588,30 +599,26 @@ class SearchViewModel @Inject constructor(
     fun loadLiveMapStop(stop: StopEntity) {
         clearSelectedLiveVehicle()
         val requestId = ++liveMapStopRequestId
-        liveMapStopDeparturesJob?.cancel()
+        liveMapStopTimetableJob?.cancel()
         mutableUiState.update {
             it.copy(
                 selectedLiveMapStop = stop,
-                liveMapStopDepartures = null,
-                isLoadingLiveMapStopDepartures = true,
-                liveMapStopDeparturesError = null
+                liveMapStopTimetable = null,
+                isLoadingLiveMapStopTimetable = true,
+                liveMapStopTimetableError = null
             )
         }
-        liveMapStopDeparturesJob = viewModelScope.launch {
+        liveMapStopTimetableJob = viewModelScope.launch {
             try {
-                val now = LocalDateTime.now()
-                val serviceTime = GtfsServiceClock.from(now)
-                val departures = ttssDepartureRepository.getDepartures(
+                val timetable = stopTimetableRepository.getTimetable(
                     stopId = stop.stopId,
-                    serviceDate = serviceTime.serviceDate,
-                    startTimeSeconds = serviceTime.timeSeconds,
-                    nowTimeSeconds = now.toLocalTime().toSecondOfDay()
+                    today = LocalDateTime.now(KRAKOW_ZONE).toLocalDate()
                 )
                 if (requestId == liveMapStopRequestId) {
                     mutableUiState.update {
                         it.copy(
-                            liveMapStopDepartures = departures,
-                            liveMapStopDeparturesError = null
+                            liveMapStopTimetable = timetable,
+                            liveMapStopTimetableError = null
                         )
                     }
                 }
@@ -621,8 +628,8 @@ class SearchViewModel @Inject constructor(
                 if (requestId == liveMapStopRequestId) {
                     mutableUiState.update {
                         it.copy(
-                            liveMapStopDeparturesError =
-                                "Nie można odczytać odjazdów: ${exception.message.orEmpty()}"
+                            liveMapStopTimetableError =
+                                "Nie można odczytać rozkładu przystanku: ${exception.message.orEmpty()}"
                         )
                     }
                 }
@@ -630,8 +637,8 @@ class SearchViewModel @Inject constructor(
                 if (requestId == liveMapStopRequestId) {
                     mutableUiState.update {
                         it.copy(
-                            liveMapStopDeparturesError =
-                                "Nie można pobrać odjazdów: ${exception.message.orEmpty()}"
+                            liveMapStopTimetableError =
+                                "Nie można odczytać rozkładu przystanku: ${exception.message.orEmpty()}"
                         )
                     }
                 }
@@ -639,15 +646,15 @@ class SearchViewModel @Inject constructor(
                 if (requestId == liveMapStopRequestId) {
                     mutableUiState.update {
                         it.copy(
-                            liveMapStopDeparturesError =
-                                "Nie udało się pobrać odjazdów: ${exception.message.orEmpty()}"
+                            liveMapStopTimetableError =
+                                "Nie udało się pobrać rozkładu przystanku: ${exception.message.orEmpty()}"
                         )
                     }
                 }
             } finally {
                 if (requestId == liveMapStopRequestId) {
                     mutableUiState.update {
-                        it.copy(isLoadingLiveMapStopDepartures = false)
+                        it.copy(isLoadingLiveMapStopTimetable = false)
                     }
                 }
             }
@@ -656,14 +663,14 @@ class SearchViewModel @Inject constructor(
 
     fun clearLiveMapStop() {
         liveMapStopRequestId += 1
-        liveMapStopDeparturesJob?.cancel()
-        liveMapStopDeparturesJob = null
+        liveMapStopTimetableJob?.cancel()
+        liveMapStopTimetableJob = null
         mutableUiState.update {
             it.copy(
                 selectedLiveMapStop = null,
-                liveMapStopDepartures = null,
-                isLoadingLiveMapStopDepartures = false,
-                liveMapStopDeparturesError = null
+                liveMapStopTimetable = null,
+                isLoadingLiveMapStopTimetable = false,
+                liveMapStopTimetableError = null
             )
         }
     }
