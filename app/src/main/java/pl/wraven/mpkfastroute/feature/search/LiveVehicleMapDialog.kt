@@ -78,12 +78,15 @@ import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
 import pl.wraven.mpkfastroute.core.live.ScheduledVehicleStop
 import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
 import pl.wraven.mpkfastroute.core.live.VehicleTripSchedule
+import pl.wraven.mpkfastroute.core.location.GeoPlace
 
 @Composable
 internal fun LiveVehicleMapDialog(
     snapshot: LiveVehicleSnapshot?,
     isLoading: Boolean,
     error: String?,
+    userLocation: GeoPlace?,
+    userLocationError: String?,
     stops: List<StopEntity>,
     selectedStop: StopEntity?,
     departures: LiveDeparturesResult?,
@@ -185,6 +188,9 @@ internal fun LiveVehicleMapDialog(
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
+                userLocationError?.let {
+                    Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 snapshot?.unavailableModes?.takeIf { it.isNotEmpty() }?.let {
                     Text(
                         "Częściowe dane — brak pozycji ${it.joinToString(" i ") { mode ->
@@ -203,6 +209,7 @@ internal fun LiveVehicleMapDialog(
 
                 LiveVehicleMap(
                     snapshot = snapshot,
+                    userLocation = userLocation,
                     stops = mappedStops,
                     selectedStop = selectedStop,
                     selectedVehicle = selectedVehicle,
@@ -266,6 +273,7 @@ internal fun LiveVehicleMapDialog(
 @Composable
 private fun LiveVehicleMap(
     snapshot: LiveVehicleSnapshot?,
+    userLocation: GeoPlace?,
     stops: List<StopEntity>,
     selectedStop: StopEntity?,
     selectedVehicle: LiveVehiclePosition?,
@@ -276,7 +284,7 @@ private fun LiveVehicleMap(
 ) {
     val context = LocalContext.current
     val mapView = remember(context) { createMapView(context) }
-    var centeredOnVehicles by remember(mapView) { mutableStateOf(false) }
+    var centeredOnUserLocation by remember(mapView) { mutableStateOf<GeoPlace?>(null) }
     var fittedTripId by remember(mapView) { mutableStateOf<String?>(null) }
     var previousSelectedVehicleId by remember(mapView) { mutableStateOf<String?>(null) }
     val mapShape = RoundedCornerShape(16.dp)
@@ -364,14 +372,22 @@ private fun LiveVehicleMap(
                 }
                 view.overlays.add(marker)
             }
-            if (!centeredOnVehicles && vehicles.isNotEmpty()) {
-                view.controller.setCenter(
-                    GeoPoint(
-                        vehicles.map { it.latitude }.average(),
-                        vehicles.map { it.longitude }.average()
-                    )
+            userLocation?.let { location ->
+                view.overlays.add(
+                    Marker(view).apply {
+                        position = GeoPoint(location.latitude, location.longitude)
+                        title = location.label
+                        icon = createUserLocationMarkerIcon(context)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    }
                 )
-                centeredOnVehicles = true
+            }
+            if (userLocation != null && userLocation != centeredOnUserLocation) {
+                view.controller.setCenter(
+                    GeoPoint(userLocation.latitude, userLocation.longitude)
+                )
+                view.controller.setZoom(USER_LOCATION_MAP_ZOOM)
+                centeredOnUserLocation = userLocation
             }
             view.invalidate()
         }
@@ -876,6 +892,17 @@ private fun createStopMarkerIcon(context: Context, selected: Boolean): GradientD
     }
 }
 
+private fun createUserLocationMarkerIcon(context: Context): GradientDrawable {
+    val density = context.resources.displayMetrics.density
+    return GradientDrawable().apply {
+        shape = GradientDrawable.OVAL
+        setColor(USER_LOCATION_MARKER_COLOR)
+        setStroke((3 * density).toInt().coerceAtLeast(1), AndroidColor.WHITE)
+        val sizeDp = 20
+        setSize((sizeDp * density).toInt(), (sizeDp * density).toInt())
+    }
+}
+
 private fun hasValidCoordinates(stop: StopEntity): Boolean =
     stop.stopLat.isFinite() &&
         stop.stopLon.isFinite() &&
@@ -888,6 +915,7 @@ private const val MAX_DISPLAYED_STOP_DEPARTURES = 5
 private const val MAX_DISPLAYED_TRIP_STOPS = 8
 private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 190
 private const val DEFAULT_MAP_ZOOM = 12.0
+private const val USER_LOCATION_MAP_ZOOM = 14.5
 private const val SELECTED_VEHICLE_MAP_ZOOM = 14.5
 private const val ROUTE_MAP_PADDING_DP = 48
 private const val ROUTE_LINE_WIDTH_DP = 5f
@@ -904,5 +932,6 @@ private const val BUS_MARKER_COLOR = 0xFF1976D2.toInt()
 private const val TRAM_MARKER_COLOR = 0xFFD32F2F.toInt()
 private const val STOP_MARKER_COLOR = 0xFF388E3C.toInt()
 private const val SELECTED_MARKER_COLOR = 0xFFFFA000.toInt()
+private const val USER_LOCATION_MARKER_COLOR = 0xFF1565C0.toInt()
 private const val DIRECTION_MARKER_STROKE_COLOR = 0xFF263238.toInt()
 private val UPDATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")

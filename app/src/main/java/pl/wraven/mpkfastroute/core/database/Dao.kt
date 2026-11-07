@@ -53,6 +53,16 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE tripId = :tripId LIMIT 1")
     suspend fun getById(tripId: String): TripEntity?
 
+    @Query(
+        """
+        SELECT trip.tripId AS tripId, route.routeShortName AS routeShortName
+        FROM trips AS trip
+        JOIN routes AS route ON route.routeId = trip.routeId
+        WHERE trip.tripId IN (:tripIds)
+        """
+    )
+    suspend fun getRouteShortNamesByTripIds(tripIds: List<String>): List<TripRouteShortNameRow>
+
     @Transaction
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(trips: List<TripEntity>)
@@ -60,6 +70,11 @@ interface TripDao {
     @Query("DELETE FROM trips")
     suspend fun deleteAll()
 }
+
+data class TripRouteShortNameRow(
+    val tripId: String,
+    val routeShortName: String
+)
 
 @Dao
 interface ShapePointDao {

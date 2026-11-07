@@ -108,6 +108,8 @@ data class SearchUiState(
     val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
     val isLoadingLiveVehicles: Boolean = false,
     val liveVehicleError: String? = null,
+    val liveMapUserLocation: GeoPlace? = null,
+    val liveMapLocationError: String? = null,
     val selectedLiveMapStop: StopEntity? = null,
     val liveMapStopDepartures: LiveDeparturesResult? = null,
     val isLoadingLiveMapStopDepartures: Boolean = false,
@@ -378,6 +380,61 @@ class SearchViewModel @Inject constructor(
                 }
             } finally {
                 mutableUiState.update { it.copy(isLoadingLiveVehicles = false) }
+            }
+        }
+    }
+
+    fun clearLiveMapUserLocation() {
+        mutableUiState.update {
+            it.copy(liveMapUserLocation = null, liveMapLocationError = null)
+        }
+    }
+
+    fun locateUserOnLiveMap() {
+        viewModelScope.launch {
+            mutableUiState.update {
+                it.copy(liveMapUserLocation = null, liveMapLocationError = null)
+            }
+            try {
+                val location = currentLocationProvider.getCurrentLocation()
+                if (
+                    !location.latitude.isFinite() || location.latitude !in -90.0..90.0 ||
+                    !location.longitude.isFinite() || location.longitude !in -180.0..180.0
+                ) {
+                    throw LocationUnavailableException()
+                }
+                mutableUiState.update {
+                    it.copy(
+                        liveMapUserLocation = GeoPlace(
+                            label = "Moja lokalizacja",
+                            latitude = location.latitude,
+                            longitude = location.longitude
+                        ),
+                        liveMapLocationError = null
+                    )
+                }
+            } catch (exception: LocationPermissionRequiredException) {
+                mutableUiState.update {
+                    it.copy(liveMapLocationError = "Zezwól na dostęp do lokalizacji.")
+                }
+            } catch (exception: LocationUnavailableException) {
+                mutableUiState.update {
+                    it.copy(
+                        liveMapLocationError =
+                            "Nie udało się ustalić bieżącej lokalizacji: ${exception.message.orEmpty()}"
+                    )
+                }
+            } catch (exception: SecurityException) {
+                mutableUiState.update {
+                    it.copy(liveMapLocationError = "Brak dostępu do lokalizacji.")
+                }
+            } catch (exception: IllegalStateException) {
+                mutableUiState.update {
+                    it.copy(
+                        liveMapLocationError =
+                            "Nie udało się ustalić bieżącej lokalizacji: ${exception.message.orEmpty()}"
+                    )
+                }
             }
         }
     }

@@ -414,7 +414,11 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     weatherVisible = true
                     runWithLocationPermission(viewModel::loadWeather)
                 },
-                onOpenLiveMap = { liveMapVisible = true },
+                onOpenLiveMap = {
+                    liveMapVisible = true
+                    viewModel.clearLiveMapUserLocation()
+                    runWithLocationPermission(viewModel::locateUserOnLiveMap)
+                },
                 remindersEnabled = commuteRemindersEnabled,
                 onEnableCommuteReminders = ::requestCommuteReminderPermissions,
                 modifier = Modifier
@@ -538,6 +542,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             snapshot = state.liveVehicleSnapshot,
             isLoading = state.isLoadingLiveVehicles,
             error = state.liveVehicleError,
+            userLocation = state.liveMapUserLocation,
+            userLocationError = state.liveMapLocationError,
             stops = state.stops,
             selectedStop = state.selectedLiveMapStop,
             departures = state.liveMapStopDepartures,

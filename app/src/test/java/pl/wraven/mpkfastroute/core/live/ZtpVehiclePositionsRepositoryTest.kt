@@ -75,6 +75,46 @@ class ZtpVehiclePositionsRepositoryTest {
         )
     }
 
+    @Test
+    fun resolvesMissingRouteShortNameFromTripId() {
+        val vehicle = LiveVehiclePosition(
+            id = "vehicle-1",
+            mode = TransitVehicleMode.BUS,
+            latitude = 50.061,
+            longitude = 19.937,
+            routeShortName = null,
+            vehicleLabel = "123",
+            tripId = "trip-152-1"
+        )
+
+        val resolved = resolveMissingVehicleRouteShortNames(
+            vehicles = listOf(vehicle),
+            routeShortNamesByTripId = mapOf("trip-152-1" to "152")
+        ).single()
+
+        assertEquals("152", resolved.routeShortName)
+    }
+
+    @Test
+    fun keepsRouteShortNameWhenItIsAlreadyResolved() {
+        val vehicle = LiveVehiclePosition(
+            id = "vehicle-1",
+            mode = TransitVehicleMode.TRAM,
+            latitude = 50.061,
+            longitude = 19.937,
+            routeShortName = "52",
+            vehicleLabel = "123",
+            tripId = "trip-52-1"
+        )
+
+        val resolved = resolveMissingVehicleRouteShortNames(
+            vehicles = listOf(vehicle),
+            routeShortNamesByTripId = mapOf("trip-52-1" to "4")
+        ).single()
+
+        assertEquals("52", resolved.routeShortName)
+    }
+
     private fun feedHeader() = GtfsRealtime.FeedHeader.newBuilder()
         .setGtfsRealtimeVersion("2.0")
         .build()

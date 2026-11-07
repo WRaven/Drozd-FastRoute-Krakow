@@ -76,8 +76,23 @@ class ZtpVehiclePositionsRepository @Inject constructor(
             throw exception
         }
 
+        val tripIdsWithoutRouteName = vehicles
+            .filter { it.routeShortName.isNullOrBlank() }
+            .mapNotNull { it.tripId?.takeIf(String::isNotBlank) }
+            .distinct()
+        val routeShortNamesByTripId = if (tripIdsWithoutRouteName.isEmpty()) {
+            emptyMap()
+        } else {
+            database.tripDao()
+                .getRouteShortNamesByTripIds(tripIdsWithoutRouteName)
+                .associate { it.tripId to it.routeShortName }
+        }
+
         return LiveVehicleSnapshot(
-            vehicles = vehicles,
+            vehicles = resolveMissingVehicleRouteShortNames(
+                vehicles,
+                routeShortNamesByTripId
+            ),
             fetchedAt = LocalDateTime.now(),
             unavailableModes = unavailableModes
         )
@@ -145,4 +160,18 @@ internal fun mapVehiclePositions(
         },
         currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() }
     )
+}
+
+internal fun resolveMissingVehicleRouteShortNames(
+    vehicles: List<LiveVehiclePosition>,
+    routeShortNamesByTripId: Map<String, String>
+): List<LiveVehiclePosition> = vehicles.map { vehicle ->
+    if (!vehicle.routeShortName.isNullOrBlank()) {
+        vehicle
+    } else {
+        val tripRouteShortName = vehicle.tripId
+            ?.let(routeShortNamesByTripId::get)
+            ?.takeIf(String::isNotBlank)
+        vehicle.copy(routeShortName = tripRouteShortName)
+    }
 }
