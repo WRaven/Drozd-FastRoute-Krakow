@@ -72,10 +72,13 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -294,6 +297,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             TopAppBar(
                 title = { Text("MPK Kraków FastRoute") },
                 actions = {
+                    state.databaseUpdateProgressPercent?.let { progressPercent ->
+                        DatabaseUpdateIndicator(progressPercent)
+                    }
                     TextButton(onClick = { settingsVisible = true }) {
                         Text("Ustawienia")
                     }
@@ -368,7 +374,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     if (settingsVisible) {
         SettingsDialog(
             progressMessage = state.progressMessage,
-            isImporting = state.isImporting,
+            isImporting = state.isImporting ||
+                state.databaseUpdateProgressPercent != null,
             homeStopName = state.homePlace?.label
                 ?: state.stops.firstOrNull { it.stopId == state.homeStopId }
                     ?.let { StopNameGrouper.mainName(it.stopName) },
@@ -542,6 +549,32 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
 }
 
 @Composable
+private fun DatabaseUpdateIndicator(progressPercent: Int) {
+    val progress = progressPercent.coerceIn(0, 100)
+    Box(
+        modifier = Modifier
+            .padding(end = 8.dp)
+            .size(36.dp)
+            .semantics {
+                contentDescription = "Aktualizacja bazy rozkładów: $progress%"
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            progress = { progress / 100f },
+            modifier = Modifier.size(34.dp),
+            strokeWidth = 2.dp
+        )
+        Text(
+            text = "$progress%",
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold
+        )
+    }
+}
+
+@Composable
 private fun OnboardingContent(
     progressMessage: String,
     isImporting: Boolean,
@@ -559,9 +592,6 @@ private fun OnboardingContent(
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(16.dp))
-        if (isImporting) {
-            CircularProgressIndicator()
-        }
         if (progressMessage.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Text(progressMessage)

@@ -5,6 +5,7 @@ import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.BufferedReader
 import java.io.File
+import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.InputStreamReader
@@ -14,9 +15,13 @@ import java.nio.charset.StandardCharsets
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.format.DateTimeFormatter
+import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import javax.inject.Inject
+import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.CalendarDateEntity
@@ -37,36 +42,69 @@ private const val CONNECT_TIMEOUT_MILLIS = 30_000
 private const val READ_TIMEOUT_MILLIS = 120_000
 private const val GTFS_ETAG_KEY = "etag"
 private const val GTFS_LAST_MODIFIED_KEY = "last_modified"
+private const val DOWNLOAD_START_PERCENT = 0
+private const val DOWNLOAD_END_PERCENT = 25
+private const val STOP_TIMES_START_PERCENT = 40
+private const val STOP_TIMES_END_PERCENT = 82
 
+data class GtfsScheduleProgress(
+    val percent: Int,
+    val message: String
+)
+
+@Singleton
 class GtfsZipParser @Inject constructor(
     private val database: AppDatabase,
     private val connectionIndexBuilder: ConnectionIndexBuilder,
     @param:ApplicationContext private val context: Context
 ) {
+    private val updateMutex = Mutex()
+
     suspend fun importSchedule(
         onProgress: (String) -> Unit = {}
     ) {
-        importScheduleInternal(onlyIfUpdated = false, onProgress = onProgress)
+        updateSchedule(forceDownload = true) { onProgress(it.message) }
     }
 
     suspend fun importScheduleIfUpdated(
         onProgress: (String) -> Unit = {}
-    ): Boolean = importScheduleInternal(onlyIfUpdated = true, onProgress = onProgress)
+    ): Boolean = updateSchedule(forceDownload = false) { onProgress(it.message) }
+
+    suspend fun updateSchedule(
+        forceDownload: Boolean,
+        onProgress: suspend (GtfsScheduleProgress) -> Unit
+    ): Boolean = updateMutex.withLock {
+        val hasUsableSchedule = database.stopDao().count() > 0 &&
+            database.stopTimeDao().count() > 0 &&
+            database.connectionDao().count() > 0
+        importScheduleInternal(
+            onlyIfUpdated = !forceDownload && hasUsableSchedule,
+            onProgress = onProgress
+        )
+    }
+
+    suspend fun rebuildConnectionIndexWithProgress(
+        onProgress: suspend (GtfsScheduleProgress) -> Unit
+    ) = updateMutex.withLock {
+        connectionIndexBuilder.rebuildWithProgress { percent, message ->
+            onProgress(GtfsScheduleProgress(percent, message))
+        }
+    }
 
     private suspend fun importScheduleInternal(
         onlyIfUpdated: Boolean,
-        onProgress: (String) -> Unit
+        onProgress: suspend (GtfsScheduleProgress) -> Unit
     ): Boolean = withContext(Dispatchers.IO) {
-        onProgress("Pobieranie rozkładu ZTP Kraków...")
+        onProgress(GtfsScheduleProgress(0, "Sprawdzanie rozkładu ZTP Kraków..."))
         val downloadedArchive = downloadArchive(onProgress, onlyIfUpdated)
         if (downloadedArchive == null) {
             markScheduleChecked()
-            onProgress("Rozkład GTFS jest aktualny.")
+            onProgress(GtfsScheduleProgress(100, "Rozkład GTFS jest aktualny."))
             return@withContext false
         }
         val archive = downloadedArchive.file
         try {
-            onProgress("Odczytywanie przystanków, tras i kalendarza...")
+            onProgress(GtfsScheduleProgress(27, "Odczytywanie przystanków, tras i kalendarza..."))
             val stops = mutableListOf<StopEntity>()
             val routes = mutableListOf<RouteEntity>()
             val trips = mutableListOf<TripEntity>()
@@ -80,6 +118,7 @@ class GtfsZipParser @Inject constructor(
             require(calendars.isNotEmpty() || calendarDates.isNotEmpty()) {
                 "GTFS archive contains no service calendar data."
             }
+            onProgress(GtfsScheduleProgress(35, "Zapisuję dane rozkładu..."))
 
             val stopIds = stops.mapTo(HashSet(stops.size)) { it.stopId }
             val tripIds = trips.mapTo(HashSet(trips.size)) { it.tripId }
@@ -87,7 +126,7 @@ class GtfsZipParser @Inject constructor(
             sqliteDatabase.execSQL("PRAGMA foreign_keys = OFF")
 
             try {
-                onProgress("Zapisywanie danych i indeksowanie bazy...")
+                onProgress(GtfsScheduleProgress(35, "Zapisywanie danych i indeksowanie bazy..."))
                 database.withTransaction {
                     val stopDao = database.stopDao()
                     val routeDao = database.routeDao()
@@ -117,23 +156,34 @@ class GtfsZipParser @Inject constructor(
                     for (batch in calendarDates.chunked(BATCH_SIZE)) {
                         calendarDao.insertAllExceptions(batch)
                     }
+                    onProgress(GtfsScheduleProgress(40, "Importuję godziny odjazdów..."))
 
                     val stopTimeCount = readStopTimes(
                         archive = archive,
                         stopIds = stopIds,
                         tripIds = tripIds,
+                        totalBytes = archiveEntrySize(archive, "stop_times.txt"),
                         insertBatch = stopTimeDao::insertAll
-                    ) { count ->
-                        onProgress("Import GTFS: $count wpisów stop_times.")
+                    ) { count, percent ->
+                        onProgress(
+                            GtfsScheduleProgress(
+                                percent,
+                                "Import GTFS: $count wpisów stop_times."
+                            )
+                        )
                     }
                     check(stopTimeCount > 0) { "GTFS archive contains no stop times." }
-                    connectionIndexBuilder.rebuildWithinTransaction(onProgress)
+                    onProgress(GtfsScheduleProgress(82, "Buduję indeks połączeń..."))
+                    connectionIndexBuilder.rebuildWithinTransaction(stopTimeCount) { percent, message ->
+                        onProgress(GtfsScheduleProgress(percent, message))
+                    }
                 }
             } finally {
                 sqliteDatabase.execSQL("PRAGMA foreign_keys = ON")
             }
-            onProgress("Kończenie indeksowania rozkładu...")
+            onProgress(GtfsScheduleProgress(99, "Kończę aktualizację rozkładu..."))
             saveDownloadMetadata(downloadedArchive)
+            onProgress(GtfsScheduleProgress(100, "Rozkład GTFS jest gotowy."))
             true
         } finally {
             archive.delete()
@@ -141,11 +191,11 @@ class GtfsZipParser @Inject constructor(
     }
 
     suspend fun rebuildConnectionIndex(onProgress: (String) -> Unit = {}) {
-        connectionIndexBuilder.rebuild(onProgress)
+        updateMutex.withLock { connectionIndexBuilder.rebuild(onProgress) }
     }
 
-    private fun downloadArchive(
-        onProgress: (String) -> Unit,
+    private suspend fun downloadArchive(
+        onProgress: suspend (GtfsScheduleProgress) -> Unit,
         onlyIfUpdated: Boolean
     ): DownloadedArchive? {
         val archive = File.createTempFile("gtfs-krakow-", ".zip", context.cacheDir)
@@ -184,9 +234,9 @@ class GtfsZipParser @Inject constructor(
                 lastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
                 val contentLength = connection.contentLengthLong
                 var downloadedBytes = 0L
-                var nextProgressPercent = 5
+                var nextDownloadPercent = 5
                 var nextProgressBytes = DOWNLOAD_PROGRESS_INTERVAL_BYTES
-                onProgress("Pobieranie rozkładu: 0%")
+                onProgress(GtfsScheduleProgress(0, "Pobieranie rozkładu GTFS z ZTP..."))
                 connection.inputStream.buffered().use { input ->
                     archive.outputStream().buffered().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -201,13 +251,27 @@ class GtfsZipParser @Inject constructor(
                                     (downloadedBytes * 100L / contentLength)
                                         .toInt()
                                         .coerceAtMost(100)
-                                if (progressPercent >= nextProgressPercent) {
-                                    onProgress("Pobieranie rozkładu: $progressPercent%")
-                                    nextProgressPercent = (progressPercent / 5 + 1) * 5
+                                if (progressPercent >= nextDownloadPercent) {
+                                    val overallPercent = scaleProgress(
+                                        DOWNLOAD_START_PERCENT,
+                                        DOWNLOAD_END_PERCENT,
+                                        downloadedBytes,
+                                        contentLength
+                                    )
+                                    onProgress(
+                                        GtfsScheduleProgress(
+                                            overallPercent,
+                                            "Pobieranie rozkładu GTFS z ZTP..."
+                                        )
+                                    )
+                                    nextDownloadPercent = (progressPercent / 5 + 1) * 5
                                 }
                             } else if (downloadedBytes >= nextProgressBytes) {
                                 onProgress(
-                                    "Pobieranie rozkładu: ${downloadedBytes / 1_000_000} MB"
+                                    GtfsScheduleProgress(
+                                        DOWNLOAD_START_PERCENT,
+                                        "Pobrano ${downloadedBytes / 1_000_000} MB rozkładu GTFS..."
+                                    )
                                 )
                                 nextProgressBytes =
                                     downloadedBytes + DOWNLOAD_PROGRESS_INTERVAL_BYTES
@@ -218,6 +282,12 @@ class GtfsZipParser @Inject constructor(
                 if (downloadedBytes == 0L) {
                     throw IOException("GTFS download returned an empty archive.")
                 }
+                onProgress(
+                    GtfsScheduleProgress(
+                        DOWNLOAD_END_PERCENT,
+                        "Rozkład pobrany. Przygotowuję import..."
+                    )
+                )
             } finally {
                 connection.disconnect()
             }
@@ -349,8 +419,9 @@ class GtfsZipParser @Inject constructor(
         archive: File,
         stopIds: Set<String>,
         tripIds: Set<String>,
+        totalBytes: Long,
         insertBatch: suspend (List<StopTimeEntity>) -> Unit,
-        onBatchProgress: (Int) -> Unit
+        onBatchProgress: suspend (Int, Int) -> Unit
     ): Int {
         var foundStopTimes = false
         var recordCount = 0
@@ -361,7 +432,8 @@ class GtfsZipParser @Inject constructor(
                 val entry = zip.nextEntry ?: break
                 if (entry.name.substringAfterLast('/') == "stop_times.txt") {
                     foundStopTimes = true
-                    readCsv(zip, entry.name) { columns, values, rowNumber ->
+                    val countingInput = CountingInputStream(zip)
+                    readCsv(countingInput, entry.name) { columns, values, rowNumber ->
                         val tripId = values.required(columns, "trip_id", entry.name, rowNumber)
                         val stopId = values.required(columns, "stop_id", entry.name, rowNumber)
                         if (tripId !in tripIds) {
@@ -398,7 +470,15 @@ class GtfsZipParser @Inject constructor(
                             insertBatch(batch.toList())
                             batch.clear()
                             if (recordCount % PROGRESS_BATCH_SIZE == 0) {
-                                onBatchProgress(recordCount)
+                                onBatchProgress(
+                                    recordCount,
+                                    scaleProgress(
+                                        STOP_TIMES_START_PERCENT,
+                                        STOP_TIMES_END_PERCENT,
+                                        countingInput.bytesRead,
+                                        totalBytes
+                                    )
+                                )
                             }
                         }
                     }
@@ -412,10 +492,24 @@ class GtfsZipParser @Inject constructor(
         }
         if (batch.isNotEmpty()) {
             insertBatch(batch)
-            onBatchProgress(recordCount)
         }
+        onBatchProgress(recordCount, STOP_TIMES_END_PERCENT)
         return recordCount
     }
+
+    private fun archiveEntrySize(archive: File, entryFileName: String): Long =
+        ZipFile(archive).use { zip ->
+            val entries = zip.entries()
+            var size = -1L
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (entry.name.substringAfterLast('/') == entryFileName) {
+                    size = entry.size
+                    break
+                }
+            }
+            size
+        }
 
     private suspend fun readCsv(
         input: InputStream,
@@ -447,6 +541,36 @@ class GtfsZipParser @Inject constructor(
             }
             onRecord(columns, values, rowNumber)
         }
+    }
+}
+
+internal fun scaleProgress(
+    startPercent: Int,
+    endPercent: Int,
+    completed: Long,
+    total: Long
+): Int {
+    require(startPercent in 0..100 && endPercent in startPercent..100)
+    if (total <= 0L) return startPercent
+    val boundedCompleted = completed.coerceIn(0L, total)
+    return startPercent +
+        ((endPercent - startPercent) * boundedCompleted / total).toInt()
+}
+
+private class CountingInputStream(input: InputStream) : FilterInputStream(input) {
+    var bytesRead: Long = 0
+        private set
+
+    override fun read(): Int {
+        val result = super.read()
+        if (result >= 0) bytesRead += 1
+        return result
+    }
+
+    override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+        val count = super.read(buffer, offset, length)
+        if (count > 0) bytesRead += count
+        return count
     }
 }
 

@@ -100,6 +100,9 @@ data class GtfsDepartureRow(
 
 @Dao
 interface StopTimeDao {
+    @Query("SELECT COUNT(*) FROM stop_times")
+    suspend fun count(): Int
+
     @Query(
         """
         SELECT * FROM stop_times

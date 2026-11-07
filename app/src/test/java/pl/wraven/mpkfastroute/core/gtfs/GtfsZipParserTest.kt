@@ -43,4 +43,16 @@ class GtfsZipParserTest {
             parseCsvLine("\"unfinished")
         }
     }
+
+    @Test
+    fun scalesProgressWithinTheCurrentImportPhase() {
+        assertEquals(40, scaleProgress(40, 82, 0, 100))
+        assertEquals(61, scaleProgress(40, 82, 50, 100))
+        assertEquals(82, scaleProgress(40, 82, 100, 100))
+    }
+
+    @Test
+    fun keepsProgressAtThePhaseStartWhenTheTotalIsUnknown() {
+        assertEquals(40, scaleProgress(40, 82, 500, -1))
+    }
 }

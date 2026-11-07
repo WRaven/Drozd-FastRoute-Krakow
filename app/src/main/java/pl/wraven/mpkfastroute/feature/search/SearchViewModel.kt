@@ -1,9 +1,13 @@
 package pl.wraven.mpkfastroute.feature.search
 
+import android.content.Context
 import android.database.sqlite.SQLiteException
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.DateTimeException
 import java.time.LocalDateTime
@@ -13,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -35,7 +40,7 @@ import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
-import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
+import pl.wraven.mpkfastroute.core.gtfs.GtfsScheduleUpdateScheduler
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
 import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
@@ -92,6 +97,7 @@ data class SearchUiState(
     val routeTimePlan: JourneyTimePlan? = null,
     val liveDepartures: LiveDeparturesResult? = null,
     val isImporting: Boolean = false,
+    val databaseUpdateProgressPercent: Int? = null,
     val isSearching: Boolean = false,
     val progressMessage: String = "",
     val diagnosticEntries: List<String> = emptyList(),
@@ -127,7 +133,7 @@ data class SearchUiState(
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val database: AppDatabase,
-    private val gtfsZipParser: GtfsZipParser,
+    @param:ApplicationContext private val appContext: Context,
     private val routePlanner: RoutePlanner,
     private val ttssDepartureRepository: TtssDepartureRepository,
     private val contextEngine: ContextEngine,
@@ -156,7 +162,7 @@ class SearchViewModel @Inject constructor(
         observeStops()
         observePreferences()
         observeDiagnostics()
-        ensureScheduleImported()
+        observeScheduleUpdates()
         checkForUpdates(showStatus = false)
         refreshServiceNews()
         refreshLiveServiceAlerts()
@@ -718,7 +724,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun refreshSchedule() {
-        viewModelScope.launch { importSchedule() }
+        GtfsScheduleUpdateScheduler.requestRefresh(appContext)
     }
 
     fun saveSelectedStopAsHome(schedule: DestinationSchedule) {
@@ -1012,7 +1018,13 @@ class SearchViewModel @Inject constructor(
     private fun observeStops() {
         viewModelScope.launch {
             database.stopDao().observeAll().collect { stops ->
-                mutableUiState.update { it.copy(stops = stops) }
+                mutableUiState.update {
+                    it.copy(
+                        stops = stops,
+                        isImporting = stops.isEmpty() &&
+                            it.databaseUpdateProgressPercent != null
+                    )
+                }
             }
         }
     }
@@ -1088,84 +1100,63 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private fun ensureScheduleImported() {
+    private fun observeScheduleUpdates() {
+        val workManager = WorkManager.getInstance(appContext)
         viewModelScope.launch {
-            try {
-                if (database.stopDao().count() == 0) {
-                    importSchedule()
-                } else if (database.connectionDao().count() == 0) {
-                    prepareConnectionIndex()
+            combine(
+                workManager.getWorkInfosForUniqueWorkFlow(
+                    GtfsScheduleUpdateScheduler.STARTUP_WORK_NAME
+                ),
+                workManager.getWorkInfosForUniqueWorkFlow(
+                    GtfsScheduleUpdateScheduler.PERIODIC_WORK_NAME
+                )
+            ) { startupWorkInfos, periodicWorkInfos ->
+                startupWorkInfos + periodicWorkInfos
+            }.collect { workInfos ->
+                val runningWork = workInfos
+                    .filter { it.state == WorkInfo.State.RUNNING }
+                    .maxByOrNull {
+                        it.progress.getInt(
+                            GtfsScheduleUpdateScheduler.PROGRESS_PERCENT_KEY,
+                            0
+                        )
+                    }
+                val startupWork = workInfos.firstOrNull {
+                    GtfsScheduleUpdateScheduler.STARTUP_WORK_NAME in it.tags &&
+                        !it.state.isFinished
+                } ?: workInfos.lastOrNull {
+                    GtfsScheduleUpdateScheduler.STARTUP_WORK_NAME in it.tags
                 }
-            } catch (exception: SQLiteException) {
-                showMessage("Nie można sprawdzić lokalnego rozkładu: ${exception.message.orEmpty()}")
-            }
-        }
-    }
+                val startupIsPending = startupWork?.state == WorkInfo.State.ENQUEUED ||
+                    startupWork?.state == WorkInfo.State.BLOCKED
+                val startupFailed = startupWork?.takeIf {
+                    it.state == WorkInfo.State.FAILED
+                }
+                val isScheduleEmpty = mutableUiState.value.stops.isEmpty()
+                val progress = runningWork?.progress?.getInt(
+                    GtfsScheduleUpdateScheduler.PROGRESS_PERCENT_KEY,
+                    0
+                )?.coerceIn(0, 100)
+                val progressMessage = when {
+                    runningWork != null -> runningWork.progress.getString(
+                        GtfsScheduleUpdateScheduler.PROGRESS_MESSAGE_KEY
+                    ).orEmpty()
+                    isScheduleEmpty && startupFailed != null ->
+                        startupFailed.outputData.getString(
+                            GtfsScheduleUpdateScheduler.ERROR_MESSAGE_KEY
+                        ) ?: "Nie udało się pobrać rozkładu ZTP. Spróbuj ponownie."
+                    isScheduleEmpty && startupIsPending ->
+                        "Oczekiwanie na połączenie z internetem..."
+                    else -> ""
+                }
 
-    private suspend fun prepareConnectionIndex() {
-        if (mutableUiState.value.isImporting) {
-            return
-        }
-        diagnostics.record("Brak lokalnego indeksu połączeń; rozpoczęto jego budowę.")
-        mutableUiState.update {
-            it.copy(
-                isImporting = true,
-                progressMessage = "Przygotowanie szybkiego indeksu połączeń...",
-                statusMessage = null
-            )
-        }
-        try {
-            gtfsZipParser.rebuildConnectionIndex { progress ->
-                diagnostics.record(progress)
-                mutableUiState.update { it.copy(progressMessage = progress) }
-            }
-            showMessage("Lokalny indeks połączeń jest gotowy.")
-        } catch (exception: IllegalStateException) {
-            diagnostics.record("Błąd budowy indeksu: ${exception.message.orEmpty()}")
-            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
-        } catch (exception: IllegalArgumentException) {
-            diagnostics.record("Nieprawidłowe dane podczas budowy indeksu: ${exception.message.orEmpty()}")
-            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
-        } catch (exception: SQLiteException) {
-            diagnostics.record("Błąd bazy podczas budowy indeksu.")
-            showMessage("Nie udało się przygotować indeksu: ${exception.message.orEmpty()}")
-        } finally {
-            mutableUiState.update {
-                it.copy(isImporting = false, progressMessage = "")
-            }
-        }
-    }
-
-    private suspend fun importSchedule() {
-        if (mutableUiState.value.isImporting) {
-            return
-        }
-        diagnostics.record("Rozpoczęto pobieranie i import GTFS.")
-        mutableUiState.update {
-            it.copy(isImporting = true, progressMessage = "Przygotowanie importu...", statusMessage = null)
-        }
-        try {
-            gtfsZipParser.importSchedule { progress ->
-                diagnostics.record(progress)
-                mutableUiState.update { it.copy(progressMessage = progress) }
-            }
-            diagnostics.record("Import GTFS zakończony pomyślnie.")
-            showMessage("Rozkład został zaktualizowany.")
-        } catch (exception: IOException) {
-            diagnostics.record("Błąd pobierania GTFS: ${exception.message.orEmpty()}")
-            showMessage("Nie udało się pobrać rozkładu: ${exception.message.orEmpty()}")
-        } catch (exception: IllegalArgumentException) {
-            diagnostics.record("Nieprawidłowe dane GTFS: ${exception.message.orEmpty()}")
-            showMessage("Rozkład ma nieprawidłowe dane: ${exception.message.orEmpty()}")
-        } catch (exception: IllegalStateException) {
-            diagnostics.record("Błąd importu GTFS: ${exception.message.orEmpty()}")
-            showMessage("Nie udało się zaimportować rozkładu: ${exception.message.orEmpty()}")
-        } catch (exception: SQLiteException) {
-            diagnostics.record("Błąd bazy danych podczas importu GTFS.")
-            showMessage("Nie udało się zapisać rozkładu: ${exception.message.orEmpty()}")
-        } finally {
-            mutableUiState.update {
-                it.copy(isImporting = false, progressMessage = "")
+                mutableUiState.update { state ->
+                    state.copy(
+                        databaseUpdateProgressPercent = progress,
+                        isImporting = state.stops.isEmpty() && progress != null,
+                        progressMessage = progressMessage
+                    )
+                }
             }
         }
     }

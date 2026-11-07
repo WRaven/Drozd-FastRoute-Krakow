@@ -10,15 +10,32 @@ import pl.wraven.mpkfastroute.core.database.ConnectionEntity
 class ConnectionIndexBuilder @Inject constructor(
     private val database: AppDatabase
 ) {
-    suspend fun rebuild(onProgress: (String) -> Unit = {}) = withContext(Dispatchers.IO) {
+    suspend fun rebuild(onProgress: (String) -> Unit = {}) =
+        rebuildWithProgress { _, message -> onProgress(message) }
+
+    suspend fun rebuildWithProgress(
+        onProgress: suspend (Int, String) -> Unit
+    ) = withContext(Dispatchers.IO) {
         database.withTransaction {
-            rebuildWithinTransaction(onProgress)
+            rebuildWithinTransaction(
+                totalStopTimes = database.stopTimeDao().count(),
+                onProgress = onProgress
+            )
         }
     }
 
     suspend fun rebuildWithinTransaction(onProgress: (String) -> Unit = {}) {
+        rebuildWithinTransaction(database.stopTimeDao().count()) { _, message ->
+            onProgress(message)
+        }
+    }
+
+    suspend fun rebuildWithinTransaction(
+        totalStopTimes: Int,
+        onProgress: suspend (Int, String) -> Unit
+    ) {
         val startedAt = System.nanoTime()
-        onProgress("Budowanie lokalnej siatki połączeń...")
+        onProgress(INDEX_START_PERCENT, "Budowanie lokalnej siatki połączeń...")
         val connectionDao = database.connectionDao()
         val sqliteDatabase = database.openHelper.writableDatabase
         sqliteDatabase.execSQL("DROP INDEX IF EXISTS `$CONNECTION_INDEX_NAME`")
@@ -67,9 +84,15 @@ class ConnectionIndexBuilder @Inject constructor(
                     batch.clear()
                 }
                 if (processedStopTimes % PROGRESS_INTERVAL == 0) {
+                    val progressPercent = scaleProgress(
+                        INDEX_START_PERCENT,
+                        INDEX_END_PERCENT,
+                        processedStopTimes.toLong(),
+                        totalStopTimes.toLong()
+                    )
                     val progress = "Indeksowanie: $processedStopTimes wpisów stop_times, " +
                         "$insertedConnections segmentów."
-                    onProgress(progress)
+                    onProgress(progressPercent, progress)
                 }
             }
         } finally {
@@ -84,7 +107,7 @@ class ConnectionIndexBuilder @Inject constructor(
             "The GTFS schedule does not contain any adjacent stop connections."
         }
 
-        onProgress("Tworzenie indeksu SQLite do wyszukiwania połączeń...")
+        onProgress(INDEX_END_PERCENT, "Tworzenie indeksu SQLite do wyszukiwania połączeń...")
         val indexStartedAt = System.nanoTime()
         sqliteDatabase.execSQL(CREATE_CONNECTION_INDEX_SQL)
         val indexElapsedSeconds =
@@ -92,7 +115,7 @@ class ConnectionIndexBuilder @Inject constructor(
         val elapsedSeconds = (System.nanoTime() - startedAt) / NANOS_PER_SECOND
         val completion = "Indeks połączeń gotowy: $insertedConnections segmentów " +
             "w ${elapsedSeconds}s (indeks SQLite: ${indexElapsedSeconds}s)."
-        onProgress(completion)
+        onProgress(99, completion)
     }
 
     private companion object {
@@ -100,6 +123,8 @@ class ConnectionIndexBuilder @Inject constructor(
             "index_connections_departureTime_serviceId_tripId"
         const val INSERT_BATCH_SIZE = 5_000
         const val PROGRESS_INTERVAL = 50_000
+        const val INDEX_START_PERCENT = 82
+        const val INDEX_END_PERCENT = 98
         const val NANOS_PER_SECOND = 1_000_000_000L
         const val CREATE_CONNECTION_INDEX_SQL = """
             CREATE INDEX IF NOT EXISTS `index_connections_departureTime_serviceId_tripId`

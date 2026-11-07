@@ -30,7 +30,7 @@ the architecture and phases in the project specification.
   by the next matching scheduled time; a long press on a route saves its
   endpoints as the single "Własny" quick action. Existing saved stop IDs remain
   supported.
-- Compose provides first-run GTFS import progress, a current-location or
+- Compose provides first-run GTFS import status, a current-location or
   typed-address/name origin, debounced address and stop suggestions, recent
   address/stop selections, an optional "Wybierz przystanek" control, grouped
   stop names with automatic platform selection, and home/work/custom/radio
@@ -65,11 +65,14 @@ the architecture and phases in the project specification.
   published under CC BY 4.0. Live departure and alert requests use Android's
   active network, so Wi-Fi is used when available and mobile data is the
   fallback.
-- The app checks the official static GTFS feed daily and imports it when its
-  ETag or last-modified value changes. The request uses the currently active
-  network (Wi-Fi when connected, with mobile-data fallback); WorkManager waits
-  until a network is available. Service calendars determine when newly
-  published timetable data applies.
+- WorkManager checks the official static GTFS feed at app startup and daily,
+  importing it when its ETag or last-modified value changes. The request uses
+  the currently active network (Wi-Fi when connected, with mobile-data
+  fallback); WorkManager waits until a network is available. A small
+  percentage ring in the app bar appears only while the download/import runs.
+  Existing timetable data remains available until the replacement commits;
+  first-time route search becomes available after the initial ZTP import.
+  Service calendars determine when newly published timetable data applies.
 - Stop codes remain available internally for TTSS mapping and stop matching,
   but are not shown in user-facing stop labels.
 - Stop-name search ignores Polish diacritics and suggests up to three
