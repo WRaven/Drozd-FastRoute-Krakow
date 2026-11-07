@@ -40,6 +40,11 @@ From **1.0.1**, the updater, release link and QR code use the renamed repository
 directly. Installed 1.0.0 can discover this update through GitHub's old-address
 redirect; the Android package, signing key and local data remain unchanged.
 
+From **1.0.2**, clock times in route results and Live use `00:00–23:59`, not raw
+GTFS hours such as `25:06` (displayed as `01:06`). Route times show `(+1)` only
+when that time is on the calendar day after the journey starts. GTFS service-day
+values remain unchanged internally, preserving night-trip order and durations.
+
 To update an existing installation, open **Ustawienia → Sprawdź aktualizacje**
 (Settings → Check for updates), then **Pobierz i zainstaluj** (Download and install).
 If required, use **Zezwól na instalowanie** to grant this app installation permission

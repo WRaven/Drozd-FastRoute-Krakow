@@ -1448,7 +1448,7 @@ private fun JourneyResult(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 JourneyMetric(
                     label = "PRZYJAZD",
-                    value = formatGtfsTime(journey.estimatedArrivalTime),
+                    value = formatJourneyTime(journey.estimatedArrivalTime, journey.departureTime),
                     modifier = Modifier.weight(1f)
                 )
                 JourneyMetric(
@@ -1531,13 +1531,13 @@ private fun JourneyResult(
                                     ) {
                                         Text(
                                             "${stopName(stops, connection.departureStopId)} · " +
-                                                formatGtfsTime(connection.departureTime),
+                                                formatJourneyTime(connection.departureTime, journey.departureTime),
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
                                             "${stopName(stops, connection.arrivalStopId)} · " +
-                                                formatGtfsTime(connection.arrivalTime),
+                                                formatJourneyTime(connection.arrivalTime, journey.departureTime),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -2545,8 +2545,14 @@ private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =
     } ?: throw IllegalStateException("A stop group cannot be empty.")
 
 internal fun formatGtfsTime(seconds: Int): String {
-    val totalMinutes = seconds / 60
+    val totalMinutes = Math.floorMod(seconds, 24 * 60 * 60) / 60
     return "%02d:%02d".format(totalMinutes / 60, totalMinutes % 60)
+}
+
+internal fun formatJourneyTime(seconds: Int, journeyDepartureTime: Int): String {
+    val dayOffset = Math.floorDiv(seconds, 24 * 60 * 60) -
+        Math.floorDiv(journeyDepartureTime, 24 * 60 * 60)
+    return formatGtfsTime(seconds) + if (dayOffset > 0) " (+$dayOffset)" else ""
 }
 
 private fun formatDuration(seconds: Int): String {

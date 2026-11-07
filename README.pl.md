@@ -40,6 +40,12 @@ Od **1.0.1** aktualizator, link wydań i kod QR korzystają bezpośrednio z nowe
 nazwy repozytorium. Zainstalowane 1.0.0 wykryje aktualizację przez przekierowanie
 GitHub ze starego adresu; pakiet, podpis i dane lokalne pozostają bez zmian.
 
+Od **1.0.2** godziny w wynikach tras i Live mają zakres `00:00–23:59`, zamiast
+surowego zapisu GTFS, np. `25:06` (wyświetlane jako `01:06`). W trasie `(+1)`
+pojawia się tylko przy godzinie z dnia kalendarzowego po rozpoczęciu podróży.
+Wewnętrzne czasy dnia kursowania pozostają bez zmian, aby zachować kolejność
+nocnych kursów i prawidłowy czas przejazdu.
+
 Aktualizacja istniejącej instalacji: **Ustawienia → Sprawdź aktualizacje →
 Pobierz i zainstaluj**. Jeśli Android tego wymaga, użyj **Zezwól na instalowanie**
 i potwierdź instalację. Nie odinstalowuj aplikacji przed zgodną aktualizacją:
