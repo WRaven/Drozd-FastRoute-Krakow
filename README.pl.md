@@ -1,5 +1,7 @@
 # Drozd FastRoute
 
+<img src="./app/src/main/res/drawable-nodpi/drozd_logo.png" width="180" alt="Logo Drozd FastRoute: drozd nad trasą" />
+
 **Polski** | [English](./README.md)
 
 Aplikacja Android do wyszukiwania połączeń komunikacji miejskiej w Krakowie,
@@ -28,11 +30,17 @@ nie zmienia istniejącej instalacji ani zapisanych danych.
    początek trasy, centrować mapę Live i pobierać pogodę. Początek trasy można
    również wpisać ręcznie.
 
+Stabilne **1.0.0** ma nazwę **Drozd FastRoute**, bez słowa „test”, i aktualizuje
+istniejącą wersję testową z zachowaniem pakietu oraz klucza podpisu.
+Prerelease `upgrade-v1.0.0` zawiera ten sam stabilny APK dla starszych
+aktualizatorów, które szukają tylko wersji testowych. Po instalacji aplikacja
+release sprawdza wydania stabilne.
+
 Aktualizacja istniejącej instalacji: **Ustawienia → Sprawdź aktualizacje →
 Pobierz i zainstaluj**. Jeśli Android tego wymaga, użyj **Zezwól na instalowanie**
 i potwierdź instalację. Nie odinstalowuj aplikacji przed zgodną aktualizacją:
-zachowasz lokalny rozkład i ustawienia. Wersje testowa i zwykła są oddzielnymi
-aplikacjami; nie aktualizują się wzajemnie.
+zachowasz lokalny rozkład i ustawienia. Buildy debug i release mają teraz wspólną
+stałą tożsamość pakietu; do normalnego korzystania wybierz stabilny APK.
 
 ## Obsługa aplikacji
 
@@ -135,6 +143,10 @@ nie ma osobnego przełącznika profilu kolorystycznego.
   co Compose, z kolorami tonalnymi systemu od Androida 12. Ikony pasków
   systemowych mają właściwy kontrast; po starcie Compose tło okna jest
   synchronizowane z dokładnym kolorem interfejsu.
+  Przekazany obraz drozda i trasy jest przycięty lokalnie i używany jako ikona
+  aplikacji, logo startowe oraz znak w tej dokumentacji. Przezroczyste narożniki
+  i bezpieczne marginesy chronią cały znak przed maskami ikon/startu Androida.
+  Logo nie dodaje sztucznego czasu oczekiwania przy uruchamianiu.
 - Trasy adresowe porównują do sześciu grup pobliskich przystanków w promieniu
   1,5 km. Wynik obejmuje dojście do pierwszego przystanku, przesiadki i dojście
   do celu; dostępne są opcje najszybsza i z mniejszą ilością marszu.
@@ -263,7 +275,8 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
 1. Zainstaluj aktualizację na poprzednią wersję testową; sprawdź zachowanie celów
    i nazw.
 2. Wymuś zatrzymanie i uruchom w trybie ciemnym, następnie jasnym; sprawdź kolory
-   startu i czytelność ikon pasków systemowych.
+   startu i czytelność ikon pasków systemowych. Sprawdź nową ikonę oraz logo
+   startowe: drozd, trasa i ramka nie powinny być obcięte.
 3. Otwórz Live z uprawnieniem lokalizacji i bez niego; sprawdź centrowanie oraz
    numery linii na znacznikach i po kliknięciu pojazdu. Oddal mapę do widoku miasta,
    następnie przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć
@@ -279,23 +292,30 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
 - GitHub Actions nadaje numer uruchomienia workflow jako `versionCode`.
   Gradle odczytuje `APP_VERSION_NAME` / `APP_VERSION_CODE`, a lokalnie korzysta
   z `git describe --tags --always`.
-- Stały identyfikator zwykłej aplikacji to `pl.wraven.mpkfastroute`. Nie zmieniaj
-  go po opublikowaniu pierwszego APK.
+- Stały identyfikator aplikacji to `pl.wraven.mpkfastroute.debug`, zachowany
+  z zainstalowanej wersji testowej, aby 1.0.0 utrzymało dane użytkownika.
+  Wewnętrzna przestrzeń nazw Kotlin pozostaje `pl.wraven.mpkfastroute`.
+  Sufiks `.debug` nie włącza debugowania w APK release ani słowa „test” w nazwie.
 - Aktualizacje wymagają tego samego `applicationId` i klucza podpisu.
   Zmiana któregoś uniemożliwia instalację na istniejącą aplikację.
 - Workflow zwykłego wydania kończy się błędem, jeśli brakuje czterech sekretów
   podpisu; nie publikuje po cichu APK bez podpisu lub z innym kluczem.
 
-Przed pierwszym zwykłym wydaniem utwórz jeden keystore i bezpiecznie go zachowaj.
-Ustaw sekrety repozytorium GitHub Actions bez udostępniania ich wartości w czacie
-lub commitowania do repozytorium:
+Dotychczasowy klucz podpisu jest teraz stałym kluczem zgodnych aktualizacji
+stabilnych i testowych. GitHub Actions celowo używa już skonfigurowanych
+sekretów poniżej; nie generuj klucza zastępczego dla 1.0.0:
 
 | Sekret | Wartość |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | Plik keystore zakodowany w Base64 |
-| `ANDROID_KEYSTORE_PASSWORD` | Hasło keystore |
-| `ANDROID_KEY_ALIAS` | Alias klucza podpisu |
-| `ANDROID_KEY_PASSWORD` | Hasło klucza podpisu |
+| `TEST_KEYSTORE_BASE64` | Dotychczasowy keystore zakodowany w Base64 |
+| `TEST_KEYSTORE_PASSWORD` | Dotychczasowe hasło keystore |
+| `TEST_KEY_ALIAS` | Dotychczasowy alias klucza |
+| `TEST_KEY_PASSWORD` | Dotychczasowe hasło klucza |
+
+Lokalne buildy release nadal odczytują `ANDROID_KEYSTORE_FILE`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` i `ANDROID_KEY_PASSWORD`.
+Wskaż w nich ten sam stały klucz. CI mapuje istniejące sekrety na te parametry
+builda bez zmiany samych sekretów.
 
 Nie zmieniaj klucza ani haseł między wydaniami. Utrata klucza uniemożliwia
 instalację APK podpisanego inaczej jako aktualizacji.
@@ -310,36 +330,14 @@ git push origin v1.0.0
 Workflow buduje podpisany APK z wersją w nazwie, dołącza go do wydania GitHub
 i zachowuje artefakt w Actions.
 
-Testowe APK z gałęzi `main` używają osobnego pakietu
-`pl.wraven.mpkfastroute.debug` i nazwy **Drozd FastRoute (test)**.
-Dotychczasowe identyfikatory pakietów celowo pozostają bez zmian dla zgodności
-aktualizacji. Ustaw osobny, stały keystore testowy w sekretach:
-
-| Sekret | Wartość |
-| --- | --- |
-| `TEST_KEYSTORE_BASE64` | Testowy keystore zakodowany w Base64 |
-| `TEST_KEYSTORE_PASSWORD` | Hasło testowego keystore |
-| `TEST_KEY_ALIAS` | Alias testowego klucza |
-| `TEST_KEY_PASSWORD` | Hasło testowego klucza |
-
-Przykład utworzenia testowego keystore poza repozytorium w Windows/PowerShell:
-
-```powershell
-$keyPath = Join-Path $HOME "mpk-fastroute-test.jks"
-$keytool = "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"
-& $keytool -genkeypair -v -keystore $keyPath -storetype JKS `
-  -alias mpk-fastroute-test -keyalg RSA -keysize 2048 -validity 10000 `
-  -dname "CN=MPK FastRoute Test, OU=Development, O=WRaven, C=PL"
-[Convert]::ToBase64String([IO.File]::ReadAllBytes($keyPath)) | Set-Clipboard
-```
-
-Wartość ze schowka wpisz do `TEST_KEYSTORE_BASE64`, alias `mpk-fastroute-test`
-do `TEST_KEY_ALIAS`, a wybrane hasła do odpowiednich sekretów.
-Zachowaj keystore i nie zmieniaj go: CI używa go do aktualizacji jednej wersji
-testowej na drugą bez usuwania lokalnej bazy. Wersja testowa nie współdzieli
-danych ze zwykłą. Brak sekretów testowych nie zatrzymuje walidacji, ale wyłącza
-upload testowego APK. Buildy pull requestów służą tylko walidacji i nie publikują
-artefaktów APK.
+APK debug z gałęzi `main` nadal mają nazwę **Drozd FastRoute (test)** i sprawdzają
+prerelease. APK release mają nazwę **Drozd FastRoute**, nie pozwalają na debugowanie
+i sprawdzają wydania stabilne. Kanał zależy od typu builda (`BuildConfig.DEBUG`),
+nie od zachowanego sufiksu pakietu. Oba buildy współdzielą dane lokalne i stały
+podpis; nie są osobnymi aplikacjami.
+Brak sekretów podpisu nie zatrzymuje walidacji na `main`, ale wyłącza upload
+testowego APK; CI release wtedy kończy się błędem. Buildy pull requestów służą
+tylko walidacji i nie publikują artefaktów APK.
 
 CI na `main` sprawdza aplikację i przesyła podpisany testowy artefakt, jeśli
 sekrety są dostępne; nie tworzy automatycznie wydania testowego. Aby plik był
@@ -350,6 +348,11 @@ podpisanym lokalnie. Aktualizator odczytuje wersję CI z nazwy, np.
 w odpowiednim kanale, nie opiera się na kolejności listy wydań.
 Nazwy wcześniej opublikowanych APK nadal są obsługiwane. Nowe artefakty Actions
 używają nazwy `Drozd-FastRoute-Krakow-ci-build-N`.
+
+Dla pierwszego przejścia do stabilnego 1.0.0 dołącz zweryfikowany APK release
+zarówno do stabilnego wydania `v1.0.0`, jak i niedraftowego prerelease
+`upgrade-v1.0.0`. To drugie pozwala starym instalacjom pobrać ten sam APK bez
+zmiany ich dotychczasowego kodu aktualizatora. Nie zastępuj go APK debug.
 
 ## Etapowa zmiana nazwy repozytorium
 

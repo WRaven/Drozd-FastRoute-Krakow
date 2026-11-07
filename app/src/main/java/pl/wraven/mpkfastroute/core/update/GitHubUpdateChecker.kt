@@ -16,6 +16,7 @@ import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import pl.wraven.mpkfastroute.BuildConfig
 
 data class UpdateCheckResult(
     val currentVersion: String,
@@ -50,11 +51,14 @@ class GitHubUpdateChecker @Inject constructor(
         } catch (exception: SerializationException) {
             throw IOException("GitHub returned an invalid releases response.", exception)
         }
-        val isTestBuild = context.packageName.endsWith(".debug")
         val releaseCandidates = releases.mapNotNull { element ->
             val candidate = element.jsonObject
-            if (candidate["draft"]?.jsonPrimitive?.boolean == true ||
-                candidate["prerelease"]?.jsonPrimitive?.boolean != isTestBuild
+            if (
+                !releaseMatchesChannel(
+                    prerelease = candidate["prerelease"]?.jsonPrimitive?.boolean,
+                    draft = candidate["draft"]?.jsonPrimitive?.boolean,
+                    isTestBuild = BuildConfig.DEBUG
+                )
             ) {
                 return@mapNotNull null
             }
@@ -110,6 +114,12 @@ class GitHubUpdateChecker @Inject constructor(
             Regex("""(?i)(?:^|[-_])v?(\d+\.\d+\.\d+(?:-ci\.\d+)?)\b""")
         private val APK_BUILD_NUMBER_PATTERN =
             Regex("""(?i)(?:^|[-_])build(\d+)(?:[-_.]|$)""")
+
+        internal fun releaseMatchesChannel(
+            prerelease: Boolean?,
+            draft: Boolean?,
+            isTestBuild: Boolean
+        ): Boolean = draft != true && prerelease == isTestBuild
 
         internal fun selectApkDownloadUrl(assets: List<Pair<String, String?>>): String? =
             assets.firstNotNullOfOrNull { (assetName, downloadUrl) ->

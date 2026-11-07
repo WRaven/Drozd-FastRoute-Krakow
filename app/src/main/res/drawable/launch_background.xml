@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/fast_route_window_background" />
+    <item
+        android:width="152dp"
+        android:height="152dp"
+        android:gravity="center"
+        android:drawable="@drawable/drozd_logo" />
+</layer-list>

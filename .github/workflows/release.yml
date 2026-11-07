@@ -145,17 +145,17 @@ jobs:
             echo "APP_VERSION_CODE=$VERSION_CODE"
           } >> "$GITHUB_ENV"
 
-      - name: Configure stable release signing
+      - name: Configure stable signing compatible with existing installations
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.TEST_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.TEST_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.TEST_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.TEST_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           if [[ -z "$ANDROID_KEYSTORE_BASE64" || -z "$ANDROID_KEYSTORE_PASSWORD" || \
                 -z "$ANDROID_KEY_ALIAS" || -z "$ANDROID_KEY_PASSWORD" ]]; then
-            echo "::error::Configure all four release-signing secrets in the repository settings."
+            echo "::error::All four existing TEST_KEYSTORE/TEST_KEY signing secrets are required for compatible releases."
             exit 1
           fi
           keystore_path="$RUNNER_TEMP/mpk-krakow-fastroute-release.jks"
@@ -163,12 +163,12 @@ jobs:
           chmod 600 "$keystore_path"
           echo "ANDROID_KEYSTORE_FILE=$keystore_path" >> "$GITHUB_ENV"
 
-      - name: Build release APK
+      - name: Validate and build release APK
         env:
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleRelease
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.TEST_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.TEST_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.TEST_KEY_PASSWORD }}
+        run: ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
 
       - name: Version APK filename
         id: apk

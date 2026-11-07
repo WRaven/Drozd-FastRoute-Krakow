@@ -7,6 +7,29 @@ import org.junit.Test
 
 class GitHubUpdateCheckerTest {
     @Test
+    fun stableBuildsSelectStableReleasesAndDebugBuildsSelectPrereleases() {
+        assertTrue(GitHubUpdateChecker.releaseMatchesChannel(false, false, isTestBuild = false))
+        assertTrue(!GitHubUpdateChecker.releaseMatchesChannel(true, false, isTestBuild = false))
+        assertTrue(GitHubUpdateChecker.releaseMatchesChannel(true, false, isTestBuild = true))
+        assertTrue(!GitHubUpdateChecker.releaseMatchesChannel(false, false, isTestBuild = true))
+        listOf(false, true).forEach { isTestBuild ->
+            assertTrue(!GitHubUpdateChecker.releaseMatchesChannel(isTestBuild, true, isTestBuild))
+            assertTrue(!GitHubUpdateChecker.releaseMatchesChannel(null, false, isTestBuild))
+        }
+    }
+
+    @Test
+    fun oldPrereleaseUpdatersCanDiscoverTheStableApkThroughABridgeAsset() {
+        val bridgeVersion = GitHubUpdateChecker.versionForRelease(
+            tagName = "upgrade-v1.0.0",
+            assetNames = listOf("Drozd-FastRoute-Krakow-v1.0.0-build66.apk")
+        )
+        assertEquals("1.0.0-ci.66", bridgeVersion)
+        assertTrue(GitHubUpdateChecker.compareVersions(bridgeVersion, "0.1.0-ci.64-test") > 0)
+        assertEquals(0, GitHubUpdateChecker.compareVersions("v1.0.0", "1.0.0"))
+    }
+
+    @Test
     fun comparesReleaseAndContinuousIntegrationVersions() {
         assertEquals(1, GitHubUpdateChecker.compareVersions("v1.2.0", "1.1.9-test"))
         assertEquals(1, GitHubUpdateChecker.compareVersions("1.2.3", "v1.2.3-ci.12"))

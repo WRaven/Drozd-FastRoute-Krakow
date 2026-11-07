@@ -49,13 +49,14 @@ class StartupThemeTest {
         }
         listOf(
             "android:colorBackground",
-            "android:windowBackground",
             "android:statusBarColor",
             "android:navigationBarColor",
             "android:windowSplashScreenBackground"
         ).forEach { attribute ->
             assertEquals(attribute, "@color/fast_route_window_background", values[attribute])
         }
+        assertEquals("@drawable/launch_background", values["android:windowBackground"])
+        assertEquals("@drawable/ic_splash_logo", values["android:windowSplashScreenAnimatedIcon"])
         listOf("android:windowLightStatusBar", "android:windowLightNavigationBar")
             .forEach { attribute ->
                 assertEquals(attribute, "@bool/fast_route_light_system_bars", values[attribute])

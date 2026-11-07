@@ -1,5 +1,7 @@
 # Drozd FastRoute
 
+<img src="./app/src/main/res/drawable-nodpi/drozd_logo.png" width="180" alt="Drozd FastRoute logo: a thrush above a route" />
+
 [Polski](./README.pl.md) | **English**
 
 Android app for searching Kraków public-transport connections, showing live
@@ -28,12 +30,18 @@ the new display name does not change existing installations or saved data.
 5. Allow foreground location for automatic origin selection, Live map centering
    and local weather, or enter your origin manually.
 
+Stable **1.0.0** is named **Drozd FastRoute**, without "test", and updates the
+existing test installation using the same Android package and signing key.
+An `upgrade-v1.0.0` prerelease carries the identical stable APK for older
+updaters that only search prereleases. After installing it, the release app
+checks stable releases.
+
 To update an existing installation, open **Ustawienia → Sprawdź aktualizacje**
 (Settings → Check for updates), then **Pobierz i zainstaluj** (Download and install).
 If required, use **Zezwól na instalowanie** to grant this app installation permission
 and confirm the Android installer. Do not uninstall first: a compatible update
-preserves the local timetable and preferences. Test and regular applications are
-separate; one channel cannot update the other.
+preserves the local timetable and preferences. Debug and release builds now share
+the permanent package identity; use the stable APK for normal use.
 
 ## Using the app
 
@@ -146,6 +154,10 @@ color-profile selector.
   profile as Compose, including system tonal colors on Android 12 and newer.
   System bar icons keep the matching contrast; when Compose starts, the window
   background is synchronized with its exact color scheme.
+  The supplied thrush-and-route artwork is cropped locally and used for the
+  launcher icon, startup logo and this documentation. Transparent corners and
+  safe margins preserve the full emblem under Android's icon/splash masks.
+  The startup logo adds no artificial loading delay.
 - Address routes compare up to six nearby stop-name groups within 1.5 km.
   Walking to the first stop, between transfer stops, and from the final stop
   is included in door-to-door arrival estimates; results include the fastest
@@ -288,7 +300,8 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
 1. Install an update over the preceding test build; confirm saved destinations
    and names remain.
 2. Force-stop and relaunch in dark mode, then in light mode; check launch colors
-   and readable system-bar icons.
+   and readable system-bar icons. Check the new logo on the launcher and startup
+   screen: the thrush, route and frame should not be cut off.
 3. Open Live with/without location permission; check centering and line labels on
    markers and after tapping a vehicle. Zoom out to the whole city, then zoom in:
    stop dots should grow smoothly and shrink again when zooming out; a selected
@@ -304,8 +317,10 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
 - GitHub Actions assigns the workflow run number as Android `versionCode`.
   Gradle reads `APP_VERSION_NAME` and `APP_VERSION_CODE` from the release
   workflow and uses `git describe --tags --always` for local builds.
-- The permanent Android application ID is `pl.wraven.mpkfastroute`. Do not
-  change it after publishing the first APK.
+- The permanent Android application ID is `pl.wraven.mpkfastroute.debug`,
+  retained from the installed test app so 1.0.0 preserves user data. The
+  internal Kotlin namespace remains `pl.wraven.mpkfastroute`. The `.debug`
+  suffix does not make a release APK debuggable or require "test" in its name.
 - All releases must keep the same Android `applicationId` and be signed with
   the same release key. Changing either prevents Android from installing an
   APK over the existing app.
@@ -313,16 +328,21 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
   below are configured. It never silently publishes an unsigned or differently
   signed APK.
 
-Before the first release, create and securely back up one Android release
-keystore. Configure these GitHub Actions repository secrets without sharing
-their values in chat or committing them to the repository:
+The existing signing key is now the permanent key for both compatible stable
+and test updates. GitHub Actions deliberately reuses the already configured
+secrets below; do not generate a replacement key for 1.0.0:
 
 | Secret | Value |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | Base64 encoding of the keystore file |
-| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
-| `ANDROID_KEY_ALIAS` | Signing key alias |
-| `ANDROID_KEY_PASSWORD` | Signing key password |
+| `TEST_KEYSTORE_BASE64` | Base64 encoding of the existing keystore file |
+| `TEST_KEYSTORE_PASSWORD` | Existing keystore password |
+| `TEST_KEY_ALIAS` | Existing signing key alias |
+| `TEST_KEY_PASSWORD` | Existing signing key password |
+
+Local release builds still read `ANDROID_KEYSTORE_FILE`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`.
+Point them to the same permanent key. CI maps the existing secret values to
+those build inputs without changing the secrets themselves.
 
 Keep the keystore and passwords safe and unchanged for future releases. If the
 release key is lost, Android cannot install a differently signed APK as an
@@ -338,37 +358,14 @@ git push origin v1.0.0
 The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
 
-Main-branch test APKs use the separate `pl.wraven.mpkfastroute.debug` package
-and appear as "Drozd FastRoute (test)". The legacy package IDs are deliberately
-unchanged for update compatibility. Configure a separate, stable test
-keystore using these GitHub Actions repository secrets:
-
-| Secret | Value |
-| --- | --- |
-| `TEST_KEYSTORE_BASE64` | Base64 encoding of the test keystore file |
-| `TEST_KEYSTORE_PASSWORD` | Keystore password |
-| `TEST_KEY_ALIAS` | Signing key alias |
-| `TEST_KEY_PASSWORD` | Signing key password |
-
-On Windows, create the test keystore outside the repository in PowerShell:
-
-```powershell
-$keyPath = Join-Path $HOME "mpk-fastroute-test.jks"
-$keytool = "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe"
-& $keytool -genkeypair -v -keystore $keyPath -storetype JKS `
-  -alias mpk-fastroute-test -keyalg RSA -keysize 2048 -validity 10000 `
-  -dname "CN=MPK FastRoute Test, OU=Development, O=WRaven, C=PL"
-[Convert]::ToBase64String([IO.File]::ReadAllBytes($keyPath)) | Set-Clipboard
-```
-
-Use the copied value for `TEST_KEYSTORE_BASE64`, the alias `mpk-fastroute-test`
-for `TEST_KEY_ALIAS`, and the passwords you entered for the password secrets.
-Keep this test keystore safe and unchanged; CI signs test APKs with it so one
-test APK can update another without removing its local database. The test app
-remains separate from the regular release app and does not share its data. If
-the test secrets are missing, CI still runs validation but does not upload a
-test APK artifact. Pull-request builds are for validation only and do not
-publish APK artifacts.
+Main-branch debug APKs still appear as "Drozd FastRoute (test)" and check
+prereleases. Release APKs appear as "Drozd FastRoute", are not debuggable and
+check stable releases. Channel selection uses the build type (`BuildConfig.DEBUG`),
+not the retained package suffix. Both builds share local data and the same
+permanent signing identity; they are not separate applications.
+If signing secrets are missing, main-branch CI still validates but does not upload
+a test APK artifact, while release CI fails. Pull-request builds are for
+validation only and do not publish APK artifacts.
 
 Main-branch CI validates the app and uploads a signed test APK artifact when the
 stable test secrets are available; it does not automatically create a test release.
@@ -379,6 +376,11 @@ name (for example, `Drozd-FastRoute-Krakow-v0.1.0-ci.N-buildN-debug.apk`) and se
 the highest compatible-channel version rather than relying on release-list order.
 Previously published APK names remain supported. New Actions artifacts use
 `Drozd-FastRoute-Krakow-ci-build-N`.
+
+For the initial transition to stable 1.0.0, attach the verified release APK both
+to the stable `v1.0.0` release and to the non-draft `upgrade-v1.0.0` prerelease.
+The latter lets old installations discover the same APK without changing their
+old updater code. Do not substitute a debug APK for this transition.
 
 ## Staged repository rename
 

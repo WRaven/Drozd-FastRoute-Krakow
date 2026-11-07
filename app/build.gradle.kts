@@ -87,7 +87,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "pl.wraven.mpkfastroute"
+        applicationId = "pl.wraven.mpkfastroute.debug"
         minSdk = 26
         targetSdk = 36
         versionCode = appVersionCode
@@ -117,13 +117,13 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
             versionNameSuffix = "-test"
             if (hasTestSigning) {
                 signingConfig = signingConfigs.getByName("stableTest")
             }
         }
         release {
+            isDebuggable = false
             if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("stableRelease")
             }
@@ -142,7 +142,14 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
+    }
+}
+
+androidComponents {
+    beforeVariants(selector().withBuildType("release")) {
+        it.hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
     }
 }
 
