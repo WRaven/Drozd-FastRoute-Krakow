@@ -26,10 +26,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -65,8 +67,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -593,6 +597,9 @@ private fun SearchContent(
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
+    val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    var isOriginFieldFocused by remember { mutableStateOf(false) }
+    var isDestinationFieldFocused by remember { mutableStateOf(false) }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
     var showDestinationStopPicker by remember(state.destinationPlace) {
         mutableStateOf(false)
@@ -605,14 +612,15 @@ private fun SearchContent(
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+        if (!isKeyboardVisible) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                 Text("Szybkie akcje", style = MaterialTheme.typography.titleSmall)
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
@@ -697,12 +705,13 @@ private fun SearchContent(
                         Text("⚙")
                     }
                 }
-                ServiceNewsTicker(
-                    state = state,
-                    onOpenAlerts = onOpenServiceAlerts,
-                    onOpenArticle = onOpenServiceNews,
-                    onRefresh = onRefreshServiceNews
-                )
+                    ServiceNewsTicker(
+                        state = state,
+                        onOpenAlerts = onOpenServiceAlerts,
+                        onOpenArticle = onOpenServiceNews,
+                        onRefresh = onRefreshServiceNews
+                    )
+                }
             }
         }
         if (state.isImporting && state.progressMessage.isNotBlank()) {
@@ -718,7 +727,9 @@ private fun SearchContent(
             CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
         }
 
-        Text("Znajdź połączenie", style = MaterialTheme.typography.titleLarge)
+        if (!isKeyboardVisible) {
+            Text("Znajdź połączenie", style = MaterialTheme.typography.titleLarge)
+        }
         Card(
             modifier = Modifier.fillMaxWidth(),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -748,14 +759,19 @@ private fun SearchContent(
                     onValueChange = onOriginQueryChange,
                     label = { Text("Adres lub przystanek") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { isOriginFieldFocused = it.isFocused }
                 )
-                if (state.originPlace == null) {
+                if (
+                    state.originPlace == null &&
+                    (isOriginFieldFocused || state.originQuery.isNotBlank())
+                ) {
                     Column(
                         modifier = Modifier
-                            .heightIn(max = 220.dp)
+                            .heightIn(max = 160.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         AddressSuggestionPicker(
                             query = state.originQuery,
@@ -831,7 +847,9 @@ private fun SearchContent(
                     onValueChange = onDestinationQueryChange,
                     label = { Text("Adres lub przystanek") },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { isDestinationFieldFocused = it.isFocused }
                 )
                 if (state.destinationPlace != null) {
                     if (
@@ -866,12 +884,15 @@ private fun SearchContent(
                             }
                         }
                     }
-                } else {
+                } else if (
+                    isDestinationFieldFocused ||
+                    state.destinationQuery.isNotBlank()
+                ) {
                     Column(
                         modifier = Modifier
-                            .heightIn(max = 220.dp)
+                            .heightIn(max = 160.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         AddressSuggestionPicker(
                             query = state.destinationQuery,
@@ -902,14 +923,15 @@ private fun SearchContent(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
+        if (!isKeyboardVisible) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                 TextButton(
                     onClick = onEditRoutePlan,
                     enabled = !state.isSearching && !state.isImporting,
@@ -937,6 +959,7 @@ private fun SearchContent(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (state.isSearching) "Szukam..." else "Szukaj trasy")
+                    }
                 }
             }
         }
