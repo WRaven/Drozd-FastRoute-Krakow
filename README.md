@@ -1,8 +1,75 @@
 # MPK Kraków FastRoute
 
+[Polski](./README.pl.md) | **English**
+
 Android app for searching Kraków public-transport connections, showing live
-departure information, and playing radio streams. The implementation follows
-the architecture and phases in the project specification.
+departure information, and playing radio streams. This document describes the
+current application and its development workflow. The app interface is currently
+in Polish; English documentation does not change the interface language.
+
+## Install and get started
+
+1. Use Android 8.0 or newer and an internet connection for the first timetable
+   download.
+2. Open [GitHub Releases](https://github.com/WRaven/MPK-Krakow-FastRoute/releases)
+   and download the APK from the desired channel. Public test builds are
+   prereleases named **Test build N**; regular releases use `vMAJOR.MINOR.PATCH`.
+   Within the test channel, choose the highest build number, not just the first
+   release listed.
+3. Open the APK, allow installation from the browser or file manager if Android
+   requests it, and confirm installation.
+4. Open the app and wait for the first GTFS timetable import. Its progress is
+   visible; route search becomes available when the import finishes.
+5. Allow foreground location for automatic origin selection, Live map centering
+   and local weather, or enter your origin manually.
+
+To update an existing installation, open **Ustawienia → Sprawdź aktualizacje**
+(Settings → Check for updates), then **Pobierz i zainstaluj** (Download and install).
+If required, use **Zezwól na instalowanie** to grant this app installation permission
+and confirm the Android installer. Do not uninstall first: a compatible update
+preserves the local timetable and preferences. Test and regular applications are
+separate; one channel cannot update the other.
+
+## Using the app
+
+| Feature | How to use it |
+| --- | --- |
+| Route search | Enter an origin and destination address/name, select suggestions or use the current location. **Wybierz przystanek** allows explicit stop selection. The date/time editor supports departure or latest-arrival planning. Results include transport legs, walking estimates and available live departures. |
+| Home and work | Use **Ustaw: Do domu** / **Ustaw: Do pracy** to configure a destination, arrival time and weekdays. Subsequent taps plan arrival for the next scheduled occurrence. Edit saved schedules in Settings or the work-schedule quick action. |
+| Shortcut names | In Settings, edit **Nazwa skrótu do domu** and **Nazwa skrótu do pracy**, then tap **Zapisz nazwy skrótów**. Names cannot be blank. Both persist after restart and also appear in schedule headings and commute notifications. Renaming does not change the destinations or schedules. |
+| Custom route | Long-press a result to store its endpoints as the single **Własny** shortcut. Saving another custom route replaces the previous one. |
+| Live map | Tap **Live**. The map initially opens on Kraków and centers on your location when available. Vehicle markers show line numbers and reported direction. Tap a vehicle or stop for details; pan or zoom the map as needed. The **Pojazd** value is a fleet number, not a line number. See the limitations below for selected-trip details. |
+| ZTP notices | Read the scrolling ZTP/active-disruption ticker or tap it to open the corresponding notice/details. It scrolls at 36 dp/s, 20% faster than the previous default. **Komunikaty MPK** and the MPK Kraków X quick action provide additional information. |
+| Weather | Tap **Pogoda** for current conditions and the next 24 hours near your location. The view includes temperature, precipitation, wind and soil temperature. Pressure is omitted; the hourly soil-temperature/wind line remains compact. |
+| Radio | Use **Uruchom radio** / **Zatrzymaj radio**, choose a station, or use the gear button to manage streams. Android media controls remain available while playing. |
+| Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder is scheduled 15 minutes before the calculated departure. |
+| Timetable and diagnostics | Settings provides **Odśwież rozkład GTFS** and a bounded search diagnostic log with copy/clear actions. The automatic updater also checks the timetable at startup and daily. |
+| Sharing | Settings contains a QR code and a link to GitHub Releases, plus contact and release-detail actions. |
+
+The main screen hides quick actions while typing to leave room for suggestions.
+The app and its launch screen follow the phone's light/dark mode; Android 12 and
+newer also use the system dynamic color palette. There is no separate in-app
+color-profile selector.
+
+## Permissions, network and stored data
+
+- Foreground location is used for nearby-stop/origin actions, Live and weather.
+  If location is denied, a manually entered origin remains usable and the Live
+  map retains its Kraków starting view.
+- Background location and notifications are needed for commute reminders.
+  Radio playback uses an Android media foreground service.
+- Internet is needed for GTFS imports, live data, notices, map tiles, weather,
+  radio streams and application updates. These requests use the active network;
+  downloading timetables, map tiles or audio may consume mobile data.
+- Timetables, destinations, shortcut names, schedules, recent selections and
+  radio preferences are stored in the app's local database/preferences. Android
+  backup is enabled, so system backup settings can affect copies of app data.
+- Weather requests send the selected current coordinates to Open-Meteo. Address
+  lookup uses Android's device-provided geocoder. Map requests go to the tile
+  provider; these features are not entirely offline.
+- The diagnostic log is kept in memory, is bounded, and does not record entered
+  addresses or GPS coordinates. Weather and tram-line lookup caches are also
+  in memory, not permanent location histories.
 
 ## Implementation status
 
@@ -38,7 +105,8 @@ the architecture and phases in the project specification.
   the route planner). The tram mapping is cached in memory for an hour, and
   unavailable line numbers are reported explicitly. Fleet numbers shown as
   "Pojazd" are separate from line numbers. Map tiles and vehicle positions
-  include visible source attribution.
+  include visible source attribution. The line-label mapping does not migrate
+  selected-trip geometry/timetables to the separate A/T feeds; see the limitations.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,
@@ -77,7 +145,8 @@ the architecture and phases in the project specification.
   shows current conditions plus an hourly 24-hour forecast from Open-Meteo,
   including precipitation amounts and probability, wind, and near-surface soil
   temperature. Pressure is omitted from the weather view to keep the hourly
-  soil-temperature/wind details compact. Weather codes include fog and thunderstorms.
+  soil-temperature/wind details compact. Weather codes include fog and
+  thunderstorms.
   Forecasts are cached in memory for 15 minutes by approximate location; no
   weather location is stored. The weather view includes a compact legend,
   credits Open-Meteo, and links its CC BY 4.0 license.
@@ -124,6 +193,92 @@ the architecture and phases in the project specification.
 - Settings include an in-memory, bounded search diagnostic log with copy and
   clear actions. It reports database/index/CSA stages and counts without
   recording addresses or GPS coordinates.
+
+## Limitations and troubleshooting
+
+- After the initial import, the stored timetable can support static route
+  planning without a new download. Live departures, vehicle positions, notices,
+  map tiles, weather and radio still depend on their external services.
+- The planner scans a two-hour departure window. Address routing examines up to
+  six nearby stop groups within 1.5 km, requires at least three minutes to transfer
+  and considers inter-stop walks up to 500 m. It is not an exhaustive journey
+  planner for every possible connection.
+- Walking distances use straight-line Haversine estimates at 4.5 km/h, not
+  pedestrian street routing; obstacles and actual walking times can differ.
+- The combined planner feed and the bus/tram realtime feeds use different ID
+  namespaces. Tram line labels are resolved from the matching `GTFS_KRK_T.zip`,
+  but a selected Live trip may still report that it is absent from the planner
+  GTFS database. A correct line label does not guarantee that its detailed
+  timetable or route geometry can be displayed.
+- Missing live/line metadata is shown as an unavailable/incomplete-data warning.
+  Scheduled estimates are not presented as confirmed live data.
+- If location is unavailable, enable phone location services and check the app's
+  permission. Address search also depends on geocoder availability on the device.
+- Commute reminder delivery depends on permissions, Android background scheduling
+  and available data; it is not a guaranteed alarm.
+- If an update cannot install, check its channel, package, signing certificate,
+  version and Android installation permission. Do not remove the app or its data
+  merely to bypass a signing mismatch.
+- Weather text may wrap on narrow displays or at larger accessibility font sizes;
+  pressure removal shortens the details without hiding the remaining values.
+
+## Data sources and credits
+
+| Data | Source |
+| --- | --- |
+| Planner timetable | [ZTP combined GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK.zip) |
+| Live vehicles and delays | [ZTP GTFS-Realtime feeds](https://gtfs.ztp.krakow.pl/) and the matching [tram GTFS](https://gtfs.ztp.krakow.pl/GTFS_KRK_T.zip) |
+| Stop departure predictions | [Kraków TTSS](http://www.ttss.krakow.pl/) |
+| Service notices | [ZTP notices feed](https://ztp.krakow.pl/feed?post_type=komunikat) |
+| Map | [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) |
+| Weather | [Open-Meteo](https://open-meteo.com/), [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) |
+| Radio | The providers of the configured station streams |
+
+ZTP GTFS-Realtime and Open-Meteo data include CC BY 4.0 attribution in the app.
+Data-source licenses are separate from the application's source-code licensing.
+External data availability and accuracy remain the responsibility of the providers.
+
+## Local development and validation
+
+The [app build configuration](./app/build.gradle.kts) targets Java 17 and Android
+SDK 36, with Android 8.0/API 26 as its minimum. Use the checked-in Gradle wrapper,
+a JDK compatible with the project, Android SDK Platform 36 and Build Tools 36.0.0.
+The [CI workflow](./.github/workflows/release.yml) uses Java 17.
+
+Windows/PowerShell example:
+
+```powershell
+git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git
+Set-Location '.\MPK-Krakow-FastRoute'
+$env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+.\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+```
+
+Set `ANDROID_HOME` to your actual SDK location if it differs. The local debug APK
+is written to `app\build\outputs\apk\debug\app-debug.apk`. Its default local signing
+key is not the CI test key; do not use it to update an existing CI-signed test app.
+
+Focused tests for the recent presentation changes:
+
+```powershell
+.\gradlew.bat :app:testDebugUnitTest `
+  --tests 'pl.wraven.mpkfastroute.feature.search.ServiceNewsTickerTest' `
+  --tests 'pl.wraven.mpkfastroute.feature.search.WeatherForecastSheetTest' `
+  --tests 'pl.wraven.mpkfastroute.ui.theme.StartupThemeTest'
+```
+
+The suite also covers route planning, GTFS parsing, live-feed mapping, weather
+requests and persistent shortcut names. Unit tests do not replace device checks:
+
+1. Install an update over the preceding test build; confirm saved destinations
+   and names remain.
+2. Force-stop and relaunch in dark mode, then in light mode; check launch colors
+   and readable system-bar icons.
+3. Open Live with/without location permission; check centering and line labels on
+   markers and after tapping a vehicle.
+4. Rename both shortcuts, save and restart; check names, destinations and schedules.
+5. Check ticker movement and the weather soil-temperature/wind line on the phone,
+   including a larger font setting.
 
 ## Versioning and in-place updates
 
@@ -196,3 +351,11 @@ remains separate from the regular release app and does not share its data. If
 the test secrets are missing, CI still runs validation but does not upload a
 test APK artifact. Pull-request builds are for validation only and do not
 publish APK artifacts.
+
+Main-branch CI validates the app and uploads a signed test APK artifact when the
+stable test secrets are available; it does not automatically create a test release.
+To make a verified artifact available on a phone and in the test app updater,
+publish it as a public, non-draft prerelease with a versioned APK asset. Do not
+substitute a locally signed APK. The updater derives the CI version from the asset
+name (for example, `MPK-Krakow-FastRoute-v0.1.0-ci.N-buildN-debug.apk`) and selects
+the highest compatible-channel version rather than relying on release-list order.
