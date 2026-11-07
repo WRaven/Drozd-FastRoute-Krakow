@@ -25,6 +25,7 @@ data class LiveVehiclePosition(
     val mode: TransitVehicleMode,
     val latitude: Double,
     val longitude: Double,
+    val bearing: Float? = null,
     val routeShortName: String?,
     val vehicleLabel: String?,
     val routeId: String? = null,
@@ -132,6 +133,9 @@ internal fun mapVehiclePositions(
         mode = mode,
         latitude = latitude,
         longitude = longitude,
+        bearing = position.bearing.takeIf {
+            position.hasBearing() && it.isFinite() && it in 0f..360f
+        },
         routeShortName = routeId?.let(routeShortNames::get),
         vehicleLabel = descriptor?.label?.takeIf(String::isNotBlank),
         routeId = routeId,

@@ -1,7 +1,13 @@
 package pl.wraven.mpkfastroute.feature.search
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.Typeface
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -33,6 +39,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -52,6 +59,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.osmdroid.config.Configuration
@@ -271,13 +279,13 @@ private fun LiveVehicleMap(
     var centeredOnVehicles by remember(mapView) { mutableStateOf(false) }
     var fittedTripId by remember(mapView) { mutableStateOf<String?>(null) }
     var previousSelectedVehicleId by remember(mapView) { mutableStateOf<String?>(null) }
+    val mapShape = RoundedCornerShape(16.dp)
 
     AndroidView(
         factory = { mapView },
-        modifier = modifier.background(
-            MaterialTheme.colorScheme.surfaceVariant,
-            RoundedCornerShape(16.dp)
-        ),
+        modifier = modifier
+            .clip(mapShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant, mapShape),
         update = { view ->
             view.overlays.clear()
             val vehicles = snapshot?.vehicles.orEmpty()
@@ -345,12 +353,9 @@ private fun LiveVehicleMap(
                         vehicle.vehicleLabel?.let { "Pojazd $it" },
                         "Dotknij, aby zobaczyć trasę i rozkład"
                     ).joinToString(" · ")
-                    icon = createVehicleMarkerIcon(
-                        context,
-                        vehicle.mode,
-                        vehicle.id == selectedVehicle?.id
-                    )
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    val isSelected = vehicle.id == selectedVehicle?.id
+                    icon = createVehicleMarkerIcon(context, vehicle, isSelected)
+                    setAnchor(vehicleMarkerAnchorX(isSelected), Marker.ANCHOR_CENTER)
                     setOnMarkerClickListener { clickedMarker, _ ->
                         clickedMarker.showInfoWindow()
                         onSelectVehicle(vehicle)
@@ -736,20 +741,124 @@ private fun createMapView(context: Context): MapView {
 
 private fun createVehicleMarkerIcon(
     context: Context,
-    mode: TransitVehicleMode,
+    vehicle: LiveVehiclePosition,
     selected: Boolean
-): GradientDrawable {
+): BitmapDrawable {
     val density = context.resources.displayMetrics.density
-    return GradientDrawable().apply {
-        shape = GradientDrawable.OVAL
-        setColor(markerColor(mode))
-        val strokeColor = if (selected) SELECTED_MARKER_COLOR else AndroidColor.WHITE
-        val strokeSize = if (selected) 3 else 2
-        val markerSize = if (selected) 28 else 22
-        setStroke((strokeSize * density).toInt().coerceAtLeast(1), strokeColor)
-        setSize((markerSize * density).toInt(), (markerSize * density).toInt())
+    val markerSize = vehicleMarkerCircleSizeDp(selected) * density
+    val arrowSize = VEHICLE_MARKER_ARROW_SIZE_DP * density
+    val gap = VEHICLE_MARKER_ARROW_GAP_DP * density
+    val width = (markerSize + arrowSize + gap).roundToInt().coerceAtLeast(1)
+    val height = markerSize.roundToInt().coerceAtLeast(1)
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val markerCenterX = markerSize / 2
+    val centerY = height / 2f
+    val markerRadius = markerSize / 2
+    val markerStrokeWidth = (if (selected) 3f else 2f) * density
+
+    canvas.drawCircle(
+        markerCenterX,
+        centerY,
+        markerRadius - markerStrokeWidth / 2,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = markerColor(vehicle.mode)
+            style = Paint.Style.FILL
+        }
+    )
+    canvas.drawCircle(
+        markerCenterX,
+        centerY,
+        markerRadius - markerStrokeWidth / 2,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = if (selected) SELECTED_MARKER_COLOR else AndroidColor.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = markerStrokeWidth
+        }
+    )
+
+    val label = vehicle.routeShortName?.takeIf(String::isNotBlank) ?: "?"
+    val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
+        textAlign = Paint.Align.CENTER
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textSize = VEHICLE_MARKER_LABEL_TEXT_SIZE_DP * density
     }
+    val availableLabelWidth = markerSize - 2 * VEHICLE_MARKER_LABEL_PADDING_DP * density
+    val measuredLabelWidth = labelPaint.measureText(label)
+    if (measuredLabelWidth > availableLabelWidth) {
+        labelPaint.textSize *= availableLabelWidth / measuredLabelWidth
+    }
+    val labelBaseline = centerY - (labelPaint.ascent() + labelPaint.descent()) / 2
+    canvas.drawText(label, markerCenterX, labelBaseline, labelPaint)
+
+    val arrowCenterX = markerSize + gap + arrowSize / 2
+    val arrowRadius = arrowSize / 2
+    canvas.drawCircle(
+        arrowCenterX,
+        centerY,
+        arrowRadius,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = AndroidColor.WHITE
+            style = Paint.Style.FILL
+        }
+    )
+    canvas.drawCircle(
+        arrowCenterX,
+        centerY,
+        arrowRadius,
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = DIRECTION_MARKER_STROKE_COLOR
+            style = Paint.Style.STROKE
+            strokeWidth = density
+        }
+    )
+
+    val bearing = vehicle.bearing
+    if (bearing == null) {
+        val unknownDirectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = DIRECTION_MARKER_STROKE_COLOR
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textSize = VEHICLE_MARKER_UNKNOWN_TEXT_SIZE_DP * density
+        }
+        val unknownDirectionBaseline =
+            centerY - (unknownDirectionPaint.ascent() + unknownDirectionPaint.descent()) / 2
+        canvas.drawText("?", arrowCenterX, unknownDirectionBaseline, unknownDirectionPaint)
+    } else {
+        val arrowPath = Path().apply {
+            moveTo(arrowCenterX, centerY - arrowRadius * 0.68f)
+            lineTo(arrowCenterX + arrowRadius * 0.5f, centerY - arrowRadius * 0.05f)
+            lineTo(arrowCenterX + arrowRadius * 0.17f, centerY - arrowRadius * 0.05f)
+            lineTo(arrowCenterX + arrowRadius * 0.17f, centerY + arrowRadius * 0.5f)
+            lineTo(arrowCenterX - arrowRadius * 0.17f, centerY + arrowRadius * 0.5f)
+            lineTo(arrowCenterX - arrowRadius * 0.17f, centerY - arrowRadius * 0.05f)
+            lineTo(arrowCenterX - arrowRadius * 0.5f, centerY - arrowRadius * 0.05f)
+            close()
+        }
+        canvas.save()
+        canvas.rotate(bearing, arrowCenterX, centerY)
+        canvas.drawPath(
+            arrowPath,
+            Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = DIRECTION_MARKER_STROKE_COLOR
+                style = Paint.Style.FILL
+            }
+        )
+        canvas.restore()
+    }
+
+    return BitmapDrawable(context.resources, bitmap)
 }
+
+private fun vehicleMarkerAnchorX(selected: Boolean): Float {
+    val markerSize = vehicleMarkerCircleSizeDp(selected)
+    val totalWidth = markerSize + VEHICLE_MARKER_ARROW_GAP_DP + VEHICLE_MARKER_ARROW_SIZE_DP
+    return markerSize / 2 / totalWidth
+}
+
+private fun vehicleMarkerCircleSizeDp(selected: Boolean): Float =
+    if (selected) VEHICLE_MARKER_SELECTED_SIZE_DP else VEHICLE_MARKER_SIZE_DP
 
 private fun markerColor(mode: TransitVehicleMode): Int = when (mode) {
     TransitVehicleMode.BUS -> BUS_MARKER_COLOR
@@ -782,10 +891,18 @@ private const val DEFAULT_MAP_ZOOM = 12.0
 private const val SELECTED_VEHICLE_MAP_ZOOM = 14.5
 private const val ROUTE_MAP_PADDING_DP = 48
 private const val ROUTE_LINE_WIDTH_DP = 5f
+private const val VEHICLE_MARKER_SIZE_DP = 30f
+private const val VEHICLE_MARKER_SELECTED_SIZE_DP = 34f
+private const val VEHICLE_MARKER_ARROW_SIZE_DP = 18f
+private const val VEHICLE_MARKER_ARROW_GAP_DP = 1.5f
+private const val VEHICLE_MARKER_LABEL_TEXT_SIZE_DP = 13f
+private const val VEHICLE_MARKER_LABEL_PADDING_DP = 3.5f
+private const val VEHICLE_MARKER_UNKNOWN_TEXT_SIZE_DP = 11f
 private const val KRAKOW_LATITUDE = 50.0647
 private const val KRAKOW_LONGITUDE = 19.9450
 private const val BUS_MARKER_COLOR = 0xFF1976D2.toInt()
 private const val TRAM_MARKER_COLOR = 0xFFD32F2F.toInt()
 private const val STOP_MARKER_COLOR = 0xFF388E3C.toInt()
 private const val SELECTED_MARKER_COLOR = 0xFFFFA000.toInt()
+private const val DIRECTION_MARKER_STROKE_COLOR = 0xFF263238.toInt()
 private val UPDATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
