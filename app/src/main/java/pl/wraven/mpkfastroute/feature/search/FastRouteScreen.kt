@@ -245,6 +245,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permissionStateRevision += 1
         viewModel.refreshServiceNews()
+        viewModel.refreshLiveServiceAlerts()
         CommuteReminderScheduler.synchronize(
             context,
             hasSavedCommuteSchedule && hasCommuteReminderPermissions(context)
@@ -343,8 +344,14 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onOpenServiceAlerts = {
                     openExternalUrl("https://ztp.krakow.pl/kmk/komunikaty")
                 },
+                onOpenMpKX = {
+                    openExternalUrl("https://x.com/MPK_Krakow")
+                },
                 onOpenServiceNews = ::openExternalUrl,
-                onRefreshServiceNews = { viewModel.refreshServiceNews(force = true) },
+                onRefreshServiceNews = {
+                    viewModel.refreshServiceNews(force = true)
+                    viewModel.refreshLiveServiceAlerts(force = true)
+                },
                 onOpenWeather = {
                     weatherVisible = true
                     runWithLocationPermission(viewModel::loadWeather)
@@ -589,6 +596,7 @@ private fun SearchContent(
     onSaveCustomRoute: () -> Unit,
     onEditRoutePlan: () -> Unit,
     onOpenServiceAlerts: () -> Unit,
+    onOpenMpKX: () -> Unit,
     onOpenServiceNews: (String) -> Unit,
     onRefreshServiceNews: () -> Unit,
     onOpenWeather: () -> Unit,
@@ -665,6 +673,11 @@ private fun SearchContent(
                         onClick = onOpenServiceAlerts,
                         enabled = !state.isImporting,
                         label = { Text("📢 Komunikaty MPK") }
+                    )
+                    AssistChip(
+                        onClick = onOpenMpKX,
+                        enabled = !state.isImporting,
+                        label = { Text("X: MPK Kraków") }
                     )
                     if (state.homeSchedule != null || state.workSchedule != null) {
                         AssistChip(
@@ -765,7 +778,8 @@ private fun SearchContent(
                 )
                 if (
                     state.originPlace == null &&
-                    (isOriginFieldFocused || state.originQuery.isNotBlank())
+                    isKeyboardVisible &&
+                    isOriginFieldFocused
                 ) {
                     Column(
                         modifier = Modifier
@@ -884,10 +898,7 @@ private fun SearchContent(
                             }
                         }
                     }
-                } else if (
-                    isDestinationFieldFocused ||
-                    state.destinationQuery.isNotBlank()
-                ) {
+                } else if (isKeyboardVisible && isDestinationFieldFocused) {
                     Column(
                         modifier = Modifier
                             .heightIn(max = 160.dp)
@@ -1026,6 +1037,7 @@ private fun SearchContent(
 }
 
 private const val MAX_SERVICE_NEWS_HEADLINES = 5
+private const val MAX_LIVE_ALERT_DESCRIPTION_LENGTH = 180
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1036,14 +1048,33 @@ private fun ServiceNewsTicker(
     onRefresh: () -> Unit
 ) {
     val items = state.serviceNews.take(MAX_SERVICE_NEWS_HEADLINES)
-    val headlines = items.joinToString(separator = "   •   ") { it.title }
+    val liveHeadlines = state.activeServiceAlerts.map { alert ->
+        alert.description
+            ?.takeIf { it.isNotBlank() && it != alert.title }
+            ?.let { "${alert.title} — ${it.take(MAX_LIVE_ALERT_DESCRIPTION_LENGTH)}" }
+            ?: alert.title
+    }
+    val liveTicker = liveHeadlines
+        .distinct()
+        .take(MAX_SERVICE_NEWS_HEADLINES)
+        .joinToString(separator = "   •   ")
+    val newsTicker = items
+        .map { it.title }
+        .distinct()
+        .joinToString(separator = "   •   ")
+    val hasError = state.serviceNewsError != null || state.liveServiceAlertsError != null
     val message = when {
-        headlines.isNotBlank() && state.serviceNewsError != null ->
-            "Brak aktualizacji • $headlines"
-        headlines.isNotBlank() -> headlines
-        state.isLoadingServiceNews -> "Pobieranie komunikatów ZTP..."
-        state.serviceNewsError != null -> "Komunikaty ZTP niedostępne"
-        else -> "Brak najnowszych komunikatów"
+        liveTicker.isNotBlank() && hasError -> "Niepełne dane • Awaria • $liveTicker"
+        liveTicker.isNotBlank() -> "Awaria • $liveTicker"
+        newsTicker.isNotBlank() && hasError -> "Niepełne dane • ZTP • $newsTicker"
+        newsTicker.isNotBlank() -> "ZTP • $newsTicker"
+        state.isLoadingServiceNews || state.isLoadingLiveServiceAlerts ->
+            "Pobieranie bieżących komunikatów ZTP..."
+        hasError -> listOfNotNull(
+            state.liveServiceAlertsError,
+            state.serviceNewsError
+        ).distinct().joinToString(" ")
+        else -> "Brak aktywnych awarii w danych ZTP"
     }
 
     Row(
@@ -1054,7 +1085,11 @@ private fun ServiceNewsTicker(
                 shape = MaterialTheme.shapes.small
             )
             .clickable {
-                items.firstOrNull()?.let { onOpenArticle(it.url) } ?: onOpenAlerts()
+                when {
+                    state.activeServiceAlerts.isNotEmpty() -> onOpenAlerts()
+                    items.isNotEmpty() -> onOpenArticle(items.first().url)
+                    else -> onOpenAlerts()
+                }
             }
             .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1070,10 +1105,10 @@ private fun ServiceNewsTicker(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        if (state.serviceNewsError != null) {
+        if (hasError) {
             TextButton(
                 onClick = onRefresh,
-                enabled = !state.isLoadingServiceNews
+                enabled = !state.isLoadingServiceNews && !state.isLoadingLiveServiceAlerts
             ) {
                 Text("Ponów")
             }

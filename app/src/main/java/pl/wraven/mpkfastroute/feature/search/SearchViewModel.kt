@@ -37,6 +37,8 @@ import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsZipParser
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
+import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsClient
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsItem
@@ -107,7 +109,10 @@ data class SearchUiState(
     val weatherError: String? = null,
     val serviceNews: List<ZtpServiceNewsItem> = emptyList(),
     val isLoadingServiceNews: Boolean = false,
-    val serviceNewsError: String? = null
+    val serviceNewsError: String? = null,
+    val activeServiceAlerts: List<RouteServiceAlert> = emptyList(),
+    val isLoadingLiveServiceAlerts: Boolean = false,
+    val liveServiceAlertsError: String? = null
 ) {
     val isScheduleEmpty: Boolean
         get() = stops.isEmpty()
@@ -134,7 +139,8 @@ class SearchViewModel @Inject constructor(
     private val diagnostics: SearchDiagnostics,
     private val currentLocationProvider: CurrentLocationProvider,
     private val openMeteoClient: OpenMeteoClient,
-    private val ztpServiceNewsClient: ZtpServiceNewsClient
+    private val ztpServiceNewsClient: ZtpServiceNewsClient,
+    private val serviceAlertsClient: ServiceAlertsClient
 ) : ViewModel() {
     private val mutableUiState = MutableStateFlow(SearchUiState())
     val uiState = mutableUiState.asStateFlow()
@@ -142,7 +148,9 @@ class SearchViewModel @Inject constructor(
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
     private var serviceNewsJob: Job? = null
+    private var liveServiceAlertsJob: Job? = null
     private var lastServiceNewsAttemptAtMillis = 0L
+    private var lastLiveServiceAlertsAttemptAtMillis = 0L
 
     init {
         observeStops()
@@ -151,6 +159,7 @@ class SearchViewModel @Inject constructor(
         ensureScheduleImported()
         checkForUpdates(showStatus = false)
         refreshServiceNews()
+        refreshLiveServiceAlerts()
     }
 
     fun setDestinationQuery(query: String) {
@@ -362,6 +371,48 @@ class SearchViewModel @Inject constructor(
 
     private fun showServiceNewsError(message: String) {
         mutableUiState.update { it.copy(serviceNewsError = message) }
+    }
+
+    fun refreshLiveServiceAlerts(force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (mutableUiState.value.isLoadingLiveServiceAlerts) return
+        if (
+            !force &&
+            now - lastLiveServiceAlertsAttemptAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS
+        ) {
+            return
+        }
+        lastLiveServiceAlertsAttemptAtMillis = now
+        liveServiceAlertsJob?.cancel()
+        liveServiceAlertsJob = viewModelScope.launch {
+            mutableUiState.update {
+                it.copy(isLoadingLiveServiceAlerts = true, liveServiceAlertsError = null)
+            }
+            try {
+                val result = serviceAlertsClient.getAllAlerts()
+                mutableUiState.update {
+                    it.copy(
+                        activeServiceAlerts = result.alerts,
+                        liveServiceAlertsError = result.unavailableFeeds
+                            .takeIf { it.isNotEmpty() }
+                            ?.joinToString()
+                            ?.let { feeds ->
+                                "Bieżące alerty ZTP są częściowo niedostępne ($feeds)."
+                            }
+                    )
+                }
+            } catch (exception: HttpRequestTimeoutException) {
+                showLiveServiceAlertsError("Bieżące alerty ZTP nie odpowiadają. Spróbuj ponownie.")
+            } catch (exception: IOException) {
+                showLiveServiceAlertsError("Nie można pobrać bieżących alertów ZTP.")
+            } finally {
+                mutableUiState.update { it.copy(isLoadingLiveServiceAlerts = false) }
+            }
+        }
+    }
+
+    private fun showLiveServiceAlertsError(message: String) {
+        mutableUiState.update { it.copy(liveServiceAlertsError = message) }
     }
 
     fun selectOriginAddress(place: GeoPlace) {

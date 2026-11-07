@@ -1,15 +1,16 @@
 package pl.wraven.mpkfastroute.core.live
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.header
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.isSuccess
 import java.io.IOException
 import java.io.StringReader
 import java.net.URI
 import java.net.URISyntaxException
 import javax.inject.Inject
-import javax.xml.XMLConstants
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.parsers.ParserConfigurationException
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +29,10 @@ class ZtpServiceNewsClient @Inject constructor(
     private val httpClient: HttpClient
 ) {
     suspend fun getLatestItems(): List<ZtpServiceNewsItem> {
-        val response = httpClient.get(FEED_URL)
+        val response = httpClient.get(FEED_URL) {
+            header(HttpHeaders.Accept, "application/rss+xml, application/xml, text/xml")
+            header(HttpHeaders.UserAgent, USER_AGENT)
+        }
         if (!response.status.isSuccess()) {
             throw IOException("ZTP RSS returned HTTP ${response.status.value}.")
         }
@@ -40,22 +44,27 @@ class ZtpServiceNewsClient @Inject constructor(
 
     companion object {
         const val FEED_URL = "https://ztp.krakow.pl/feed?post_type=komunikat"
+        private const val USER_AGENT = "MPK-Krakow-FastRoute/0.1.0 (Android)"
     }
 }
 
 internal object ZtpServiceNewsParser {
     fun parse(xml: String): List<ZtpServiceNewsItem> {
-        val document = try {
-            DocumentBuilderFactory.newInstance().apply {
-                setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                setFeature("http://xml.org/sax/features/external-general-entities", false)
-                setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-                setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-                setExpandEntityReferences(false)
-            }.newDocumentBuilder().parse(InputSource(StringReader(xml)))
+        if (xml.contains("<!DOCTYPE", ignoreCase = true)) {
+            throw IOException("ZTP RSS document types are not supported.")
+        }
+        val builder = try {
+            DocumentBuilderFactory.newInstance()
+                .apply { isExpandEntityReferences = false }
+                .newDocumentBuilder()
         } catch (exception: ParserConfigurationException) {
             throw IOException("Unable to configure the ZTP RSS parser.", exception)
+        }
+        builder.setEntityResolver { _, _ ->
+            throw SAXException("External RSS entities are disabled.")
+        }
+        val document = try {
+            builder.parse(InputSource(StringReader(xml)))
         } catch (exception: SAXException) {
             throw IOException("ZTP returned invalid RSS data.", exception)
         }

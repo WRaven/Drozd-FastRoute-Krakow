@@ -43,6 +43,21 @@ class ServiceAlertsClient @Inject constructor(
         routeShortNames: Set<String>,
         stopIds: Set<String>,
         nowEpochSeconds: Long = System.currentTimeMillis() / MILLIS_PER_SECOND
+    ): ServiceAlertsResult = fetchAlerts(nowEpochSeconds) { alert ->
+        alert.affectsRoute(
+            routeIds = routeIds,
+            routeShortNames = routeShortNames,
+            stopIds = stopIds
+        )
+    }
+
+    suspend fun getAllAlerts(
+        nowEpochSeconds: Long = System.currentTimeMillis() / MILLIS_PER_SECOND
+    ): ServiceAlertsResult = fetchAlerts(nowEpochSeconds) { true }
+
+    private suspend fun fetchAlerts(
+        nowEpochSeconds: Long,
+        shouldInclude: (RouteServiceAlert) -> Boolean
     ): ServiceAlertsResult {
         val matchingAlerts = mutableListOf<RouteServiceAlert>()
         val unavailableFeeds = mutableListOf<String>()
@@ -62,13 +77,7 @@ class ServiceAlertsClient @Inject constructor(
                     val routeServiceAlert = alert.toRouteServiceAlert(
                         id = "$feedName:${entity.id}"
                     )
-                    if (
-                        routeServiceAlert.affectsRoute(
-                            routeIds = routeIds,
-                            routeShortNames = routeShortNames,
-                            stopIds = stopIds
-                        )
-                    ) {
+                    if (shouldInclude(routeServiceAlert)) {
                         matchingAlerts += routeServiceAlert
                     }
                 }
