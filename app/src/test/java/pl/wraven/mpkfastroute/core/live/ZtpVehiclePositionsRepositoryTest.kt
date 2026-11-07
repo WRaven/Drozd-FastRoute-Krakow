@@ -19,6 +19,7 @@ class ZtpVehiclePositionsRepositoryTest {
                                 GtfsRealtime.Position.newBuilder()
                                     .setLatitude(50.061f)
                                     .setLongitude(19.937f)
+                                    .setBearing(90f)
                             )
                             .setTrip(
                                 GtfsRealtime.TripDescriptor.newBuilder()
@@ -43,6 +44,7 @@ class ZtpVehiclePositionsRepositoryTest {
         ).single()
 
         assertEquals(TransitVehicleMode.TRAM, position.mode)
+        assertEquals(90f, position.bearing ?: -1f, 0.001f)
         assertEquals("52", position.routeShortName)
         assertEquals("123", position.vehicleLabel)
         assertEquals("route-52", position.routeId)

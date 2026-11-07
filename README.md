@@ -25,11 +25,13 @@ the architecture and phases in the project specification.
   appear as red minute badges beside departure estimates.
 - The "Live" quick action displays ZTP bus and tram vehicle-position feeds on
   an OpenStreetMap map, refreshing positions and selected-trip predictions
-  every 30 seconds while the map is open. Tap a stop for its next departures,
-  or a vehicle to highlight its GTFS route and see the trip timetable with ZTP
-  real-time delay updates when available. Scheduled estimates and live delays
-  are clearly distinguished. The map supports pan and pinch/button zoom; map
-  tiles and vehicle positions include visible source attribution.
+  every 30 seconds while the map is open. Vehicle markers show the line number
+  and a direction arrow when ZTP reports a bearing. Tap a stop for its next
+  departures, or a vehicle to highlight its GTFS route and see the trip
+  timetable with ZTP real-time delay updates when available. Scheduled
+  estimates and live delays are clearly distinguished. The map supports pan
+  and pinch/button zoom; map tiles and vehicle positions include visible
+  source attribution.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,
