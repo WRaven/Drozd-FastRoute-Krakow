@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.MarqueeDefaults
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -1204,6 +1205,8 @@ private fun SearchContent(
 private const val MAX_SERVICE_NEWS_HEADLINES = 5
 private const val MAX_LIVE_ALERT_DESCRIPTION_LENGTH = 180
 
+internal val serviceNewsMarqueeVelocity = MarqueeDefaults.Velocity * 1.2f
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ServiceNewsTicker(
@@ -1265,7 +1268,10 @@ private fun ServiceNewsTicker(
             text = message,
             modifier = Modifier
                 .weight(1f)
-                .basicMarquee(iterations = Int.MAX_VALUE),
+                .basicMarquee(
+                    iterations = Int.MAX_VALUE,
+                    velocity = serviceNewsMarqueeVelocity
+                ),
             maxLines = 1,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant

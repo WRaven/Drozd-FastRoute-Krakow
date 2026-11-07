@@ -60,6 +60,7 @@ the architecture and phases in the project specification.
   the official MPK Kraków profile on X. Recent address and stop suggestions
   appear only while a search field is focused with the keyboard open; quick
   actions and route-planning controls hide while typing.
+  The ZTP ticker scrolls at 36 dp per second, 20% faster than Compose's default.
 - The launch screen and window background follow the same system light/dark
   profile as Compose, including system tonal colors on Android 12 and newer.
   System bar icons keep the matching contrast; when Compose starts, the window
@@ -74,8 +75,9 @@ the architecture and phases in the project specification.
   granted, and the quick actions open the official ZTP/KMK service notices.
 - The weather quick action requests foreground location only when tapped and
   shows current conditions plus an hourly 24-hour forecast from Open-Meteo,
-  including precipitation amounts and probability, surface pressure, and
-  near-surface soil temperature. Weather codes include fog and thunderstorms.
+  including precipitation amounts and probability, wind, and near-surface soil
+  temperature. Pressure is omitted from the weather view to keep the hourly
+  soil-temperature/wind details compact. Weather codes include fog and thunderstorms.
   Forecasts are cached in memory for 15 minutes by approximate location; no
   weather location is stored. The weather view includes a compact legend,
   credits Open-Meteo, and links its CC BY 4.0 license.

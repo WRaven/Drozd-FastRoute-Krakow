@@ -26,7 +26,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.roundToInt
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
 import pl.wraven.mpkfastroute.core.weather.WeatherCondition
 import pl.wraven.mpkfastroute.core.weather.weatherConditionForCode
@@ -77,14 +76,13 @@ internal fun WeatherForecastSheet(
                         precipitationProbability = hour.precipitationProbabilityPercent,
                         precipitationMillimeters = hour.precipitationMillimeters,
                         windSpeed = hour.windSpeedKilometersPerHour,
-                        surfacePressureHpa = hour.surfacePressureHpa,
                         soilTemperatureCelsius = hour.soilTemperatureCelsius
                     )
                     HorizontalDivider()
                 }
                 Text(
                     "Legenda: mm — suma opadu w godzinie · % — szansa opadu · " +
-                        "hPa — ciśnienie przy powierzchni · grunt 0 cm — temperatura gruntu. " +
+                        "grunt 0 cm — temperatura gruntu. " +
                         "⛈️ burza · 🌫️ mgła.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -146,9 +144,6 @@ private fun CurrentWeatherCard(forecast: WeatherForecast) {
                 "Opady ${current.precipitationMillimeters} mm · " +
                     "wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h"
             )
-            Text(
-                "Ciśnienie ${current.surfacePressureHpa?.roundToInt()?.let { "$it hPa" } ?: "—"}"
-            )
             forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
                 Text("Temperatura gruntu ${formatWeatherValue(temperature)}°C (najbliższa godz.)")
             }
@@ -164,7 +159,6 @@ private fun HourlyWeatherRow(
     precipitationProbability: Int,
     precipitationMillimeters: Double,
     windSpeed: Double,
-    surfacePressureHpa: Double?,
     soilTemperatureCelsius: Double?
 ) {
     Column(
@@ -195,14 +189,19 @@ private fun HourlyWeatherRow(
             style = MaterialTheme.typography.bodySmall
         )
         Text(
-            "Grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
-                "ciśnienie ${surfacePressureHpa?.roundToInt()?.toString() ?: "—"} hPa · " +
-                "wiatr ${windSpeed.toInt()} km/h",
+            formatHourlyWeatherDetails(soilTemperatureCelsius, windSpeed),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
+
+internal fun formatHourlyWeatherDetails(
+    soilTemperatureCelsius: Double?,
+    windSpeed: Double
+): String =
+    "Grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
+        "wiatr ${windSpeed.toInt()} km/h"
 
 private fun formatWeatherValue(value: Double): String =
     String.format(Locale.forLanguageTag("pl-PL"), "%.1f", value)
