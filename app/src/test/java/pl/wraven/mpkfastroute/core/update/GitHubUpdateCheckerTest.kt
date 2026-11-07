@@ -39,6 +39,22 @@ class GitHubUpdateCheckerTest {
     }
 
     @Test
+    fun usesLegacyTestApkBuildNumberWhenVersionHasNoCiSuffix() {
+        val legacyVersion = GitHubUpdateChecker.versionForRelease(
+            tagName = "test-d1a45a3",
+            assetNames = listOf(
+                "MPK-Krakow-FastRoute-0.1.0-d1a45a3-test-build24-debug.apk"
+            )
+        )
+
+        assertEquals("0.1.0-ci.24", legacyVersion)
+        assertEquals(
+            "0.1.0-ci.48",
+            GitHubUpdateChecker.latestVersion(listOf(legacyVersion, "0.1.0-ci.48"))
+        )
+    }
+
+    @Test
     fun treatsNotFoundAsNoPublishedRelease() {
         val exception = runCatching {
             GitHubUpdateChecker.ensureSuccessfulResponse(404)

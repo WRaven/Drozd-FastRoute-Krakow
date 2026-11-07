@@ -92,6 +92,8 @@ class GitHubUpdateChecker @Inject constructor(
             Regex("""^[vV]?(\d+)\.(\d+)\.(\d+)(?:-ci\.(\d+))?(?:[-+].*)?$""")
         private val APK_VERSION_PATTERN =
             Regex("""(?i)(?:^|[-_])v?(\d+\.\d+\.\d+(?:-ci\.\d+)?)\b""")
+        private val APK_BUILD_NUMBER_PATTERN =
+            Regex("""(?i)(?:^|[-_])build(\d+)(?:[-_.]|$)""")
 
         internal fun ensureSuccessfulResponse(statusCode: Int) {
             when {
@@ -128,7 +130,15 @@ class GitHubUpdateChecker @Inject constructor(
                 return tagName.removePrefix("v").removePrefix("V")
             }
             return assetNames.firstNotNullOfOrNull { assetName ->
-                APK_VERSION_PATTERN.find(assetName)?.groupValues?.get(1)
+                val version = APK_VERSION_PATTERN.find(assetName)?.groupValues?.get(1)
+                    ?: return@firstNotNullOfOrNull null
+                if (version.contains("-ci.")) {
+                    version
+                } else {
+                    val buildNumber =
+                        APK_BUILD_NUMBER_PATTERN.find(assetName)?.groupValues?.get(1)
+                    buildNumber?.let { "$version-ci.$it" } ?: version
+                }
             } ?: throw IllegalArgumentException(
                 "GitHub release has no APK asset with a supported version."
             )
