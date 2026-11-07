@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,9 +22,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.roundToInt
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
 import pl.wraven.mpkfastroute.core.weather.WeatherCondition
 import pl.wraven.mpkfastroute.core.weather.weatherConditionForCode
@@ -72,10 +75,20 @@ internal fun WeatherForecastSheet(
                         condition = weatherConditionForCode(hour.weatherCode),
                         temperature = hour.temperatureCelsius,
                         precipitationProbability = hour.precipitationProbabilityPercent,
-                        windSpeed = hour.windSpeedKilometersPerHour
+                        precipitationMillimeters = hour.precipitationMillimeters,
+                        windSpeed = hour.windSpeedKilometersPerHour,
+                        surfacePressureHpa = hour.surfacePressureHpa,
+                        soilTemperatureCelsius = hour.soilTemperatureCelsius
                     )
                     HorizontalDivider()
                 }
+                Text(
+                    "Legenda: mm — suma opadu w godzinie · % — szansa opadu · " +
+                        "hPa — ciśnienie przy powierzchni · grunt 0 cm — temperatura gruntu. " +
+                        "⛈️ burza · 🌫️ mgła.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
         Spacer(Modifier.height(4.dp))
@@ -133,6 +146,12 @@ private fun CurrentWeatherCard(forecast: WeatherForecast) {
                 "Opady ${current.precipitationMillimeters} mm · " +
                     "wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h"
             )
+            Text(
+                "Ciśnienie ${current.surfacePressureHpa?.roundToInt()?.let { "$it hPa" } ?: "—"}"
+            )
+            forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
+                Text("Temperatura gruntu ${formatWeatherValue(temperature)}°C (najbliższa godz.)")
+            }
         }
     }
 }
@@ -143,22 +162,50 @@ private fun HourlyWeatherRow(
     condition: WeatherCondition,
     temperature: Double,
     precipitationProbability: Int,
-    windSpeed: Double
+    precipitationMillimeters: Double,
+    windSpeed: Double,
+    surfacePressureHpa: Double?,
+    soilTemperatureCelsius: Double?
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(time, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Text(condition.symbol, style = MaterialTheme.typography.titleMedium)
-        Text("${temperature.toInt()}°")
-        Text("💧 $precipitationProbability%")
-        Text("${windSpeed.toInt()} km/h", style = MaterialTheme.typography.bodySmall)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(time, modifier = Modifier.width(88.dp), style = MaterialTheme.typography.bodyMedium)
+            Text(condition.symbol, style = MaterialTheme.typography.titleMedium)
+            Text(
+                condition.description,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodySmall
+            )
+            Text("${temperature.toInt()}°")
+        }
+        Text(
+            "Opady ${formatWeatherValue(precipitationMillimeters)} mm · " +
+                "szansa $precipitationProbability%",
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            "Grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
+                "ciśnienie ${surfacePressureHpa?.roundToInt()?.toString() ?: "—"} hPa · " +
+                "wiatr ${windSpeed.toInt()} km/h",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
+
+private fun formatWeatherValue(value: Double): String =
+    String.format(Locale.forLanguageTag("pl-PL"), "%.1f", value)
 
 private val CURRENT_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
 private val HOURLY_TIME_FORMATTER =

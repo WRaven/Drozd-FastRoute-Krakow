@@ -77,6 +77,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -123,6 +124,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var pendingLocationAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var routeTimePlanVisible by remember { mutableStateOf(false) }
     var weatherVisible by remember { mutableStateOf(false) }
+    var liveMapVisible by remember { mutableStateOf(false) }
     var startupLocationRequested by rememberSaveable { mutableStateOf(false) }
     var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
     var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
@@ -362,6 +364,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     weatherVisible = true
                     runWithLocationPermission(viewModel::loadWeather)
                 },
+                onOpenLiveMap = { liveMapVisible = true },
                 remindersEnabled = commuteRemindersEnabled,
                 onEnableCommuteReminders = ::requestCommuteReminderPermissions,
                 modifier = Modifier
@@ -460,6 +463,16 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onOpenLicense = { openExternalUrl(OpenMeteoClient.LICENSE_URL) }
             )
         }
+    }
+
+    if (liveMapVisible) {
+        LiveVehicleMapDialog(
+            snapshot = state.liveVehicleSnapshot,
+            isLoading = state.isLoadingLiveVehicles,
+            error = state.liveVehicleError,
+            onRefresh = viewModel::refreshLiveVehiclePositions,
+            onDismiss = { liveMapVisible = false }
+        )
     }
 
     if (radioManagementVisible) {
@@ -630,6 +643,7 @@ private fun SearchContent(
     onOpenServiceNews: (String) -> Unit,
     onRefreshServiceNews: () -> Unit,
     onOpenWeather: () -> Unit,
+    onOpenLiveMap: () -> Unit,
     remindersEnabled: Boolean,
     onEnableCommuteReminders: () -> Unit,
     modifier: Modifier = Modifier
@@ -664,6 +678,11 @@ private fun SearchContent(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    AssistChip(
+                            onClick = onOpenLiveMap,
+                            enabled = !state.isImporting,
+                            label = { Text("🗺 Live") }
+                    )
                     AssistChip(
                             onClick = onOpenWeather,
                             enabled = !state.isLoadingWeather,
@@ -1532,17 +1551,43 @@ private fun LiveDeparturesSection(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
+            Text(
+                "Czerwone +N oznacza opóźnienie w minutach.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             departures.departures.take(MAX_DISPLAYED_DEPARTURES).forEach { departure ->
-                val liveIndicator = if (departure.isLive) " · LIVE" else ""
-                Text(
-                    "${departure.routeShortName} → ${departure.direction}: " +
-                        "${formatGtfsTime(departure.estimatedDepartureTime)}$liveIndicator",
-                    color = if (departure.isLive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
+                val delayMinutes = departure.delaySeconds
+                    ?.takeIf { departure.isLive && it > 0 }
+                    ?.let { ((it.toLong() + 59) / 60).toInt() }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "${departure.routeShortName} → ${departure.direction}",
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        "${formatGtfsTime(departure.estimatedDepartureTime)}" +
+                            if (departure.isLive) " · LIVE" else "",
+                        color = if (departure.isLive) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        }
+                    )
+                    delayMinutes?.let {
+                        Text(
+                            "+$it",
+                            color = MaterialTheme.colorScheme.error,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
-                )
+                }
             }
         }
     }

@@ -45,6 +45,8 @@ import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
 import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
+import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
+import pl.wraven.mpkfastroute.core.live.ZtpVehiclePositionsRepository
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsClient
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsItem
 import pl.wraven.mpkfastroute.core.location.AddressGeocoder
@@ -96,6 +98,9 @@ data class SearchUiState(
     val arrivalTarget: LocalDateTime? = null,
     val routeTimePlan: JourneyTimePlan? = null,
     val liveDepartures: LiveDeparturesResult? = null,
+    val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
+    val isLoadingLiveVehicles: Boolean = false,
+    val liveVehicleError: String? = null,
     val isImporting: Boolean = false,
     val databaseUpdateProgressPercent: Int? = null,
     val isSearching: Boolean = false,
@@ -136,6 +141,7 @@ class SearchViewModel @Inject constructor(
     @param:ApplicationContext private val appContext: Context,
     private val routePlanner: RoutePlanner,
     private val ttssDepartureRepository: TtssDepartureRepository,
+    private val liveVehiclePositionsRepository: ZtpVehiclePositionsRepository,
     private val contextEngine: ContextEngine,
     private val addressGeocoder: AddressGeocoder,
     private val appPreferences: AppPreferences,
@@ -153,6 +159,7 @@ class SearchViewModel @Inject constructor(
     private var originAddressSearchJob: Job? = null
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
+    private var liveVehicleJob: Job? = null
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
     private var lastServiceNewsAttemptAtMillis = 0L
@@ -294,6 +301,37 @@ class SearchViewModel @Inject constructor(
                 showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
             } finally {
                 mutableUiState.update { it.copy(isSearching = false) }
+            }
+        }
+    }
+
+    fun refreshLiveVehiclePositions() {
+        if (liveVehicleJob?.isActive == true) return
+        liveVehicleJob = viewModelScope.launch {
+            mutableUiState.update {
+                it.copy(isLoadingLiveVehicles = true, liveVehicleError = null)
+            }
+            try {
+                val snapshot = liveVehiclePositionsRepository.getSnapshot()
+                mutableUiState.update {
+                    it.copy(liveVehicleSnapshot = snapshot, liveVehicleError = null)
+                }
+            } catch (exception: IOException) {
+                mutableUiState.update {
+                    it.copy(
+                        liveVehicleError = exception.message
+                            ?: "Nie udało się pobrać pozycji pojazdów ZTP."
+                    )
+                }
+            } catch (exception: SQLiteException) {
+                mutableUiState.update {
+                    it.copy(
+                        liveVehicleError = "Nie można odczytać linii z bazy: " +
+                            exception.message.orEmpty()
+                    )
+                }
+            } finally {
+                mutableUiState.update { it.copy(isLoadingLiveVehicles = false) }
             }
         }
     }

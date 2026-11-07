@@ -175,6 +175,7 @@ dependencies {
     ksp(libs.hilt.compiler)
     ksp(libs.androidx.hilt.compiler)
     implementation(libs.play.services.location)
+    implementation(libs.osmdroid.android)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.coroutines.android)
     implementation(libs.coroutines.play.services)

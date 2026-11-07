@@ -19,6 +19,7 @@ gtfsRealtimeBindings = "0.0.4"
 zxing = "3.5.4"
 ksp = "2.2.10-2.0.2"
 playServicesLocation = "21.4.0"
+osmdroid = "6.1.20"
 
 [libraries]
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -52,6 +53,7 @@ ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-conte
 ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
 gtfs-realtime-bindings = { group = "com.google.transit", name = "gtfs-realtime-bindings", version.ref = "gtfsRealtimeBindings" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
 

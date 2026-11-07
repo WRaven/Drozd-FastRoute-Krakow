@@ -20,7 +20,11 @@ the architecture and phases in the project specification.
   results are displayed before the separate live-departure request completes.
 - The TTSS client maps stops by stop code or supplied normalized stop-name
   mapping, applies reported delay to static departures, and returns explicitly
-  marked static estimates when live data is unavailable.
+  marked static estimates when live data is unavailable. Positive live delays
+  appear as red minute badges beside departure estimates.
+- The "Live" quick action displays ZTP bus and tram vehicle-position feeds on
+  an OpenStreetMap map, refreshing positions every 30 seconds while the map is
+  open. Map tiles and vehicle positions include visible source attribution.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,
@@ -51,10 +55,12 @@ the architecture and phases in the project specification.
   time. The startup origin defaults to the current location when permission is
   granted, and the quick actions open the official ZTP/KMK service notices.
 - The weather quick action requests foreground location only when tapped and
-  shows current conditions plus an hourly 24-hour forecast from Open-Meteo.
+  shows current conditions plus an hourly 24-hour forecast from Open-Meteo,
+  including precipitation amounts and probability, surface pressure, and
+  near-surface soil temperature. Weather codes include fog and thunderstorms.
   Forecasts are cached in memory for 15 minutes by approximate location; no
-  weather location is stored. The weather view credits Open-Meteo and links
-  its CC BY 4.0 license.
+  weather location is stored. The weather view includes a compact legend,
+  credits Open-Meteo, and links its CC BY 4.0 license.
 - Saved home/work schedules can trigger a commute notification 15 minutes
   before the calculated departure. The notification shows upcoming TTSS
   departures in its collapsed preview and refreshes every five minutes with

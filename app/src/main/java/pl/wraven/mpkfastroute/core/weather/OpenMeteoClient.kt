@@ -30,15 +30,19 @@ data class CurrentWeather(
     val relativeHumidityPercent: Int,
     val precipitationMillimeters: Double,
     val weatherCode: Int,
-    val windSpeedKilometersPerHour: Double
+    val windSpeedKilometersPerHour: Double,
+    val surfacePressureHpa: Double?
 )
 
 data class HourlyWeather(
     val time: LocalDateTime,
     val temperatureCelsius: Double,
+    val precipitationMillimeters: Double,
     val precipitationProbabilityPercent: Int,
     val weatherCode: Int,
-    val windSpeedKilometersPerHour: Double
+    val windSpeedKilometersPerHour: Double,
+    val surfacePressureHpa: Double?,
+    val soilTemperatureCelsius: Double?
 )
 
 class OpenMeteoRequestException(message: String) : IOException(message)
@@ -76,11 +80,11 @@ class OpenMeteoClient @Inject constructor(
             parameter("longitude", longitude)
             parameter(
                 "current",
-                "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m"
+                "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,surface_pressure"
             )
             parameter(
                 "hourly",
-                "temperature_2m,precipitation_probability,weather_code,wind_speed_10m"
+                "temperature_2m,precipitation,precipitation_probability,weather_code,wind_speed_10m,surface_pressure,soil_temperature_0cm"
             )
             parameter("forecast_hours", FORECAST_HOURS)
             parameter("temperature_unit", "celsius")
@@ -129,6 +133,7 @@ class OpenMeteoClient @Inject constructor(
         val hourlyCount = minOf(
             hourly.time.size,
             hourly.temperatureCelsius.size,
+            hourly.precipitationMillimeters.size,
             hourly.precipitationProbabilityPercent.size,
             hourly.weatherCode.size,
             hourly.windSpeedKilometersPerHour.size
@@ -143,16 +148,20 @@ class OpenMeteoClient @Inject constructor(
                 relativeHumidityPercent = current.relativeHumidityPercent,
                 precipitationMillimeters = current.precipitationMillimeters,
                 weatherCode = current.weatherCode,
-                windSpeedKilometersPerHour = current.windSpeedKilometersPerHour
+                windSpeedKilometersPerHour = current.windSpeedKilometersPerHour,
+                surfacePressureHpa = current.surfacePressureHpa
             ),
             hourly = (0 until hourlyCount).map { index ->
                 HourlyWeather(
                     time = LocalDateTime.parse(hourly.time[index]),
                     temperatureCelsius = hourly.temperatureCelsius[index],
+                    precipitationMillimeters = hourly.precipitationMillimeters[index],
                     precipitationProbabilityPercent =
                         hourly.precipitationProbabilityPercent[index],
                     weatherCode = hourly.weatherCode[index],
-                    windSpeedKilometersPerHour = hourly.windSpeedKilometersPerHour[index]
+                    windSpeedKilometersPerHour = hourly.windSpeedKilometersPerHour[index],
+                    surfacePressureHpa = hourly.surfacePressureHpa.getOrNull(index),
+                    soilTemperatureCelsius = hourly.soilTemperatureCelsius.getOrNull(index)
                 )
             },
             timezone = timezone
@@ -179,7 +188,9 @@ class OpenMeteoClient @Inject constructor(
         @SerialName("weather_code")
         val weatherCode: Int,
         @SerialName("wind_speed_10m")
-        val windSpeedKilometersPerHour: Double
+        val windSpeedKilometersPerHour: Double,
+        @SerialName("surface_pressure")
+        val surfacePressureHpa: Double? = null
     ) {
         val precipitationMillimeters: Double
             get() = precipitation
@@ -190,12 +201,18 @@ class OpenMeteoClient @Inject constructor(
         val time: List<String>,
         @SerialName("temperature_2m")
         val temperatureCelsius: List<Double>,
+        @SerialName("precipitation")
+        val precipitationMillimeters: List<Double>,
         @SerialName("precipitation_probability")
         val precipitationProbabilityPercent: List<Int>,
         @SerialName("weather_code")
         val weatherCode: List<Int>,
         @SerialName("wind_speed_10m")
-        val windSpeedKilometersPerHour: List<Double>
+        val windSpeedKilometersPerHour: List<Double>,
+        @SerialName("surface_pressure")
+        val surfacePressureHpa: List<Double?> = emptyList(),
+        @SerialName("soil_temperature_0cm")
+        val soilTemperatureCelsius: List<Double?> = emptyList()
     )
 
     companion object {
