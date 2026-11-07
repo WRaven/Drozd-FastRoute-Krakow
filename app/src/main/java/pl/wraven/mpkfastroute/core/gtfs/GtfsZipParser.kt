@@ -631,37 +631,41 @@ class GtfsZipParser @Inject constructor(
             }
             size
         }
+}
 
-    private suspend fun readCsv(
-        input: InputStream,
-        entryName: String,
-        onRecord: suspend (Map<String, Int>, List<String>, Int) -> Unit
-    ) {
-        val reader = BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8))
-        val headerLine = reader.readLine() ?: throw IOException("$entryName is empty.")
-        val headers = parseCsvLine(headerLine.removePrefix("\uFEFF")).map(String::trim)
-        val columns = headers.withIndex().associate { it.value to it.index }
-        if (columns.size != headers.size) {
-            throw IOException("$entryName contains duplicate column names.")
-        }
+internal suspend fun readCsv(
+    input: InputStream,
+    entryName: String,
+    onRecord: suspend (Map<String, Int>, List<String>, Int) -> Unit
+) {
+    val reader = BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8))
+    val headerLine = reader.readLine() ?: throw IOException("$entryName is empty.")
+    val headers = try {
+        parseCsvLine(headerLine.removePrefix("\uFEFF")).map(String::trim)
+    } catch (exception: IllegalArgumentException) {
+        throw IOException("$entryName contains an invalid CSV header.", exception)
+    }
+    val columns = headers.withIndex().associate { it.value to it.index }
+    if (columns.size != headers.size) {
+        throw IOException("$entryName contains duplicate column names.")
+    }
 
-        var rowNumber = 1
-        while (true) {
-            val line = reader.readLine() ?: break
-            rowNumber++
-            if (line.isBlank()) continue
-            val values = try {
-                parseCsvLine(line)
-            } catch (exception: IllegalArgumentException) {
-                throw IOException("$entryName row $rowNumber is not valid CSV.", exception)
-            }
-            if (values.size != headers.size) {
-                throw IOException(
-                    "$entryName row $rowNumber has ${values.size} fields; expected ${headers.size}."
-                )
-            }
-            onRecord(columns, values, rowNumber)
+    var rowNumber = 1
+    while (true) {
+        val line = reader.readLine() ?: break
+        rowNumber++
+        if (line.isBlank()) continue
+        val values = try {
+            parseCsvLine(line)
+        } catch (exception: IllegalArgumentException) {
+            throw IOException("$entryName row $rowNumber is not valid CSV.", exception)
         }
+        if (values.size != headers.size) {
+            throw IOException(
+                "$entryName row $rowNumber has ${values.size} fields; expected ${headers.size}."
+            )
+        }
+        onRecord(columns, values, rowNumber)
     }
 }
 
@@ -742,7 +746,7 @@ internal fun parseCsvLine(line: String): List<String> {
     return values
 }
 
-private fun List<String>.required(
+internal fun List<String>.required(
     columns: Map<String, Int>,
     column: String,
     entryName: String,

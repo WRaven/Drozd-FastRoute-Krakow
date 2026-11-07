@@ -106,6 +106,7 @@ import pl.wraven.mpkfastroute.core.live.DepartureEstimate
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
+import pl.wraven.mpkfastroute.core.settings.DestinationShortcutNames
 import pl.wraven.mpkfastroute.core.update.AppUpdateInstaller
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
 import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
@@ -430,6 +431,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
 
     if (settingsVisible) {
         SettingsDialog(
+            shortcutNames = state.destinationShortcutNames,
+            isSavingShortcutNames = state.isSavingShortcutNames,
+            shortcutNamesSaveError = state.shortcutNamesSaveError,
+            onSaveShortcutNames = viewModel::saveDestinationShortcutNames,
             progressMessage = state.progressMessage,
             isImporting = state.isImporting ||
                 state.databaseUpdateProgressPercent != null,
@@ -583,7 +588,10 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             SavedDestination.WORK -> state.workSchedule
         } ?: DestinationSchedule.DEFAULT
         DestinationScheduleDialog(
-            destinationName = if (destination == SavedDestination.HOME) "domu" else "pracy",
+            destinationName = when (destination) {
+                SavedDestination.HOME -> state.destinationShortcutNames.home
+                SavedDestination.WORK -> state.destinationShortcutNames.work
+            },
             initialSchedule = initialSchedule,
             onSave = { schedule ->
                 when (destination) {
@@ -788,21 +796,35 @@ private fun SearchContent(
                         onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
                         enabled = !state.isSearching && !state.isImporting,
                         label = {
-                            Text(if (state.hasHomeDestination) "🏠 Do domu" else "🏠 Ustaw do domu")
+                            Text(
+                                "🏠 " + if (state.hasHomeDestination) {
+                                    state.destinationShortcutNames.home
+                                } else {
+                                    "Ustaw: ${state.destinationShortcutNames.home}"
+                                }
+                            )
                         }
                     )
                     AssistChip(
                         onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
                         enabled = !state.isSearching && !state.isImporting,
                         label = {
-                            Text(if (state.hasWorkDestination) "🏢 Do pracy" else "🏢 Ustaw do pracy")
+                            Text(
+                                "🏢 " + if (state.hasWorkDestination) {
+                                    state.destinationShortcutNames.work
+                                } else {
+                                    "Ustaw: ${state.destinationShortcutNames.work}"
+                                }
+                            )
                         }
                     )
                     if (state.hasWorkDestination) {
                         AssistChip(
                             onClick = onEditWorkSchedule,
                             enabled = !state.isImporting,
-                            label = { Text("🕒 Harmonogram pracy") }
+                            label = {
+                                Text("🕒 Harmonogram: ${state.destinationShortcutNames.work}")
+                            }
                         )
                     }
                     AssistChip(
@@ -1694,6 +1716,10 @@ internal fun LiveDepartureRow(departure: DepartureEstimate) {
 
 @Composable
 private fun SettingsDialog(
+    shortcutNames: DestinationShortcutNames,
+    isSavingShortcutNames: Boolean,
+    shortcutNamesSaveError: String?,
+    onSaveShortcutNames: (DestinationShortcutNames) -> Unit,
     progressMessage: String,
     isImporting: Boolean,
     homeStopName: String?,
@@ -1725,6 +1751,8 @@ private fun SettingsDialog(
     onDiagnosticsCopied: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    var homeShortcutName by rememberSaveable(shortcutNames.home) { mutableStateOf(shortcutNames.home) }
+    var workShortcutName by rememberSaveable(shortcutNames.work) { mutableStateOf(shortcutNames.work) }
     val clipboardManager = LocalClipboardManager.current
     val diagnosticsScrollState = rememberScrollState()
     LaunchedEffect(diagnosticEntries.lastOrNull()) {
@@ -1741,9 +1769,44 @@ private fun SettingsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text("Nazwy skrótów", style = MaterialTheme.typography.titleSmall)
+                OutlinedTextField(
+                    value = homeShortcutName,
+                    onValueChange = { homeShortcutName = it },
+                    label = { Text("Nazwa skrótu do domu") },
+                    singleLine = true,
+                    enabled = !isSavingShortcutNames,
+                    isError = homeShortcutName.isBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = workShortcutName,
+                    onValueChange = { workShortcutName = it },
+                    label = { Text("Nazwa skrótu do pracy") },
+                    singleLine = true,
+                    enabled = !isSavingShortcutNames,
+                    isError = workShortcutName.isBlank(),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (homeShortcutName.isBlank() || workShortcutName.isBlank()) {
+                    Text("Nazwy skrótów nie mogą być puste.", color = MaterialTheme.colorScheme.error)
+                }
+                Button(
+                    onClick = {
+                        onSaveShortcutNames(DestinationShortcutNames(homeShortcutName, workShortcutName))
+                    },
+                    enabled = !isSavingShortcutNames &&
+                        homeShortcutName.isNotBlank() && workShortcutName.isNotBlank() &&
+                        (homeShortcutName.trim() != shortcutNames.home ||
+                            workShortcutName.trim() != shortcutNames.work)
+                ) {
+                    Text(if (isSavingShortcutNames) "Zapisuję..." else "Zapisz nazwy skrótów")
+                }
+                shortcutNamesSaveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                HorizontalDivider()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Dom: ${homeStopName ?: "nie ustawiono"}")
+                        Text("${shortcutNames.home}: ${homeStopName ?: "nie ustawiono"}")
                         Text(
                             scheduleSummary(homeSchedule),
                             style = MaterialTheme.typography.bodySmall
@@ -1758,7 +1821,7 @@ private fun SettingsDialog(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Praca: ${workStopName ?: "nie ustawiono"}")
+                        Text("${shortcutNames.work}: ${workStopName ?: "nie ustawiono"}")
                         Text(
                             scheduleSummary(workSchedule),
                             style = MaterialTheme.typography.bodySmall

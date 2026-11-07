@@ -37,12 +37,14 @@ data class LiveVehiclePosition(
 data class LiveVehicleSnapshot(
     val vehicles: List<LiveVehiclePosition>,
     val fetchedAt: LocalDateTime,
-    val unavailableModes: Set<TransitVehicleMode>
+    val unavailableModes: Set<TransitVehicleMode>,
+    val routeLabelsWarning: String? = null
 )
 
 class ZtpVehiclePositionsRepository @Inject constructor(
     private val httpClient: HttpClient,
-    private val database: AppDatabase
+    private val database: AppDatabase,
+    private val tramRoutesRepository: ZtpTramRoutesRepository
 ) {
     suspend fun getSnapshot(): LiveVehicleSnapshot {
         val routeShortNames = database.routeDao().getAll()
@@ -88,13 +90,36 @@ class ZtpVehiclePositionsRepository @Inject constructor(
                 .associate { it.tripId to it.routeShortName }
         }
 
+        var resolvedVehicles = resolveMissingVehicleRouteShortNames(vehicles, routeShortNamesByTripId)
+        var routeLabelsWarning: String? = null
+        if (resolvedVehicles.any {
+                it.mode == TransitVehicleMode.TRAM && it.routeShortName.isNullOrBlank()
+            }
+        ) {
+            try {
+                val tramRoutes = tramRoutesRepository.getRouteShortNamesByTripId()
+                resolvedVehicles = resolvedVehicles.map { vehicle ->
+                    if (vehicle.mode == TransitVehicleMode.TRAM) {
+                        resolveVehicleRouteShortName(vehicle, tramRoutes)
+                    } else {
+                        vehicle
+                    }
+                }
+            } catch (exception: IOException) {
+                routeLabelsWarning = "Nie udało się pobrać numerów linii tramwajowych: " +
+                    exception.message.orEmpty()
+            }
+        }
+        val unresolvedCount = resolvedVehicles.count { it.routeShortName.isNullOrBlank() }
+        if (unresolvedCount > 0 && routeLabelsWarning == null) {
+            routeLabelsWarning = "Brak numeru linii dla $unresolvedCount pojazdów w danych ZTP."
+        }
+
         return LiveVehicleSnapshot(
-            vehicles = resolveMissingVehicleRouteShortNames(
-                vehicles,
-                routeShortNamesByTripId
-            ),
+            vehicles = resolvedVehicles,
             fetchedAt = LocalDateTime.now(),
-            unavailableModes = unavailableModes
+            unavailableModes = unavailableModes,
+            routeLabelsWarning = routeLabelsWarning
         )
     }
 
@@ -121,51 +146,62 @@ internal fun mapVehiclePositions(
     feed: GtfsRealtime.FeedMessage,
     mode: TransitVehicleMode,
     routeShortNames: Map<String, String>
-): List<LiveVehiclePosition> = feed.entityList.mapNotNull { entity ->
-    if (!entity.hasVehicle()) return@mapNotNull null
-    val vehicle = entity.vehicle
-    if (!vehicle.hasPosition()) return@mapNotNull null
+): List<LiveVehiclePosition> {
+    val knownRouteShortNames = routeShortNames.values.toSet()
+    return feed.entityList.mapNotNull { entity ->
+        if (!entity.hasVehicle()) return@mapNotNull null
+        val vehicle = entity.vehicle
+        if (!vehicle.hasPosition()) return@mapNotNull null
 
-    val position = vehicle.position
-    if (!position.hasLatitude() || !position.hasLongitude()) return@mapNotNull null
-    val latitude = position.latitude.toDouble()
-    val longitude = position.longitude.toDouble()
-    if (
-        !latitude.isFinite() || latitude !in -90.0..90.0 ||
-        !longitude.isFinite() || longitude !in -180.0..180.0
-    ) {
-        return@mapNotNull null
+        val position = vehicle.position
+        if (!position.hasLatitude() || !position.hasLongitude()) return@mapNotNull null
+        val latitude = position.latitude.toDouble()
+        val longitude = position.longitude.toDouble()
+        if (
+            !latitude.isFinite() || latitude !in -90.0..90.0 ||
+            !longitude.isFinite() || longitude !in -180.0..180.0
+        ) {
+            return@mapNotNull null
+        }
+
+        val descriptor = vehicle.vehicle.takeIf { vehicle.hasVehicle() }
+        val vehicleId = descriptor?.id?.takeIf(String::isNotBlank)
+        val entityId = entity.id.ifBlank { vehicleId ?: "$latitude,$longitude" }
+        val trip = vehicle.trip.takeIf { vehicle.hasTrip() }
+        val routeId = trip?.routeId?.takeIf(String::isNotBlank)
+
+        LiveVehiclePosition(
+            id = "${mode.name}:$entityId",
+            mode = mode,
+            latitude = latitude,
+            longitude = longitude,
+            bearing = position.bearing.takeIf {
+                position.hasBearing() && it.isFinite() && it in 0f..360f
+            },
+            routeShortName = routeId?.let(routeShortNames::get)?.takeIf(String::isNotBlank)
+                ?: routeId?.takeIf { mode == TransitVehicleMode.BUS && it in knownRouteShortNames },
+            vehicleLabel = descriptor?.label?.takeIf(String::isNotBlank),
+            routeId = routeId,
+            tripId = trip?.tripId?.takeIf(String::isNotBlank),
+            currentStopSequence = vehicle.currentStopSequence.takeIf {
+                vehicle.hasCurrentStopSequence()
+            },
+            currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() }
+        )
     }
-
-    val descriptor = vehicle.vehicle.takeIf { vehicle.hasVehicle() }
-    val vehicleId = descriptor?.id?.takeIf(String::isNotBlank)
-    val entityId = entity.id.ifBlank { vehicleId ?: "$latitude,$longitude" }
-    val trip = vehicle.trip.takeIf { vehicle.hasTrip() }
-    val routeId = trip?.routeId?.takeIf(String::isNotBlank)
-
-    LiveVehiclePosition(
-        id = "${mode.name}:$entityId",
-        mode = mode,
-        latitude = latitude,
-        longitude = longitude,
-        bearing = position.bearing.takeIf {
-            position.hasBearing() && it.isFinite() && it in 0f..360f
-        },
-        routeShortName = routeId?.let(routeShortNames::get),
-        vehicleLabel = descriptor?.label?.takeIf(String::isNotBlank),
-        routeId = routeId,
-        tripId = trip?.tripId?.takeIf(String::isNotBlank),
-        currentStopSequence = vehicle.currentStopSequence.takeIf {
-            vehicle.hasCurrentStopSequence()
-        },
-        currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() }
-    )
 }
 
 internal fun resolveMissingVehicleRouteShortNames(
     vehicles: List<LiveVehiclePosition>,
     routeShortNamesByTripId: Map<String, String>
 ): List<LiveVehiclePosition> = vehicles.map { vehicle ->
+    resolveVehicleRouteShortName(vehicle, routeShortNamesByTripId)
+}
+
+private fun resolveVehicleRouteShortName(
+    vehicle: LiveVehiclePosition,
+    routeShortNamesByTripId: Map<String, String>
+): LiveVehiclePosition =
     if (!vehicle.routeShortName.isNullOrBlank()) {
         vehicle
     } else {
@@ -174,4 +210,3 @@ internal fun resolveMissingVehicleRouteShortNames(
             ?.takeIf(String::isNotBlank)
         vehicle.copy(routeShortName = tripRouteShortName)
     }
-}

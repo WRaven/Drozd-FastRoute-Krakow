@@ -1,6 +1,7 @@
 package pl.wraven.mpkfastroute.core.settings
 
 import android.content.Context
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -21,11 +22,23 @@ private val Context.appPreferencesDataStore by preferencesDataStore(
     name = "mpk_fastroute_preferences"
 )
 
-class AppPreferences @Inject constructor(
-    @ApplicationContext context: Context,
+class AppPreferences internal constructor(
+    private val dataStore: DataStore<Preferences>,
     private val json: Json
 ) {
-    private val dataStore = context.appPreferencesDataStore
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        json: Json
+    ) : this(context.appPreferencesDataStore, json)
+
+    val destinationShortcutNames: Flow<DestinationShortcutNames> = dataStore.data.map { preferences ->
+        val defaults = DestinationShortcutNames()
+        DestinationShortcutNames(
+            home = preferences[HOME_SHORTCUT_NAME] ?: defaults.home,
+            work = preferences[WORK_SHORTCUT_NAME] ?: defaults.work
+        )
+    }
 
     val homeStopId: Flow<String?> = dataStore.data.map { preferences ->
         preferences[HOME_STOP_ID]
@@ -96,6 +109,14 @@ class AppPreferences @Inject constructor(
 
     suspend fun saveHomeStopId(stopId: String?) {
         saveStopId(HOME_STOP_ID, stopId)
+    }
+
+    suspend fun saveDestinationShortcutNames(names: DestinationShortcutNames) {
+        val normalized = names.normalized()
+        dataStore.edit { preferences ->
+            preferences[HOME_SHORTCUT_NAME] = normalized.home
+            preferences[WORK_SHORTCUT_NAME] = normalized.work
+        }
     }
 
     suspend fun saveWorkStopId(stopId: String?) {
@@ -289,6 +310,8 @@ class AppPreferences @Inject constructor(
     )
 
     private companion object {
+        val HOME_SHORTCUT_NAME = stringPreferencesKey("homeShortcutName")
+        val WORK_SHORTCUT_NAME = stringPreferencesKey("workShortcutName")
         val HOME_STOP_ID = stringPreferencesKey("homeStopId")
         val WORK_STOP_ID = stringPreferencesKey("workStopId")
         val HOME_PLACE_LABEL = stringPreferencesKey("homePlaceLabel")

@@ -32,8 +32,12 @@ the architecture and phases in the project specification.
   estimates and live delays are clearly distinguished. The map supports pan
   and pinch/button zoom. It opens centered on Kraków, then centers and marks
   the user's current location when location permission is granted; without
-  permission it stays centered on Kraków. Missing route labels are resolved
-  from the vehicle's GTFS trip when available. Map tiles and vehicle positions
+  permission it stays centered on Kraków. Bus line IDs are matched to known
+  line names; tram line numbers are resolved from `GTFS_KRK_T.zip`, whose trip
+  IDs match the tram position feed (unlike the combined `GTFS_KRK.zip` used by
+  the route planner). The tram mapping is cached in memory for an hour, and
+  unavailable line numbers are reported explicitly. Fleet numbers shown as
+  "Pojazd" are separate from line numbers. Map tiles and vehicle positions
   include visible source attribution.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
@@ -95,6 +99,10 @@ the architecture and phases in the project specification.
   recently selected stop names from either search field.
 - Settings can check GitHub releases, open the releases page, show a QR code
   for sharing it, edit home/work arrival schedules, and contact the author.
+  Home/work shortcut names are editable and persisted independently of their
+  destinations and schedules; the names also appear in schedule headings and
+  commute notifications. Existing installations retain "Do domu"/"Do pracy"
+  until the names are changed.
   The test app checks the latest prerelease; the production app checks the
   latest stable release. The app checks for updates at startup and offers
   "Pobierz i zainstaluj" or "Pomiń"; skipping suppresses that release until a

@@ -115,6 +115,64 @@ class ZtpVehiclePositionsRepositoryTest {
         assertEquals("52", resolved.routeShortName)
     }
 
+    @Test
+    fun matchesBusLineIdToLineNameInTheCombinedPlannerFeed() {
+        val position = mapVehiclePositions(
+            busFeed(routeId = "126", fleetLabel = "147"),
+            TransitVehicleMode.BUS,
+            mapOf("160010" to "126")
+        ).single()
+
+        assertEquals("126", position.routeShortName)
+        assertEquals("147", position.vehicleLabel)
+    }
+
+    @Test
+    fun doesNotUseFleetNumbersOrUnknownIdsAsLineNumbers() {
+        val position = mapVehiclePositions(
+            busFeed(routeId = "unknown-route", fleetLabel = "126"),
+            TransitVehicleMode.BUS,
+            mapOf("160010" to "126")
+        ).single()
+
+        assertNull(position.routeShortName)
+        assertEquals("126", position.vehicleLabel)
+    }
+
+    @Test
+    fun doesNotTreatTramRouteIdsAsLineNumbers() {
+        val position = mapVehiclePositions(
+            busFeed(routeId = "126", fleetLabel = "147"),
+            TransitVehicleMode.TRAM,
+            mapOf("160010" to "126")
+        ).single()
+
+        assertNull(position.routeShortName)
+    }
+
+    private fun busFeed(routeId: String, fleetLabel: String): GtfsRealtime.FeedMessage =
+        GtfsRealtime.FeedMessage.newBuilder()
+            .setHeader(feedHeader())
+            .addEntity(
+                GtfsRealtime.FeedEntity.newBuilder()
+                    .setId("vehicle_PA147")
+                    .setVehicle(
+                        GtfsRealtime.VehiclePosition.newBuilder()
+                            .setTrip(
+                                GtfsRealtime.TripDescriptor.newBuilder().setRouteId(routeId)
+                            )
+                            .setPosition(
+                                GtfsRealtime.Position.newBuilder()
+                                    .setLatitude(50.07589f)
+                                    .setLongitude(19.84899f)
+                            )
+                            .setVehicle(
+                                GtfsRealtime.VehicleDescriptor.newBuilder().setLabel(fleetLabel)
+                            )
+                    )
+            )
+            .build()
+
     private fun feedHeader() = GtfsRealtime.FeedHeader.newBuilder()
         .setGtfsRealtimeVersion("2.0")
         .build()

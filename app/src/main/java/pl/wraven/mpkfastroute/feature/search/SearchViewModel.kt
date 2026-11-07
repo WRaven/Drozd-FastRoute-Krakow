@@ -62,6 +62,7 @@ import pl.wraven.mpkfastroute.core.location.LocationPermissionRequiredException
 import pl.wraven.mpkfastroute.core.location.LocationUnavailableException
 import pl.wraven.mpkfastroute.core.settings.AppPreferences
 import pl.wraven.mpkfastroute.core.settings.DestinationSchedule
+import pl.wraven.mpkfastroute.core.settings.DestinationShortcutNames
 import pl.wraven.mpkfastroute.core.settings.SavedRoute
 import pl.wraven.mpkfastroute.core.update.AppUpdateDownloader
 import pl.wraven.mpkfastroute.core.update.GitHubUpdateChecker
@@ -72,6 +73,9 @@ import pl.wraven.mpkfastroute.core.weather.OpenMeteoRequestException
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
 
 data class SearchUiState(
+    val destinationShortcutNames: DestinationShortcutNames = DestinationShortcutNames(),
+    val isSavingShortcutNames: Boolean = false,
+    val shortcutNamesSaveError: String? = null,
     val stops: List<StopEntity> = emptyList(),
     val recentStopSearches: List<String> = emptyList(),
     val recentAddressPlaces: List<GeoPlace> = emptyList(),
@@ -1459,7 +1463,33 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    fun saveDestinationShortcutNames(names: DestinationShortcutNames) {
+        if (mutableUiState.value.isSavingShortcutNames) return
+        mutableUiState.update {
+            it.copy(isSavingShortcutNames = true, shortcutNamesSaveError = null)
+        }
+        viewModelScope.launch {
+            try {
+                appPreferences.saveDestinationShortcutNames(names)
+            } catch (exception: IOException) {
+                mutableUiState.update {
+                    it.copy(
+                        shortcutNamesSaveError =
+                            "Nie można zapisać nazw skrótów: ${exception.message.orEmpty()}"
+                    )
+                }
+            } finally {
+                mutableUiState.update { it.copy(isSavingShortcutNames = false) }
+            }
+        }
+    }
+
     private fun observePreferences() {
+        viewModelScope.launch {
+            appPreferences.destinationShortcutNames.collect { names ->
+                mutableUiState.update { it.copy(destinationShortcutNames = names) }
+            }
+        }
         viewModelScope.launch {
             appPreferences.homeStopId.collect { stopId ->
                 mutableUiState.update { it.copy(homeStopId = stopId) }

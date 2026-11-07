@@ -439,9 +439,12 @@ class CommuteStatusWorker @AssistedInject constructor(
         ((duration.seconds + SECONDS_PER_MINUTE - 1) / SECONDS_PER_MINUTE)
             .coerceAtLeast(1)
 
-    private fun SavedDestination.notificationTitle(): String = when (this) {
-        SavedDestination.HOME -> "Do domu"
-        SavedDestination.WORK -> "Do pracy"
+    private suspend fun SavedDestination.notificationTitle(): String {
+        val names = appPreferences.destinationShortcutNames.first()
+        return when (this) {
+            SavedDestination.HOME -> names.home
+            SavedDestination.WORK -> names.work
+        }
     }
 
     private fun hasNotificationPermission(context: Context): Boolean {

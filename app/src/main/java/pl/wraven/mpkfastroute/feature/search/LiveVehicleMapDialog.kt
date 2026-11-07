@@ -188,6 +188,9 @@ internal fun LiveVehicleMapDialog(
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
+                snapshot?.routeLabelsWarning?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
                 userLocationError?.let {
                     Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
