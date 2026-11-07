@@ -99,7 +99,11 @@ class GitHubUpdateChecker @Inject constructor(
             "https://github.com/WRaven/MPK-Krakow-FastRoute/releases"
         const val RELEASES_API =
             "https://api.github.com/repos/WRaven/MPK-Krakow-FastRoute/releases?per_page=100"
-        private const val USER_AGENT = "MPK-Krakow-FastRoute"
+        private const val USER_AGENT = "Drozd-FastRoute"
+        private val TRUSTED_RELEASE_PATHS = listOf(
+            "/WRaven/MPK-Krakow-FastRoute/releases/download/",
+            "/WRaven/Drozd-FastRoute-Krakow/releases/download/"
+        )
         private val VERSION_PATTERN =
             Regex("""^[vV]?(\d+)\.(\d+)\.(\d+)(?:-ci\.(\d+))?(?:[-+].*)?$""")
         private val APK_VERSION_PATTERN =
@@ -122,9 +126,7 @@ class GitHubUpdateChecker @Inject constructor(
                     uri.host?.equals("github.com", ignoreCase = true) == true &&
                     (uri.port == -1 || uri.port == 443) &&
                     uri.userInfo == null &&
-                    uri.path?.startsWith(
-                        "/WRaven/MPK-Krakow-FastRoute/releases/download/"
-                    ) == true
+                    TRUSTED_RELEASE_PATHS.any { uri.path?.startsWith(it) == true }
             } catch (_: URISyntaxException) {
                 false
             }

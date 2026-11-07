@@ -63,6 +63,9 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapListener
+import org.osmdroid.events.ScrollEvent
+import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
@@ -287,6 +290,7 @@ private fun LiveVehicleMap(
 ) {
     val context = LocalContext.current
     val mapView = remember(context) { createMapView(context) }
+    val stopMarkers = remember(mapView) { mutableListOf<Pair<Marker, Boolean>>() }
     var centeredOnUserLocation by remember(mapView) { mutableStateOf<GeoPlace?>(null) }
     var fittedTripId by remember(mapView) { mutableStateOf<String?>(null) }
     var previousSelectedVehicleId by remember(mapView) { mutableStateOf<String?>(null) }
@@ -299,6 +303,7 @@ private fun LiveVehicleMap(
             .background(MaterialTheme.colorScheme.surfaceVariant, mapShape),
         update = { view ->
             view.overlays.clear()
+            stopMarkers.clear()
             val vehicles = snapshot?.vehicles.orEmpty()
             val routePoints = selectedVehicleTrip?.let(::tripRoutePoints).orEmpty()
             if (selectedVehicle?.id != previousSelectedVehicleId) {
@@ -345,7 +350,7 @@ private fun LiveVehicleMap(
                     position = GeoPoint(stop.stopLat, stop.stopLon)
                     title = stop.stopName
                     snippet = "Dotknij, aby wyświetlić najbliższe odjazdy"
-                    icon = createStopMarkerIcon(context, isSelected)
+                    icon = createStopMarkerIcon(context, isSelected, view.zoomLevelDouble)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     setOnMarkerClickListener { clickedMarker, _ ->
                         clickedMarker.showInfoWindow()
@@ -353,6 +358,7 @@ private fun LiveVehicleMap(
                         true
                     }
                 }
+                stopMarkers.add(marker to isSelected)
                 view.overlays.add(marker)
             }
             vehicles.forEach { vehicle ->
@@ -392,12 +398,22 @@ private fun LiveVehicleMap(
                 view.controller.setZoom(USER_LOCATION_MAP_ZOOM)
                 centeredOnUserLocation = userLocation
             }
+            updateStopMarkerIcons(context, stopMarkers, view.zoomLevelDouble)
             view.invalidate()
         }
     )
 
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(mapView, lifecycleOwner) {
+        val mapListener = object : MapListener {
+            override fun onScroll(event: ScrollEvent): Boolean = false
+
+            override fun onZoom(event: ZoomEvent): Boolean {
+                updateStopMarkerIcons(context, stopMarkers, event.zoomLevel)
+                mapView.invalidate()
+                return false
+            }
+        }
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> mapView.onResume()
@@ -405,9 +421,12 @@ private fun LiveVehicleMap(
                 else -> Unit
             }
         }
+        mapView.addMapListener(mapListener)
         lifecycleOwner.lifecycle.addObserver(observer)
         mapView.onResume()
         onDispose {
+            mapView.removeMapListener(mapListener)
+            stopMarkers.clear()
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
@@ -884,14 +903,44 @@ private fun markerColor(mode: TransitVehicleMode): Int = when (mode) {
     TransitVehicleMode.TRAM -> TRAM_MARKER_COLOR
 }
 
-private fun createStopMarkerIcon(context: Context, selected: Boolean): GradientDrawable {
+internal fun stopMarkerSizeDp(zoomLevel: Double, selected: Boolean): Float {
+    require(zoomLevel.isFinite()) { "Map zoom must be finite." }
+    if (selected) return STOP_MARKER_SELECTED_SIZE_DP
+    val progress = ((zoomLevel - STOP_MARKER_SMALL_ZOOM) /
+        (STOP_MARKER_FULL_ZOOM - STOP_MARKER_SMALL_ZOOM)).coerceIn(0.0, 1.0).toFloat()
+    return STOP_MARKER_SMALL_SIZE_DP +
+        (STOP_MARKER_FULL_SIZE_DP - STOP_MARKER_SMALL_SIZE_DP) * progress
+}
+
+private fun updateStopMarkerIcons(
+    context: Context,
+    markers: List<Pair<Marker, Boolean>>,
+    zoomLevel: Double
+) {
     val density = context.resources.displayMetrics.density
+    markers.forEach { (marker, selected) ->
+        val sizePixels = (stopMarkerSizeDp(zoomLevel, selected) * density)
+            .roundToInt().coerceAtLeast(1)
+        if (marker.icon.intrinsicWidth != sizePixels) {
+            marker.icon = createStopMarkerIcon(context, selected, zoomLevel)
+        }
+    }
+}
+
+private fun createStopMarkerIcon(
+    context: Context,
+    selected: Boolean,
+    zoomLevel: Double
+): GradientDrawable {
+    val density = context.resources.displayMetrics.density
+    val sizeDp = stopMarkerSizeDp(zoomLevel, selected)
+    val sizePixels = (sizeDp * density).roundToInt().coerceAtLeast(1)
+    val strokeScale = (sizeDp / STOP_MARKER_FULL_SIZE_DP).coerceAtMost(1f)
     return GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(if (selected) SELECTED_MARKER_COLOR else STOP_MARKER_COLOR)
-        setStroke((2 * density).toInt().coerceAtLeast(1), AndroidColor.WHITE)
-        val sizeDp = if (selected) 18 else 14
-        setSize((sizeDp * density).toInt(), (sizeDp * density).toInt())
+        setStroke((2 * density * strokeScale).roundToInt().coerceAtLeast(1), AndroidColor.WHITE)
+        setSize(sizePixels, sizePixels)
     }
 }
 
@@ -920,6 +969,11 @@ private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 190
 private const val DEFAULT_MAP_ZOOM = 12.0
 private const val USER_LOCATION_MAP_ZOOM = 14.5
 private const val SELECTED_VEHICLE_MAP_ZOOM = 14.5
+private const val STOP_MARKER_SMALL_ZOOM = 13.0
+private const val STOP_MARKER_FULL_ZOOM = 15.0
+private const val STOP_MARKER_SMALL_SIZE_DP = 5f
+private const val STOP_MARKER_FULL_SIZE_DP = 14f
+private const val STOP_MARKER_SELECTED_SIZE_DP = 18f
 private const val ROUTE_MAP_PADDING_DP = 48
 private const val ROUTE_LINE_WIDTH_DP = 5f
 private const val VEHICLE_MARKER_SIZE_DP = 30f

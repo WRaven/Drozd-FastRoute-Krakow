@@ -18,6 +18,28 @@ class StartupThemeTest {
     }
 
     @Test
+    fun usesTheDrozdDisplayNameAndUnofficialDescription() {
+        assertEquals(
+            "Drozd FastRoute",
+            resource("values", "strings.xml", "string", "app_name").textContent
+        )
+        assertEquals(
+            "Drozd FastRoute",
+            resource("values", "strings.xml", "string", "app_title").textContent
+        )
+        assertEquals(
+            "Rozkład jazdy Kraków — aplikacja nieoficjalna",
+            resource("values", "strings.xml", "string", "app_description").textContent
+        )
+        val debugName = DocumentBuilderFactory.newInstance().apply {
+            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        }.newDocumentBuilder().parse(
+            Path.of("src", "debug", "res", "values", "strings.xml").toFile()
+        ).getElementsByTagName("string").item(0).textContent
+        assertEquals("Drozd FastRoute (test)", debugName)
+    }
+
+    @Test
     fun splashWindowAndSystemBarsShareTheProfileBackground() {
         val theme = resource("values", "themes.xml", "style", "Theme.FastRoute")
         val items = theme.getElementsByTagName("item")

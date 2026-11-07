@@ -72,6 +72,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -114,6 +115,7 @@ import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import pl.wraven.mpkfastroute.R
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -349,7 +351,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("MPK Kraków FastRoute") },
+                title = { Text(stringResource(R.string.app_title)) },
                 actions = {
                     state.databaseUpdateProgressPercent?.let { progressPercent ->
                         DatabaseUpdateIndicator(progressPercent)
@@ -1775,6 +1777,16 @@ private fun SettingsDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Text(
+                    stringResource(R.string.app_description),
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    stringResource(R.string.app_disclaimer),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                HorizontalDivider()
                 Text("Nazwy skrótów", style = MaterialTheme.typography.titleSmall)
                 OutlinedTextField(
                     value = homeShortcutName,
@@ -1974,7 +1986,7 @@ private fun ReleaseQrCode(modifier: Modifier = Modifier) {
     }
     Image(
         bitmap = qrBitmap,
-        contentDescription = "Kod QR do najnowszego wydania MPK Kraków FastRoute",
+        contentDescription = stringResource(R.string.release_qr_description),
         modifier = modifier
     )
 }

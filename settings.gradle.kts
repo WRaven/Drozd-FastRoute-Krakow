@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "MPK-Krakow-FastRoute"
+rootProject.name = "Drozd-FastRoute-Krakow"
 include(":app")

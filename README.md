@@ -1,4 +1,4 @@
-# MPK Kraków FastRoute
+# Drozd FastRoute
 
 [Polski](./README.pl.md) | **English**
 
@@ -6,6 +6,11 @@ Android app for searching Kraków public-transport connections, showing live
 departure information, and playing radio streams. This document describes the
 current application and its development workflow. The app interface is currently
 in Polish; English documentation does not change the interface language.
+
+**Kraków public-transport timetables — unofficial application.** Drozd FastRoute
+is an independent project, not an official MPK or ZTP Kraków application and not
+affiliated with either organization. It was previously named MPK Kraków FastRoute;
+the new display name does not change existing installations or saved data.
 
 ## Install and get started
 
@@ -45,6 +50,12 @@ separate; one channel cannot update the other.
 | Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder is scheduled 15 minutes before the calculated departure. |
 | Timetable and diagnostics | Settings provides **Odśwież rozkład GTFS** and a bounded search diagnostic log with copy/clear actions. The automatic updater also checks the timetable at startup and daily. |
 | Sharing | Settings contains a QR code and a link to GitHub Releases, plus contact and release-detail actions. |
+
+At city-wide map zoom (level 13 or lower), unselected stops are 5 dp dots. They
+grow smoothly between zoom levels 13 and 15 and regain their previous 14 dp size
+at level 15 or higher. The selected stop keeps its 18 dp highlight at every zoom.
+Scaling responds to zoom gestures and buttons without removing stops or changing
+the map center.
 
 The main screen hides quick actions while typing to leave room for suggestions.
 The app and its launch screen follow the phone's light/dark mode; Android 12 and
@@ -107,6 +118,8 @@ color-profile selector.
   "Pojazd" are separate from line numbers. Map tiles and vehicle positions
   include visible source attribution. The line-label mapping does not migrate
   selected-trip geometry/timetables to the separate A/T feeds; see the limitations.
+  Stop markers scale from small city-view dots to their normal close-up size;
+  vehicle and user-location markers retain their existing sizes.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,
@@ -248,8 +261,8 @@ The [CI workflow](./.github/workflows/release.yml) uses Java 17.
 Windows/PowerShell example:
 
 ```powershell
-git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git
-Set-Location '.\MPK-Krakow-FastRoute'
+git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git Drozd-FastRoute-Krakow
+Set-Location '.\Drozd-FastRoute-Krakow'
 $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
@@ -264,6 +277,8 @@ Focused tests for the recent presentation changes:
 .\gradlew.bat :app:testDebugUnitTest `
   --tests 'pl.wraven.mpkfastroute.feature.search.ServiceNewsTickerTest' `
   --tests 'pl.wraven.mpkfastroute.feature.search.WeatherForecastSheetTest' `
+  --tests 'pl.wraven.mpkfastroute.feature.search.LiveStopMarkerSizeTest' `
+  --tests 'pl.wraven.mpkfastroute.core.update.GitHubUpdateCheckerTest' `
   --tests 'pl.wraven.mpkfastroute.ui.theme.StartupThemeTest'
 ```
 
@@ -275,7 +290,9 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
 2. Force-stop and relaunch in dark mode, then in light mode; check launch colors
    and readable system-bar icons.
 3. Open Live with/without location permission; check centering and line labels on
-   markers and after tapping a vehicle.
+   markers and after tapping a vehicle. Zoom out to the whole city, then zoom in:
+   stop dots should grow smoothly and shrink again when zooming out; a selected
+   stop remains highlighted.
 4. Rename both shortcuts, save and restart; check names, destinations and schedules.
 5. Check ticker movement and the weather soil-temperature/wind line on the phone,
    including a larger font setting.
@@ -322,7 +339,8 @@ The workflow builds a signed, versioned APK, attaches it to the matching
 GitHub Release, and keeps a downloadable Actions artifact.
 
 Main-branch test APKs use the separate `pl.wraven.mpkfastroute.debug` package
-and appear as "MPK Kraków FastRoute (test)". Configure a separate, stable test
+and appear as "Drozd FastRoute (test)". The legacy package IDs are deliberately
+unchanged for update compatibility. Configure a separate, stable test
 keystore using these GitHub Actions repository secrets:
 
 | Secret | Value |
@@ -357,5 +375,34 @@ stable test secrets are available; it does not automatically create a test relea
 To make a verified artifact available on a phone and in the test app updater,
 publish it as a public, non-draft prerelease with a versioned APK asset. Do not
 substitute a locally signed APK. The updater derives the CI version from the asset
-name (for example, `MPK-Krakow-FastRoute-v0.1.0-ci.N-buildN-debug.apk`) and selects
+name (for example, `Drozd-FastRoute-Krakow-v0.1.0-ci.N-buildN-debug.apk`) and selects
 the highest compatible-channel version rather than relying on release-list order.
+Previously published APK names remain supported. New Actions artifacts use
+`Drozd-FastRoute-Krakow-ci-build-N`.
+
+## Staged repository rename
+
+The repository remains `WRaven/MPK-Krakow-FastRoute` during the bridge release.
+The planned name is `WRaven/Drozd-FastRoute-Krakow`.
+
+1. Publish and install the bridge APK while the repository still has its old name.
+   The bridge updater trusts release-download URLs from exactly these two
+   repositories. Its primary API, release link and QR code still point to the
+   current repository until the rename.
+2. Confirm installation before renaming the same GitHub repository. Repository
+   secrets, Actions configuration and signing keys remain with that repository;
+   do not create a replacement repository or regenerate signing keys.
+3. After renaming, update the git remote, the updater's primary URLs, documentation
+   and release links to the new name. Verify the API, APK download and an in-place
+   update using the installed bridge version.
+4. Do not reuse the old repository name: GitHub's redirects depend on it remaining
+   unused. See [GitHub's repository-renaming guidance](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
+
+Earlier APKs only trust the old release-download path. GitHub redirects alone do
+not make their updater accept assets under the new name; users still running
+those versions may need to install a compatible bridge APK manually.
+
+Keep Android application IDs, signing keys, database names and preference keys
+unchanged throughout this migration. The visible brand and repository name are
+separate from the permanent Android identity. The unofficial label clarifies the
+project's independence; it is not a guarantee of trademark clearance.

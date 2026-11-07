@@ -44,7 +44,7 @@ class ZtpServiceNewsClient @Inject constructor(
 
     companion object {
         const val FEED_URL = "https://ztp.krakow.pl/feed?post_type=komunikat"
-        private const val USER_AGENT = "MPK-Krakow-FastRoute/0.1.0 (Android)"
+        private const val USER_AGENT = "Drozd-FastRoute/0.1.0 (Android)"
     }
 }
 

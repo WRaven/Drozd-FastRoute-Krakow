@@ -1,4 +1,4 @@
-# MPK Kraków FastRoute
+# Drozd FastRoute
 
 **Polski** | [English](./README.md)
 
@@ -6,6 +6,11 @@ Aplikacja Android do wyszukiwania połączeń komunikacji miejskiej w Krakowie,
 podglądu odjazdów i pojazdów na żywo oraz słuchania radia. Dokument opisuje obecne
 funkcje aplikacji i sposób jej rozwijania. Interfejs jest obecnie po polsku;
 angielska dokumentacja nie zmienia języka interfejsu.
+
+**Rozkład jazdy Kraków — aplikacja nieoficjalna.** Drozd FastRoute jest niezależnym
+projektem, nie jest oficjalną aplikacją MPK ani ZTP Kraków i nie jest z nimi
+powiązana. Wcześniejsza nazwa to MPK Kraków FastRoute; zmiana nazwy wyświetlanej
+nie zmienia istniejącej instalacji ani zapisanych danych.
 
 ## Instalacja i pierwszy start
 
@@ -44,6 +49,12 @@ aplikacjami; nie aktualizują się wzajemnie.
 | Przypomnienia o dojeździe | Zapisz harmonogram domu/pracy i wybierz **Włącz powiadomienia**. Nadaj wymagane uprawnienia do powiadomień i lokalizacji w tle. Przypomnienie jest planowane 15 minut przed obliczonym wyjazdem. |
 | Rozkład i diagnostyka | W Ustawieniach dostępne są **Odśwież rozkład GTFS** i ograniczony dziennik diagnostyczny z kopiowaniem/czyszczeniem. Automatyczna aktualizacja rozkładu sprawdza dane przy starcie i codziennie. |
 | Udostępnianie | Ustawienia zawierają kod QR i link do wydań na GitHub, kontakt oraz szczegóły wydania. |
+
+Przy widoku całego miasta (zoom 13 lub mniejszy) niezaznaczone przystanki mają
+kropki 5 dp. Między poziomami 13 i 15 płynnie rosną, a od poziomu 15 odzyskują
+dotychczasowe 14 dp. Wybrany przystanek zachowuje wyróżnienie 18 dp przy każdym
+powiększeniu. Rozmiar reaguje na gesty i przyciski zoomu bez usuwania przystanków
+ani zmiany środka mapy.
 
 Podczas wpisywania szybkie akcje chowają się, aby zostawić miejsce na podpowiedzi.
 Interfejs oraz ekran uruchamiania podążają za jasnym/ciemnym trybem telefonu.
@@ -102,6 +113,8 @@ nie ma osobnego przełącznika profilu kolorystycznego.
   jest jawnie sygnalizowany. Numery taborowe **Pojazd** pozostają osobnym polem.
   Mapa i pojazdy mają widoczne oznaczenia źródeł. Naprawa nazw linii nie migruje
   geometrii ani szczegółowego rozkładu wybranego kursu na osobne feedy A/T.
+  Znaczniki przystanków rosną od małych kropek w widoku miasta do zwykłego rozmiaru
+  przy zbliżeniu; rozmiary pojazdów i znacznika użytkownika pozostają bez zmian.
 - Radio działa w usłudze MediaSession, obsługuje systemowe kontrolki odtwarzania
   i zapamiętuje wybraną stację. Domyślna edytowalna lista zawiera Eska Rock,
   Antyradio, Radio Pogoda i Radio Kraków.
@@ -222,8 +235,8 @@ JDK zgodnego z projektem, Android SDK Platform 36 i Build Tools 36.0.0.
 Przykład dla Windows/PowerShell:
 
 ```powershell
-git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git
-Set-Location '.\MPK-Krakow-FastRoute'
+git clone https://github.com/WRaven/MPK-Krakow-FastRoute.git Drozd-FastRoute-Krakow
+Set-Location '.\Drozd-FastRoute-Krakow'
 $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 .\gradlew.bat :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 ```
@@ -239,6 +252,8 @@ Testy ostatnich zmian prezentacji:
 .\gradlew.bat :app:testDebugUnitTest `
   --tests 'pl.wraven.mpkfastroute.feature.search.ServiceNewsTickerTest' `
   --tests 'pl.wraven.mpkfastroute.feature.search.WeatherForecastSheetTest' `
+  --tests 'pl.wraven.mpkfastroute.feature.search.LiveStopMarkerSizeTest' `
+  --tests 'pl.wraven.mpkfastroute.core.update.GitHubUpdateCheckerTest' `
   --tests 'pl.wraven.mpkfastroute.ui.theme.StartupThemeTest'
 ```
 
@@ -250,7 +265,9 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
 2. Wymuś zatrzymanie i uruchom w trybie ciemnym, następnie jasnym; sprawdź kolory
    startu i czytelność ikon pasków systemowych.
 3. Otwórz Live z uprawnieniem lokalizacji i bez niego; sprawdź centrowanie oraz
-   numery linii na znacznikach i po kliknięciu pojazdu.
+   numery linii na znacznikach i po kliknięciu pojazdu. Oddal mapę do widoku miasta,
+   następnie przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć
+   po oddaleniu; wybrany przystanek pozostaje wyróżniony.
 4. Zmień obie nazwy skrótów, zapisz i zrestartuj; sprawdź nazwy, cele i harmonogramy.
 5. Sprawdź ruch paska ZTP i wiersz gruntu/wiatru w pogodzie, także przy większej
    czcionce.
@@ -294,8 +311,9 @@ Workflow buduje podpisany APK z wersją w nazwie, dołącza go do wydania GitHub
 i zachowuje artefakt w Actions.
 
 Testowe APK z gałęzi `main` używają osobnego pakietu
-`pl.wraven.mpkfastroute.debug` i nazwy **MPK Kraków FastRoute (test)**.
-Ustaw osobny, stały keystore testowy w sekretach:
+`pl.wraven.mpkfastroute.debug` i nazwy **Drozd FastRoute (test)**.
+Dotychczasowe identyfikatory pakietów celowo pozostają bez zmian dla zgodności
+aktualizacji. Ustaw osobny, stały keystore testowy w sekretach:
 
 | Sekret | Wartość |
 | --- | --- |
@@ -328,5 +346,35 @@ sekrety są dostępne; nie tworzy automatycznie wydania testowego. Aby plik był
 dostępny na telefonie i przez aktualizator, opublikuj zweryfikowany APK jako
 publiczny prerelease, nie draft, z wersją w nazwie pliku. Nie zastępuj go APK
 podpisanym lokalnie. Aktualizator odczytuje wersję CI z nazwy, np.
-`MPK-Krakow-FastRoute-v0.1.0-ci.N-buildN-debug.apk`, i wybiera najwyższą wersję
+`Drozd-FastRoute-Krakow-v0.1.0-ci.N-buildN-debug.apk`, i wybiera najwyższą wersję
 w odpowiednim kanale, nie opiera się na kolejności listy wydań.
+Nazwy wcześniej opublikowanych APK nadal są obsługiwane. Nowe artefakty Actions
+używają nazwy `Drozd-FastRoute-Krakow-ci-build-N`.
+
+## Etapowa zmiana nazwy repozytorium
+
+Na czas wersji przejściowej repo pozostaje pod nazwą `WRaven/MPK-Krakow-FastRoute`.
+Planowana nowa nazwa to `WRaven/Drozd-FastRoute-Krakow`.
+
+1. Opublikuj i zainstaluj przejściowy APK, gdy repo ma jeszcze starą nazwę.
+   Aktualizator tej wersji akceptuje adresy pobierania wydań dokładnie z tych dwóch
+   repozytoriów. Główne API, link wydań i kod QR pozostają przy obecnym adresie
+   do czasu zmiany nazwy.
+2. Potwierdź instalację przed zmianą nazwy tego samego repozytorium GitHub.
+   Sekrety repo, konfiguracja Actions i klucze podpisu pozostają w tym repozytorium;
+   nie twórz nowego repo i nie generuj nowych kluczy podpisu.
+3. Po zmianie nazwy zaktualizuj git remote, główne adresy aktualizatora,
+   dokumentację i linki wydań. Sprawdź API, pobranie APK i zgodną aktualizację
+   z zainstalowanej wersji przejściowej.
+4. Nie używaj ponownie starej nazwy repo: przekierowania GitHub wymagają, aby
+   pozostała wolna. Zobacz [instrukcję zmiany nazwy repozytorium GitHub](https://docs.github.com/en/repositories/creating-and-managing-repositories/renaming-a-repository).
+
+Starsze APK akceptują wyłącznie starą ścieżkę pobierania wydań. Same przekierowania
+GitHub nie sprawią, że ich aktualizator zaakceptuje pliki pod nową nazwą;
+użytkownicy takich wersji mogą potrzebować ręcznej instalacji zgodnego APK
+przejściowego.
+
+Nie zmieniaj identyfikatorów aplikacji Android, kluczy podpisu, nazw baz ani kluczy
+ustawień podczas migracji. Widoczna marka i nazwa repo są niezależne od stałej
+tożsamości Androida. Oznaczenie nieoficjalności wyjaśnia niezależność projektu,
+ale nie gwarantuje braku kolizji ze znakami towarowymi.

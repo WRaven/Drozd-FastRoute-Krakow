@@ -1,4 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">MPK Kraków FastRoute</string>
+    <string name="app_name">Drozd FastRoute</string>
+    <string name="app_title">Drozd FastRoute</string>
+    <string name="app_description">Rozkład jazdy Kraków — aplikacja nieoficjalna</string>
+    <string name="app_disclaimer">Niezależna aplikacja. Nie jest oficjalną aplikacją MPK ani ZTP Kraków i nie jest z nimi powiązana.</string>
+    <string name="release_qr_description">Kod QR do wydań Drozd FastRoute</string>
 </resources>

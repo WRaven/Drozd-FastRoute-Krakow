@@ -78,7 +78,7 @@ jobs:
           set -euo pipefail
           apk_path="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$apk_path"
-          versioned_path="app/build/outputs/apk/debug/MPK-Krakow-FastRoute-v${APP_VERSION_NAME}-build${APP_VERSION_CODE}-debug.apk"
+          versioned_path="app/build/outputs/apk/debug/Drozd-FastRoute-Krakow-v${APP_VERSION_NAME}-build${APP_VERSION_CODE}-debug.apk"
           mv "$apk_path" "$versioned_path"
         if: github.ref == 'refs/heads/main' && env.STABLE_TEST_SIGNING_AVAILABLE == 'true'
 
@@ -86,15 +86,15 @@ jobs:
         if: github.ref == 'refs/heads/main' && env.STABLE_TEST_SIGNING_AVAILABLE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: MPK-Krakow-FastRoute-ci-build-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/MPK-Krakow-FastRoute-*-debug.apk
+          name: Drozd-FastRoute-Krakow-ci-build-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/Drozd-FastRoute-Krakow-*-debug.apk
           if-no-files-found: error
           retention-days: 30
 
       - name: Upload Room schema
         uses: actions/upload-artifact@v4
         with:
-          name: MPK-Krakow-FastRoute-room-schema-build-${{ github.run_number }}
+          name: Drozd-FastRoute-Krakow-room-schema-build-${{ github.run_number }}
           path: app/schemas/**/*.json
           if-no-files-found: error
           retention-days: 30
@@ -182,14 +182,14 @@ jobs:
             echo "::error::Release build did not produce an APK."
             exit 1
           fi
-          versioned_path="app/build/outputs/apk/release/MPK-Krakow-FastRoute-v${VERSION_NAME}-build${VERSION_CODE}.apk"
+          versioned_path="app/build/outputs/apk/release/Drozd-FastRoute-Krakow-v${VERSION_NAME}-build${VERSION_CODE}.apk"
           mv "$apk_path" "$versioned_path"
           echo "path=$versioned_path" >> "$GITHUB_OUTPUT"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MPK-Krakow-FastRoute-${{ github.ref_name }}-build${{ steps.version.outputs.version_code }}
+          name: Drozd-FastRoute-Krakow-${{ github.ref_name }}-build${{ steps.version.outputs.version_code }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
           retention-days: 30
@@ -211,6 +211,6 @@ jobs:
             echo "Install this APK over an existing installation signed with the same release key."
           } > "$notes_file"
           gh release create "$GITHUB_REF_NAME" "$APK_PATH" \
-            --title "MPK Kraków FastRoute $GITHUB_REF_NAME" \
+            --title "Drozd FastRoute $GITHUB_REF_NAME" \
             --notes-file "$notes_file" \
             --verify-tag

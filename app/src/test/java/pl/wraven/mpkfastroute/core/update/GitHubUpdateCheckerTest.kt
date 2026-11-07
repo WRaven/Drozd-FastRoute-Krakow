@@ -72,6 +72,42 @@ class GitHubUpdateCheckerTest {
     }
 
     @Test
+    fun acceptsBothRepositoryAddressesDuringTheDrozdMigration() {
+        listOf("MPK-Krakow-FastRoute", "Drozd-FastRoute-Krakow").forEach { repository ->
+            val url = "https://github.com/WRaven/$repository/releases/download/test-bridge/app.apk"
+            assertEquals(
+                url,
+                GitHubUpdateChecker.selectApkDownloadUrl(listOf("app.apk" to url))
+            )
+        }
+    }
+
+    @Test
+    fun rejectsLookalikeAndUnrelatedRepositoriesAfterMigration() {
+        listOf(
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow-other/releases/download/test/app.apk",
+            "https://github.com/other/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
+            "https://github.com/WRaven/other/releases/download/test/app.apk",
+            "https://github.com.example.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
+            "http://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
+            "https://user@github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
+            "https://github.com:444/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk"
+        ).forEach { url ->
+            assertTrue(url, !GitHubUpdateChecker.isTrustedDownloadUrl(url))
+        }
+    }
+
+    @Test
+    fun extractsNewBrandedApkVersionAndKeepsOldInstalledVersionsUpdatable() {
+        val version = GitHubUpdateChecker.versionForRelease(
+            tagName = "test-bridge",
+            assetNames = listOf("Drozd-FastRoute-Krakow-v0.1.0-ci.64-build64-debug.apk")
+        )
+        assertEquals("0.1.0-ci.64", version)
+        assertTrue(GitHubUpdateChecker.compareVersions(version, "0.1.0-ci.63-test") > 0)
+    }
+
+    @Test
     fun treatsNotFoundAsNoPublishedRelease() {
         val exception = runCatching {
             GitHubUpdateChecker.ensureSuccessfulResponse(404)
