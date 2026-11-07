@@ -60,6 +60,10 @@ the architecture and phases in the project specification.
   the official MPK Kraków profile on X. Recent address and stop suggestions
   appear only while a search field is focused with the keyboard open; quick
   actions and route-planning controls hide while typing.
+- The launch screen and window background follow the same system light/dark
+  profile as Compose, including system tonal colors on Android 12 and newer.
+  System bar icons keep the matching contrast; when Compose starts, the window
+  background is synchronized with its exact color scheme.
 - Address routes compare up to six nearby stop-name groups within 1.5 km.
   Walking to the first stop, between transfer stops, and from the final stop
   is included in door-to-door arrival estimates; results include the fastest

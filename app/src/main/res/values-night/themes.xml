@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="fast_route_light_system_bars">false</bool>
+
+    <style name="Theme.FastRoute.Base" parent="@android:style/Theme.Material.NoActionBar" />
+</resources>
