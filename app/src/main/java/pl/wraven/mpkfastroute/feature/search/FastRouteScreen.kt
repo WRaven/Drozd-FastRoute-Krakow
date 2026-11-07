@@ -476,12 +476,22 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             departures = state.liveMapStopDepartures,
             isLoadingDepartures = state.isLoadingLiveMapStopDepartures,
             departureError = state.liveMapStopDeparturesError,
+            selectedVehicle = state.selectedLiveVehicle,
+            selectedVehicleTrip = state.selectedLiveVehicleTrip,
+            selectedVehicleTripUpdate = state.selectedLiveVehicleTripUpdate,
+            isLoadingVehicleTrip = state.isLoadingSelectedLiveVehicleTrip,
+            isLoadingVehicleTripUpdate = state.isLoadingSelectedLiveVehicleTripUpdate,
+            vehicleTripError = state.selectedLiveVehicleTripError,
+            vehicleTripUpdateError = state.selectedLiveVehicleTripUpdateError,
             onRefresh = viewModel::refreshLiveVehiclePositions,
             onSelectStop = viewModel::loadLiveMapStop,
+            onSelectVehicle = viewModel::selectLiveVehicle,
             onClearSelectedStop = viewModel::clearLiveMapStop,
+            onClearSelectedVehicle = viewModel::clearSelectedLiveVehicle,
             onDismiss = {
                 liveMapVisible = false
                 viewModel.clearLiveMapStop()
+                viewModel.clearSelectedLiveVehicle()
             }
         )
     }
@@ -2295,7 +2305,7 @@ private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =
         Haversine.distanceMeters(place.latitude, place.longitude, stop.stopLat, stop.stopLon)
     } ?: throw IllegalStateException("A stop group cannot be empty.")
 
-private fun formatGtfsTime(seconds: Int): String {
+internal fun formatGtfsTime(seconds: Int): String {
     val totalMinutes = seconds / 60
     return "%02d:%02d".format(totalMinutes / 60, totalMinutes % 60)
 }

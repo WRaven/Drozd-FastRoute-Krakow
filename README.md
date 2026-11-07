@@ -6,12 +6,13 @@ the architecture and phases in the project specification.
 
 ## Implementation status
 
-- The Room v5 database stores GTFS stops, routes, trips, stop times, service
-  calendars, date exceptions, and a materialized index of adjacent trip
-  connections. The importer downloads the official Kraków feed to a temporary
-  cache file, reports download/import/indexing progress, and replaces its data
-  transactionally in batches. Existing databases build the connection index
-  after migration instead of doing expensive connection joins on every search.
+- The Room v6 database stores GTFS stops, routes, trips, stop times, route
+  shapes, service calendars, date exceptions, and a materialized index of
+  adjacent trip connections. The importer downloads the official Kraków feed
+  to a temporary cache file, reports download/import/indexing progress, and
+  replaces its data transactionally in batches. Existing databases build the
+  connection index after migration instead of doing expensive connection
+  joins on every search.
 - The route planner filters services for the requested date, scans departures
   from the indexed connections within a two-hour window, requires at least
   three minutes when changing
@@ -23,11 +24,12 @@ the architecture and phases in the project specification.
   marked static estimates when live data is unavailable. Positive live delays
   appear as red minute badges beside departure estimates.
 - The "Live" quick action displays ZTP bus and tram vehicle-position feeds on
-  an OpenStreetMap map, refreshing positions every 30 seconds while the map is
-  open. Tap a stop to see its next departures, live delay badges, or scheduled
-  estimates when live predictions are unavailable. The map supports pan and
-  pinch/button zoom; map tiles and vehicle positions include visible source
-  attribution.
+  an OpenStreetMap map, refreshing positions and selected-trip predictions
+  every 30 seconds while the map is open. Tap a stop for its next departures,
+  or a vehicle to highlight its GTFS route and see the trip timetable with ZTP
+  real-time delay updates when available. Scheduled estimates and live delays
+  are clearly distinguished. The map supports pan and pinch/button zoom; map
+  tiles and vehicle positions include visible source attribution.
 - Radio streams run in a MediaSession foreground service, stay bound to the
   media session while active, support system playback controls, and persist
   the selected station. The editable default list includes Eska Rock, Antyradio,

@@ -43,10 +43,15 @@ import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
 import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsScheduleUpdateScheduler
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
+import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
 import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
 import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
 import pl.wraven.mpkfastroute.core.live.LiveVehicleSnapshot
+import pl.wraven.mpkfastroute.core.live.LiveVehiclePosition
+import pl.wraven.mpkfastroute.core.live.VehicleTripSchedule
+import pl.wraven.mpkfastroute.core.live.VehicleTripScheduleRepository
+import pl.wraven.mpkfastroute.core.live.ZtpTripUpdatesRepository
 import pl.wraven.mpkfastroute.core.live.ZtpVehiclePositionsRepository
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsClient
 import pl.wraven.mpkfastroute.core.live.ZtpServiceNewsItem
@@ -106,6 +111,13 @@ data class SearchUiState(
     val liveMapStopDepartures: LiveDeparturesResult? = null,
     val isLoadingLiveMapStopDepartures: Boolean = false,
     val liveMapStopDeparturesError: String? = null,
+    val selectedLiveVehicle: LiveVehiclePosition? = null,
+    val selectedLiveVehicleTrip: VehicleTripSchedule? = null,
+    val selectedLiveVehicleTripUpdate: LiveTripUpdate? = null,
+    val isLoadingSelectedLiveVehicleTrip: Boolean = false,
+    val isLoadingSelectedLiveVehicleTripUpdate: Boolean = false,
+    val selectedLiveVehicleTripError: String? = null,
+    val selectedLiveVehicleTripUpdateError: String? = null,
     val isImporting: Boolean = false,
     val databaseUpdateProgressPercent: Int? = null,
     val isSearching: Boolean = false,
@@ -147,6 +159,8 @@ class SearchViewModel @Inject constructor(
     private val routePlanner: RoutePlanner,
     private val ttssDepartureRepository: TtssDepartureRepository,
     private val liveVehiclePositionsRepository: ZtpVehiclePositionsRepository,
+    private val vehicleTripScheduleRepository: VehicleTripScheduleRepository,
+    private val ztpTripUpdatesRepository: ZtpTripUpdatesRepository,
     private val contextEngine: ContextEngine,
     private val addressGeocoder: AddressGeocoder,
     private val appPreferences: AppPreferences,
@@ -167,6 +181,9 @@ class SearchViewModel @Inject constructor(
     private var liveVehicleJob: Job? = null
     private var liveMapStopDeparturesJob: Job? = null
     private var liveMapStopRequestId = 0L
+    private var selectedVehicleTripJob: Job? = null
+    private var selectedVehicleTripUpdateJob: Job? = null
+    private var selectedVehicleTripRequestId = 0L
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
     private var lastServiceNewsAttemptAtMillis = 0L
@@ -313,6 +330,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun refreshLiveVehiclePositions() {
+        refreshSelectedLiveVehicleTripUpdate()
         if (liveVehicleJob?.isActive == true) return
         liveVehicleJob = viewModelScope.launch {
             mutableUiState.update {
@@ -320,8 +338,22 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val snapshot = liveVehiclePositionsRepository.getSnapshot()
+                val selectedVehicle = mutableUiState.value.selectedLiveVehicle
+                val refreshedSelectedVehicle = selectedVehicle?.let { selected ->
+                    snapshot.vehicles.firstOrNull { it.id == selected.id }
+                }
                 mutableUiState.update {
-                    it.copy(liveVehicleSnapshot = snapshot, liveVehicleError = null)
+                    it.copy(
+                        liveVehicleSnapshot = snapshot,
+                        liveVehicleError = null,
+                        selectedLiveVehicle = refreshedSelectedVehicle ?: selectedVehicle
+                    )
+                }
+                if (
+                    refreshedSelectedVehicle != null &&
+                    refreshedSelectedVehicle.tripId != selectedVehicle?.tripId
+                ) {
+                    selectLiveVehicle(refreshedSelectedVehicle)
                 }
             } catch (exception: IOException) {
                 mutableUiState.update {
@@ -343,7 +375,150 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    fun selectLiveVehicle(vehicle: LiveVehiclePosition) {
+        val requestId = ++selectedVehicleTripRequestId
+        selectedVehicleTripJob?.cancel()
+        selectedVehicleTripUpdateJob?.cancel()
+        clearLiveMapStop()
+        val tripId = vehicle.tripId
+        mutableUiState.update {
+            it.copy(
+                selectedLiveVehicle = vehicle,
+                selectedLiveVehicleTrip = null,
+                selectedLiveVehicleTripUpdate = null,
+                isLoadingSelectedLiveVehicleTrip = !tripId.isNullOrBlank(),
+                isLoadingSelectedLiveVehicleTripUpdate = !tripId.isNullOrBlank(),
+                selectedLiveVehicleTripError = if (tripId.isNullOrBlank()) {
+                    "ZTP nie przekazał identyfikatora kursu dla tego pojazdu."
+                } else {
+                    null
+                },
+                selectedLiveVehicleTripUpdateError = null
+            )
+        }
+        if (tripId.isNullOrBlank()) return
+
+        val stopsById = mutableUiState.value.stops.associateBy(StopEntity::stopId)
+        val serviceDate = GtfsServiceClock.from(LocalDateTime.now()).serviceDate
+        selectedVehicleTripJob = viewModelScope.launch {
+            try {
+                val schedule = vehicleTripScheduleRepository.getSchedule(
+                    tripId = tripId,
+                    stopsById = stopsById,
+                    serviceDate = serviceDate
+                )
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            selectedLiveVehicleTrip = schedule,
+                            selectedLiveVehicleTripError = null
+                        )
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: SQLiteException) {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            selectedLiveVehicleTripError =
+                                "Nie można odczytać rozkładu kursu: ${exception.message.orEmpty()}"
+                        )
+                    }
+                }
+            } catch (exception: IllegalStateException) {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(selectedLiveVehicleTripError = exception.message)
+                    }
+                }
+            } finally {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(isLoadingSelectedLiveVehicleTrip = false)
+                    }
+                }
+            }
+        }
+        refreshSelectedLiveVehicleTripUpdate()
+    }
+
+    fun clearSelectedLiveVehicle() {
+        selectedVehicleTripRequestId += 1
+        selectedVehicleTripJob?.cancel()
+        selectedVehicleTripUpdateJob?.cancel()
+        selectedVehicleTripJob = null
+        selectedVehicleTripUpdateJob = null
+        mutableUiState.update {
+            it.copy(
+                selectedLiveVehicle = null,
+                selectedLiveVehicleTrip = null,
+                selectedLiveVehicleTripUpdate = null,
+                isLoadingSelectedLiveVehicleTrip = false,
+                isLoadingSelectedLiveVehicleTripUpdate = false,
+                selectedLiveVehicleTripError = null,
+                selectedLiveVehicleTripUpdateError = null
+            )
+        }
+    }
+
+    private fun refreshSelectedLiveVehicleTripUpdate() {
+        val state = mutableUiState.value
+        val vehicle = state.selectedLiveVehicle ?: return
+        val tripId = vehicle.tripId?.takeIf(String::isNotBlank) ?: return
+        if (selectedVehicleTripUpdateJob?.isActive == true) return
+        val requestId = selectedVehicleTripRequestId
+        mutableUiState.update {
+            if (it.selectedLiveVehicle?.id != vehicle.id) {
+                it
+            } else {
+                it.copy(
+                    isLoadingSelectedLiveVehicleTripUpdate = true,
+                    selectedLiveVehicleTripUpdateError = null
+                )
+            }
+        }
+        selectedVehicleTripUpdateJob = viewModelScope.launch {
+            try {
+                val update = ztpTripUpdatesRepository.getTripUpdate(vehicle.mode, tripId)
+                if (
+                    requestId == selectedVehicleTripRequestId &&
+                    mutableUiState.value.selectedLiveVehicle?.tripId == tripId
+                ) {
+                    mutableUiState.update {
+                        it.copy(
+                            selectedLiveVehicleTripUpdate = update,
+                            selectedLiveVehicleTripUpdateError = if (update == null) {
+                                "Brak bieżących prognoz dla kursu; pokazuję rozkład."
+                            } else {
+                                null
+                            }
+                        )
+                    }
+                }
+            } catch (exception: CancellationException) {
+                throw exception
+            } catch (exception: IOException) {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(
+                            selectedLiveVehicleTripUpdateError =
+                                "Nie udało się pobrać opóźnień: ${exception.message.orEmpty()}"
+                        )
+                    }
+                }
+            } finally {
+                if (requestId == selectedVehicleTripRequestId) {
+                    mutableUiState.update {
+                        it.copy(isLoadingSelectedLiveVehicleTripUpdate = false)
+                    }
+                }
+            }
+        }
+    }
+
     fun loadLiveMapStop(stop: StopEntity) {
+        clearSelectedLiveVehicle()
         val requestId = ++liveMapStopRequestId
         liveMapStopDeparturesJob?.cancel()
         mutableUiState.update {

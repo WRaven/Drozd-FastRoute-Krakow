@@ -10,12 +10,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         StopEntity::class,
         RouteEntity::class,
         TripEntity::class,
+        ShapePointEntity::class,
         ServiceCalendarEntity::class,
         CalendarDateEntity::class,
         StopTimeEntity::class,
         ConnectionEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +25,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun routeDao(): RouteDao
 
     abstract fun tripDao(): TripDao
+
+    abstract fun shapePointDao(): ShapePointDao
 
     abstract fun serviceCalendarDao(): ServiceCalendarDao
 
@@ -110,6 +113,23 @@ abstract class AppDatabase : RoomDatabase() {
                     """
                     CREATE INDEX IF NOT EXISTS `index_connections_departureTime_serviceId_tripId`
                     ON `connections` (`departureTime`, `serviceId`, `tripId`)
+                    """.trimIndent()
+                )
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `trips` ADD COLUMN `shapeId` TEXT")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `shape_points` (
+                        `shapeId` TEXT NOT NULL,
+                        `shapePtSequence` INTEGER NOT NULL,
+                        `shapeLat` REAL NOT NULL,
+                        `shapeLon` REAL NOT NULL,
+                        PRIMARY KEY(`shapeId`, `shapePtSequence`)
+                    )
                     """.trimIndent()
                 )
             }

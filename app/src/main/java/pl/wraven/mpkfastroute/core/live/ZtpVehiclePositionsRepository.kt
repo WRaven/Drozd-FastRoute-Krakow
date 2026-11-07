@@ -26,7 +26,11 @@ data class LiveVehiclePosition(
     val latitude: Double,
     val longitude: Double,
     val routeShortName: String?,
-    val vehicleLabel: String?
+    val vehicleLabel: String?,
+    val routeId: String? = null,
+    val tripId: String? = null,
+    val currentStopSequence: Int? = null,
+    val currentStopId: String? = null
 )
 
 data class LiveVehicleSnapshot(
@@ -120,11 +124,8 @@ internal fun mapVehiclePositions(
     val descriptor = vehicle.vehicle.takeIf { vehicle.hasVehicle() }
     val vehicleId = descriptor?.id?.takeIf(String::isNotBlank)
     val entityId = entity.id.ifBlank { vehicleId ?: "$latitude,$longitude" }
-    val routeId = if (vehicle.hasTrip()) {
-        vehicle.trip.routeId.takeIf(String::isNotBlank)
-    } else {
-        null
-    }
+    val trip = vehicle.trip.takeIf { vehicle.hasTrip() }
+    val routeId = trip?.routeId?.takeIf(String::isNotBlank)
 
     LiveVehiclePosition(
         id = "${mode.name}:$entityId",
@@ -132,6 +133,12 @@ internal fun mapVehiclePositions(
         latitude = latitude,
         longitude = longitude,
         routeShortName = routeId?.let(routeShortNames::get),
-        vehicleLabel = descriptor?.label?.takeIf(String::isNotBlank)
+        vehicleLabel = descriptor?.label?.takeIf(String::isNotBlank),
+        routeId = routeId,
+        tripId = trip?.tripId?.takeIf(String::isNotBlank),
+        currentStopSequence = vehicle.currentStopSequence.takeIf {
+            vehicle.hasCurrentStopSequence()
+        },
+        currentStopId = vehicle.stopId.takeIf { vehicle.hasStopId() && it.isNotBlank() }
     )
 }
