@@ -997,16 +997,16 @@ class SearchViewModel @Inject constructor(
                 )
                 val currentServiceTime = GtfsServiceClock.from(now)
                 val preferLatestArrival = routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
-                val journeyOptions = selectRouteAlternatives(
+                val journeyOptions = selectDistinctJourneyDepartures(
                     candidates,
-                    preferLatestArrival = preferLatestArrival
+                    latestFirst = preferLatestArrival
                 )
                 diagnostics.record(
                     "Wyniki: ${candidates.size} kandydatów, " +
                         "${journeyOptions.size} tras po wyborze alternatyw."
                 )
-                val fastestJourney = journeyOptions.firstOrNull()
-                val transitSteps = fastestJourney?.steps
+                val firstJourney = journeyOptions.firstOrNull()
+                val transitSteps = firstJourney?.steps
                     ?.filterIsInstance<JourneyStep.Transit>()
                     .orEmpty()
                 val stopsById = state.stops.associateBy(StopEntity::stopId)
@@ -1017,10 +1017,10 @@ class SearchViewModel @Inject constructor(
                     ?.connection
                     ?.arrivalStopId
                 val selectedOrigin = firstTransitStopId?.let(stopsById::get)
-                    ?: fastestJourney?.originAccess?.stopId?.let(stopsById::get)
+                    ?: firstJourney?.originAccess?.stopId?.let(stopsById::get)
                     ?: state.originStop
                 val selectedDestination = lastTransitStopId?.let(stopsById::get)
-                    ?: fastestJourney?.destinationAccess?.stopId?.let(stopsById::get)
+                    ?: firstJourney?.destinationAccess?.stopId?.let(stopsById::get)
                     ?: state.destinationStop
                 val noJourneyMessage = when (routeTimePlan?.mode) {
                     JourneyTimeMode.DEPART_AFTER ->
@@ -1034,22 +1034,22 @@ class SearchViewModel @Inject constructor(
                     it.copy(
                         originStop = selectedOrigin,
                         destinationStop = selectedDestination,
-                        journey = fastestJourney,
+                        journey = firstJourney,
                         journeyOptions = journeyOptions,
                         liveDepartures = null,
-                        routeSearchMessage = if (fastestJourney == null) {
+                        routeSearchMessage = if (firstJourney == null) {
                             noJourneyMessage
                         } else {
                             null
                         },
-                        statusMessage = if (fastestJourney == null) {
+                        statusMessage = if (firstJourney == null) {
                             noJourneyMessage
                         } else {
                             null
                         }
                     )
                 }
-                if (routeTimePlan == null && fastestJourney != null && firstTransitStopId != null) {
+                if (routeTimePlan == null && firstJourney != null && firstTransitStopId != null) {
                     diagnostics.record("Trasa gotowa; odjazdy TTSS pobierane w tle.")
                     viewModelScope.launch {
                         try {
@@ -1061,7 +1061,7 @@ class SearchViewModel @Inject constructor(
                             )
                             diagnostics.record("Odpowiedź TTSS odebrana.")
                             mutableUiState.update { current ->
-                                if (current.journey !== fastestJourney) {
+                                if (current.journey !== firstJourney) {
                                     current
                                 } else {
                                     current.copy(liveDepartures = liveDepartures)
@@ -1070,7 +1070,7 @@ class SearchViewModel @Inject constructor(
                         } catch (exception: SQLiteException) {
                             diagnostics.record("Błąd bazy podczas pobierania odjazdów TTSS.")
                             mutableUiState.update { current ->
-                                if (current.journey !== fastestJourney) {
+                                if (current.journey !== firstJourney) {
                                     current
                                 } else {
                                     current.copy(
@@ -1086,7 +1086,7 @@ class SearchViewModel @Inject constructor(
                                     exception.message.orEmpty()
                             )
                             mutableUiState.update { current ->
-                                if (current.journey !== fastestJourney) {
+                                if (current.journey !== firstJourney) {
                                     current
                                 } else {
                                     current.copy(
@@ -1867,56 +1867,6 @@ class SearchViewModel @Inject constructor(
         longitude = stop.stopLon
     )
 
-    private fun selectRouteAlternatives(
-        candidates: List<CsaJourney>,
-        preferLatestArrival: Boolean = false
-    ): List<CsaJourney> {
-        val fastestComparator = if (preferLatestArrival) {
-            compareByDescending<CsaJourney> { it.estimatedArrivalTime }
-                .thenBy { it.totalDurationSeconds }
-                .thenBy { it.totalWalkingDistanceMeters }
-                .thenBy { it.transferPenaltySeconds }
-        } else {
-            compareBy<CsaJourney> { it.totalDurationSeconds }
-                .thenBy { it.totalWalkingDistanceMeters }
-                .thenBy { it.transferPenaltySeconds }
-        }
-        val ordered = candidates
-            .distinctBy(::routeSignature)
-            .sortedWith(fastestComparator)
-        val fastest = ordered.firstOrNull() ?: return emptyList()
-        val leastWalkingComparator = if (preferLatestArrival) {
-            compareBy<CsaJourney> { it.totalWalkingDistanceMeters }
-                .thenByDescending { it.estimatedArrivalTime }
-                .thenBy { it.totalDurationSeconds }
-                .thenBy { it.transferPenaltySeconds }
-        } else {
-            compareBy<CsaJourney> { it.totalWalkingDistanceMeters }
-                .thenBy { it.totalDurationSeconds }
-                .thenBy { it.transferPenaltySeconds }
-        }
-        val leastWalking = ordered.minWithOrNull(leastWalkingComparator) ?: return listOf(fastest)
-
-        return buildList {
-            add(fastest)
-            if (routeSignature(leastWalking) != routeSignature(fastest)) {
-                add(leastWalking)
-            }
-            ordered.forEach { journey ->
-                if (none { routeSignature(it) == routeSignature(journey) }) {
-                    add(journey)
-                }
-            }
-        }.take(MAX_DISPLAYED_ROUTE_OPTIONS)
-    }
-
-    private fun routeSignature(journey: CsaJourney): String {
-        val tripIds = journey.steps
-            .filterIsInstance<JourneyStep.Transit>()
-            .joinToString(separator = ",") { it.connection.tripId }
-        return "${journey.originAccess.stopId}|$tripIds|${journey.destinationAccess.stopId}"
-    }
-
     private fun recordRecentStopSearch(stopName: String) {
         viewModelScope.launch {
             try {
@@ -2023,7 +1973,6 @@ class SearchViewModel @Inject constructor(
         const val MAX_NEARBY_STOPS = 6
         const val MAX_AUTO_STOP_ACCESS_METERS = 1_500.0
         const val ROUTE_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
-        const val MAX_CSA_JOURNEY_CANDIDATES = 20
-        const val MAX_DISPLAYED_ROUTE_OPTIONS = 3
+        const val MAX_CSA_JOURNEY_CANDIDATES = 100
     }
 }

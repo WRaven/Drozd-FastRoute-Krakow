@@ -923,9 +923,14 @@ private fun SearchContent(
     val destinationSuggestionsBringIntoViewRequester = remember { BringIntoViewRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     var wasKeyboardVisible by remember { mutableStateOf(false) }
+    var expandedDepartureTripId by remember { mutableStateOf<String?>(null) }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
     var showDestinationStopPicker by remember(state.destinationPlace) {
         mutableStateOf(false)
+    }
+
+    LaunchedEffect(state.journeyOptions, state.journey) {
+        expandedDepartureTripId = null
     }
 
     LaunchedEffect(
@@ -1340,7 +1345,10 @@ private fun SearchContent(
         }
 
         if (state.journeyOptions.isNotEmpty()) {
-            Text("Proponowane trasy", style = MaterialTheme.typography.headlineSmall)
+            Text(
+                "Znalezione odjazdy (${state.journeyOptions.size})",
+                style = MaterialTheme.typography.headlineSmall
+            )
         }
         state.arrivalTarget?.let { target ->
             Text(
@@ -1349,12 +1357,8 @@ private fun SearchContent(
                 fontWeight = FontWeight.Medium
             )
         }
-        val leastWalkingIndex = state.journeyOptions.indices.minByOrNull { index ->
-            state.journeyOptions[index].totalWalkingDistanceMeters
-        }
-        val preferLatestArrival =
-            state.routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
         state.journeyOptions.forEachIndexed { index, journey ->
+            val departureKey = journey.firstTransitConnection()?.tripId ?: "departure-$index"
             JourneyResult(
                 journey = journey,
                 stops = state.stops,
@@ -1364,26 +1368,30 @@ private fun SearchContent(
                 destination = state.stops.firstOrNull {
                     it.stopId == journey.destinationAccess.stopId
                 } ?: state.destinationStop,
-                routeLabel = when {
-                    preferLatestArrival && index == 0 && index == leastWalkingIndex ->
-                        "Najbliżej godziny · najmniej chodzenia"
-                    preferLatestArrival && index == 0 -> "Najbliżej godziny"
-                    index == 0 && index == leastWalkingIndex ->
-                        "Najszybciej · najmniej chodzenia"
-                    index == 0 -> "Najszybciej"
-                    index == leastWalkingIndex -> "Najmniej chodzenia"
-                    else -> "Alternatywa ${index + 1}"
+                routeNumber = index + 1,
+                isExpanded = departureKey == expandedDepartureTripId,
+                onClick = {
+                    expandedDepartureTripId =
+                        if (departureKey == expandedDepartureTripId) null else departureKey
                 },
                 onSaveAsCustom = onSaveCustomRoute
             )
         }
         if (state.journeyOptions.isEmpty()) {
             state.journey?.let { journey ->
+                val departureKey =
+                    journey.firstTransitConnection()?.tripId ?: "departure-fallback"
                 JourneyResult(
                     journey = journey,
                     stops = state.stops,
                     origin = state.originStop,
                     destination = state.destinationStop,
+                    routeNumber = 1,
+                    isExpanded = departureKey == expandedDepartureTripId,
+                    onClick = {
+                        expandedDepartureTripId =
+                            if (departureKey == expandedDepartureTripId) null else departureKey
+                    },
                     onSaveAsCustom = onSaveCustomRoute
                 )
             }
@@ -1597,14 +1605,25 @@ private fun JourneyResult(
     stops: List<StopEntity>,
     origin: StopEntity?,
     destination: StopEntity?,
-    routeLabel: String? = null,
+    routeNumber: Int,
+    isExpanded: Boolean,
+    onClick: () -> Unit,
     onSaveAsCustom: () -> Unit
 ) {
+    val transitConnections = collapseTransitSteps(journey.steps)
+        .filterIsInstance<JourneyStep.Transit>()
+        .map(JourneyStep.Transit::connection)
+    val firstConnection = transitConnections.firstOrNull()
+    val routeLines = transitConnections
+        .map { it.routeShortName }
+        .distinct()
+        .joinToString(" → ")
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .combinedClickable(
-                onClick = {},
+                onClick = onClick,
                 onLongClick = onSaveAsCustom
             ),
         elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
@@ -1615,55 +1634,68 @@ private fun JourneyResult(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Surface(
-                color = MaterialTheme.colorScheme.primaryContainer,
-                shape = MaterialTheme.shapes.small
-            ) {
-                Text(
-                    routeLabel ?: "Wynik",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
             Text(
-                "Przytrzymaj kartę, aby zapisać trasę jako „Własny”.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
-                    destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
+                "$routeNumber. Odjazd ${
+                    firstConnection?.let {
+                        formatJourneyTime(it.departureTime, journey.departureTime)
+                    } ?: formatJourneyTime(journey.departureTime, journey.departureTime)
+                }",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                JourneyMetric(
-                    label = "PRZYJAZD",
-                    value = formatJourneyTime(journey.estimatedArrivalTime, journey.departureTime),
-                    modifier = Modifier.weight(1f)
-                )
-                JourneyMetric(
-                    label = "CZAS",
-                    value = formatDuration(journey.totalDurationSeconds),
-                    modifier = Modifier.weight(1f)
-                )
-                JourneyMetric(
-                    label = "SPACER",
-                    value = formatDistance(journey.totalWalkingDistanceMeters),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            if (journey.transferPenaltySeconds > 0) {
+            if (firstConnection != null) {
                 Text(
-                    "Kara za przesiadkę: +${journey.transferPenaltySeconds / 60} min",
-                    color = MaterialTheme.colorScheme.tertiary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
+                    "${stopName(stops, firstConnection.departureStopId)} · Linia $routeLines",
+                    style = MaterialTheme.typography.bodyLarge
                 )
             }
-            if (routeLabel != null) {
+            Text(
+                if (isExpanded) "Dotknij, aby ukryć szczegóły" else "Dotknij, aby zobaczyć szczegóły",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            if (isExpanded) {
+                HorizontalDivider()
+                Text(
+                    "Przytrzymaj kartę, aby zapisać trasę jako „Własny”.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
+                        destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    JourneyMetric(
+                        label = "PRZYJAZD",
+                        value = formatJourneyTime(
+                            journey.estimatedArrivalTime,
+                            journey.departureTime
+                        ),
+                        modifier = Modifier.weight(1f)
+                    )
+                    JourneyMetric(
+                        label = "CZAS",
+                        value = formatDuration(journey.totalDurationSeconds),
+                        modifier = Modifier.weight(1f)
+                    )
+                    JourneyMetric(
+                        label = "SPACER",
+                        value = formatDistance(journey.totalWalkingDistanceMeters),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (journey.transferPenaltySeconds > 0) {
+                    Text(
+                        "Kara za przesiadkę: +${journey.transferPenaltySeconds / 60} min",
+                        color = MaterialTheme.colorScheme.tertiary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
                 Text(
                     "Dystans pieszo",
                     style = MaterialTheme.typography.labelLarge,
@@ -1686,10 +1718,9 @@ private fun JourneyResult(
                         modifier = Modifier.weight(1f)
                     )
                 }
-            }
-            HorizontalDivider()
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                collapseTransitSteps(journey.steps).forEach { step ->
+                HorizontalDivider()
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    collapseTransitSteps(journey.steps).forEach { step ->
                     when (step) {
                         is JourneyStep.Transit -> {
                             val connection = step.connection
@@ -1784,6 +1815,7 @@ private fun JourneyResult(
                                         )
                                     }
                                 }
+                            }
                             }
                         }
                     }
