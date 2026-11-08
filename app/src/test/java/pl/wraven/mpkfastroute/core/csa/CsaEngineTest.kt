@@ -238,6 +238,30 @@ class CsaEngineTest {
     }
 
     @Test
+    fun scheduledArrivalPrefersLatestDepartureOverLaterArrivalAfterLongTransferWait() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("A", "B", 21_960, 23_160, "early-first-leg"),
+                connection("C", "D", 28_260, 28_320, "late-second-leg"),
+                connection("A", "D", 26_400, 28_200, "direct-later-departure")
+            ),
+            footpaths = listOf(Footpath("B", "C", 85, 106.0)),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("D", 0.0, 0)),
+            startTime = 21_300,
+            maxResults = 1,
+            arrivalDeadline = 28_500
+        )
+
+        assertEquals(1, journeys.size)
+        assertEquals(26_400, journeys.single().departureTime)
+        assertEquals(28_200, journeys.single().estimatedArrivalTime)
+        val selectedConnection =
+            (journeys.single().steps.single() as? JourneyStep.Transit)?.connection
+        assertEquals("direct-later-departure", selectedConnection?.tripId)
+    }
+
+    @Test
     fun returnsEmptyJourneyWhenAlreadyAtDestination() {
         val journey = engine.findEarliestJourney(
             connections = emptyList(),

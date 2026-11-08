@@ -17,18 +17,6 @@ internal data class JourneyWalkingBreakdown(
 internal fun CsaJourney.firstTransitConnection(): Connection? =
     steps.filterIsInstance<JourneyStep.Transit>().firstOrNull()?.connection
 
-internal fun CsaJourney.withOriginDepartureTime(): CsaJourney {
-    val firstTransit = firstTransitConnection() ?: return this
-    val initialFootpathSeconds = steps
-        .takeWhile { it is JourneyStep.Walk }
-        .sumOf { (it as JourneyStep.Walk).footpath.durationSeconds }
-    val actualDepartureTime = Math.subtractExact(
-        Math.subtractExact(firstTransit.departureTime, originAccess.walkingDurationSeconds),
-        initialFootpathSeconds
-    )
-    return copy(departureTime = actualDepartureTime)
-}
-
 internal fun CsaJourney.walkingBreakdown(): JourneyWalkingBreakdown {
     val firstTransitIndex = steps.indexOfFirst { it is JourneyStep.Transit }
     val lastTransitIndex = steps.indexOfLast { it is JourneyStep.Transit }
@@ -62,7 +50,7 @@ internal fun selectDistinctJourneyDepartures(
     require(maxResults > 0) { "At least one journey result is required." }
 
     val routePreference = if (latestFirst) {
-        compareByDescending<CsaJourney> { it.estimatedArrivalTime }
+        compareByDescending<CsaJourney> { it.departureTime }
             .thenBy { it.totalDurationSeconds }
             .thenBy { it.totalWalkingDistanceMeters }
             .thenBy { it.transferPenaltySeconds }
@@ -80,9 +68,8 @@ internal fun selectDistinctJourneyDepartures(
         .values
         .mapNotNull { journeys -> journeys.minWithOrNull(routePreference) }
 
-    val departureOrder = compareBy<CsaJourney> {
-        it.firstTransitConnection()?.departureTime ?: Int.MAX_VALUE
-    }.thenBy { it.estimatedArrivalTime }
+    val departureOrder = compareBy<CsaJourney> { it.departureTime }
+        .thenBy { it.estimatedArrivalTime }
     val ordered = if (latestFirst) departureOrder.reversed() else departureOrder
     return bestByTrip.sortedWith(ordered).take(maxResults)
 }

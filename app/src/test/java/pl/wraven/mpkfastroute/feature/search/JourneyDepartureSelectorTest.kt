@@ -48,35 +48,6 @@ class JourneyDepartureSelectorTest {
     }
 
     @Test
-    fun arriveByDepartureIncludesOriginWalkInsteadOfTheTwoHourSearchWindow() {
-        val journey = CsaJourney(
-            departureTime = 5 * 3600 + 53 * 60,
-            arrivalTime = 7 * 3600 + 47 * 60,
-            transferPenaltySeconds = 0,
-            steps = listOf(
-                JourneyStep.Transit(
-                    Connection(
-                        departureStopId = "origin",
-                        arrivalStopId = "destination",
-                        departureTime = 7 * 3600 + 23 * 60,
-                        arrivalTime = 7 * 3600 + 47 * 60,
-                        tripId = "trip-1",
-                        routeShortName = "1"
-                    )
-                )
-            ),
-            originAccess = StopAccess("origin", 302.0, 242),
-            destinationAccess = StopAccess("destination", 369.0, 300),
-            transferWalkingDistanceMeters = 0.0
-        )
-
-        val corrected = journey.withOriginDepartureTime()
-
-        assertEquals(7 * 3600 + 18 * 60 + 58, corrected.departureTime)
-        assertEquals(33 * 60 + 2, corrected.totalDurationSeconds)
-    }
-
-    @Test
     fun terminalWalkIsShownAsDestinationAccessNotAsATransfer() {
         val journey = CsaJourney(
             departureTime = 0,
@@ -124,7 +95,7 @@ class JourneyDepartureSelectorTest {
     }
 
     private fun journey(tripId: String, departure: Int, arrival: Int) = CsaJourney(
-        departureTime = 0,
+        departureTime = departure,
         arrivalTime = arrival,
         transferPenaltySeconds = 0,
         steps = listOf(

@@ -995,16 +995,11 @@ class SearchViewModel @Inject constructor(
                         ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
                         ?.dateTime
                 )
-                val journeysForDisplay = if (routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY) {
-                    candidates.map(CsaJourney::withOriginDepartureTime)
-                } else {
-                    candidates
-                }
                 val currentServiceTime = GtfsServiceClock.from(now)
-                val preferLatestArrival = routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
+                val preferLatestDeparture = routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
                 val journeyOptions = selectDistinctJourneyDepartures(
-                    journeysForDisplay,
-                    latestFirst = preferLatestArrival
+                    candidates,
+                    latestFirst = preferLatestDeparture
                 )
                 diagnostics.record(
                     "Wyniki: ${candidates.size} kandydatów, " +
