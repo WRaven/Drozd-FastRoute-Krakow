@@ -70,6 +70,15 @@ jobs:
           APP_VERSION_CODE: ${{ github.run_number }}
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Drozd-FastRoute-Krakow-unit-tests-build-${{ github.run_number }}
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Version debug APK
         env:
           APP_VERSION_NAME: 0.1.0-ci.${{ github.run_number }}
@@ -169,6 +178,15 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.TEST_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.TEST_KEY_PASSWORD }}
         run: ./gradlew :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
+
+      - name: Upload unit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Drozd-FastRoute-Krakow-unit-tests-build-${{ github.run_number }}
+          path: app/build/test-results/testReleaseUnitTest/*.xml
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Version APK filename
         id: apk

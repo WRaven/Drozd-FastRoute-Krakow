@@ -6,8 +6,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.net.Uri
+import androidx.core.content.FileProvider
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -40,6 +42,11 @@ class BugReportEmailTest {
     fun setUp() {
         context = RuntimeEnvironment.getApplication()
         ShadowBitmapFactory.setAllowInvalidImageData(false)
+        val providerInfo = requireNotNull(context.packageManager.resolveContentProvider(
+            "${context.packageName}.fileprovider", PackageManager.GET_META_DATA
+        ))
+        // Each Robolectric case has a new cache directory, unlike a real app process.
+        FileProvider().attachInfo(context, providerInfo)
     }
 
     @Test
