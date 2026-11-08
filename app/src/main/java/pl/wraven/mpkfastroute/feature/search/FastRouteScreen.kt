@@ -1005,7 +1005,10 @@ private fun SearchContent(
                         onClick = onToggleRadio,
                         enabled = !state.isSearching,
                         label = {
-                            Text(if (state.isRadioPlaying) "■ Radio" else "▶ Radio")
+                            Text(
+                                if (state.isRadioPlaying) "■ Zatrzymaj radio"
+                                else "▶ Uruchom radio"
+                            )
                         }
                     )
                         AssistChip(
