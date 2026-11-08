@@ -58,8 +58,10 @@ class ContextEngine @Inject constructor(
         val stopOptions: List<StopEntity>
     )
 
-    suspend fun findCurrentOrigin(): CurrentOrigin {
-        val location = locationProvider.getCurrentLocation()
+    suspend fun findCurrentOrigin(): CurrentOrigin =
+        findCurrentOrigin(locationProvider.getCurrentLocation())
+
+    suspend fun findCurrentOrigin(location: Location): CurrentOrigin {
         val stops = database.stopDao().getAll()
         val stopGroup = withContext(Dispatchers.Default) {
             findNearestStopGroup(stops, location)

@@ -1,7 +1,11 @@
 package pl.wraven.mpkfastroute.feature.search
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteException
+import android.location.Location
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -204,8 +208,16 @@ class SearchViewModel @Inject constructor(
     private var selectedVehicleTripRequestId = 0L
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
+    private var currentLocationPrefetchJob: Job? = null
+    private var currentLocationResolutionJob: Job? = null
+    private var prefetchedCurrentLocation: PrefetchedCurrentLocation? = null
     private var lastServiceNewsAttemptAtMillis = 0L
     private var lastLiveServiceAlertsAttemptAtMillis = 0L
+
+    private data class PrefetchedCurrentLocation(
+        val location: Location,
+        val acquiredAtElapsedRealtime: Long
+    )
 
     init {
         observeStops()
@@ -241,6 +253,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setOriginQuery(query: String) {
+        cancelCurrentLocationResolution()
         mutableUiState.update {
             it.copy(
                 originQuery = query,
@@ -263,18 +276,27 @@ class SearchViewModel @Inject constructor(
         scheduleAddressSuggestions(query, isOrigin = true)
     }
 
-    fun useCurrentLocationIfOriginEmpty() {
-        val state = mutableUiState.value
-        if (
-            state.originPlace == null &&
-            state.originStop == null &&
-            state.originQuery.isBlank()
-        ) {
-            useCurrentLocation()
+    fun prefetchCurrentLocation() {
+        if (!hasCurrentLocationPermission()) return
+        if (currentLocationPrefetchJob?.isActive == true) return
+        if (hasFreshPrefetchedCurrentLocation()) return
+
+        currentLocationPrefetchJob = viewModelScope.launch {
+            try {
+                prefetchedCurrentLocation = PrefetchedCurrentLocation(
+                    location = currentLocationProvider.getCurrentLocation(),
+                    acquiredAtElapsedRealtime = SystemClock.elapsedRealtime()
+                )
+            } catch (exception: LocationUnavailableException) {
+                Log.i(TAG, "Startup location prefetch is unavailable.", exception)
+            } catch (exception: SecurityException) {
+                Log.w(TAG, "Startup location prefetch was denied.", exception)
+            }
         }
     }
 
     fun selectOrigin(group: StopGroup) {
+        cancelCurrentLocationResolution()
         originAddressSearchJob?.cancel()
         val state = mutableUiState.value
         val selectedFromAddress = state.nearbyOriginGroups.any { it.name == group.name }
@@ -304,10 +326,16 @@ class SearchViewModel @Inject constructor(
 
     fun useCurrentLocation() {
         originAddressSearchJob?.cancel()
-        viewModelScope.launch {
-            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+        if (currentLocationResolutionJob?.isActive == true) return
+        mutableUiState.update { it.copy(statusMessage = null) }
+        currentLocationResolutionJob = viewModelScope.launch {
             try {
-                val origin = contextEngine.findCurrentOrigin()
+                val location = takeFreshPrefetchedCurrentLocation() ?: run {
+                    currentLocationPrefetchJob?.join()
+                    takeFreshPrefetchedCurrentLocation()
+                        ?: currentLocationProvider.getCurrentLocation()
+                }
+                val origin = contextEngine.findCurrentOrigin(location)
                 val originPlace = try {
                     origin.place.copy(
                         label = addressGeocoder.reverseGeocode(origin.place) ?: origin.place.label
@@ -339,6 +367,8 @@ class SearchViewModel @Inject constructor(
                         liveDepartures = null
                     )
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: LocationPermissionRequiredException) {
                 showMessage("Aby użyć lokalizacji, zezwól na dostęp do lokalizacji.")
             } catch (exception: LocationUnavailableException) {
@@ -349,8 +379,6 @@ class SearchViewModel @Inject constructor(
                 showMessage("Brak dostępu do lokalizacji.")
             } catch (exception: SQLiteException) {
                 showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
-            } finally {
-                mutableUiState.update { it.copy(isSearching = false) }
             }
         }
     }
@@ -807,7 +835,31 @@ class SearchViewModel @Inject constructor(
         mutableUiState.update { it.copy(liveServiceAlertsError = message) }
     }
 
+    private fun hasCurrentLocationPermission(): Boolean =
+        appContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            appContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun hasFreshPrefetchedCurrentLocation(): Boolean {
+        val cached = prefetchedCurrentLocation ?: return false
+        val ageMillis = SystemClock.elapsedRealtime() - cached.acquiredAtElapsedRealtime
+        return ageMillis in 0L..CURRENT_LOCATION_CACHE_TTL_MILLIS
+    }
+
+    private fun takeFreshPrefetchedCurrentLocation(): Location? {
+        val cached = prefetchedCurrentLocation ?: return null
+        prefetchedCurrentLocation = null
+        val ageMillis = SystemClock.elapsedRealtime() - cached.acquiredAtElapsedRealtime
+        return cached.location.takeIf { ageMillis in 0L..CURRENT_LOCATION_CACHE_TTL_MILLIS }
+    }
+
+    private fun cancelCurrentLocationResolution() {
+        currentLocationResolutionJob?.cancel()
+    }
+
     fun selectOriginAddress(place: GeoPlace) {
+        cancelCurrentLocationResolution()
         originAddressSearchJob?.cancel()
         viewModelScope.launch {
             val nearbyGroups = withContext(Dispatchers.Default) {
@@ -916,6 +968,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun searchRoute() {
+        cancelCurrentLocationResolution()
         val state = mutableUiState.value
         if (state.isImporting) {
             diagnostics.record("Wyszukiwanie wstrzymane: trwa przygotowanie indeksu.")
@@ -1166,6 +1219,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun routeCustom() {
+        cancelCurrentLocationResolution()
         viewModelScope.launch {
             try {
                 val route = appPreferences.customRoute.first()
@@ -1888,6 +1942,7 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun runContextAction(destination: SavedDestination) {
+        cancelCurrentLocationResolution()
         viewModelScope.launch {
             mutableUiState.update {
                 it.copy(
@@ -1967,6 +2022,7 @@ class SearchViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "SearchViewModel"
+        const val CURRENT_LOCATION_CACHE_TTL_MILLIS = 60_000L
         const val SERVICE_NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1_000L
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3

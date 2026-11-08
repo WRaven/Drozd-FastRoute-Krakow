@@ -157,7 +157,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var routeTimePlanVisible by remember { mutableStateOf(false) }
     var weatherVisible by remember { mutableStateOf(false) }
     var liveMapVisible by remember { mutableStateOf(false) }
-    var startupLocationRequested by rememberSaveable { mutableStateOf(false) }
+    var startupLocationPrefetched by rememberSaveable { mutableStateOf(false) }
     var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
     var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
     var permissionStateRevision by remember { mutableStateOf(0) }
@@ -338,9 +338,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     }
 
     LaunchedEffect(state.isScheduleEmpty) {
-        if (!state.isScheduleEmpty && !startupLocationRequested) {
-            startupLocationRequested = true
-            runWithLocationPermission(viewModel::useCurrentLocationIfOriginEmpty)
+        if (!state.isScheduleEmpty && !startupLocationPrefetched) {
+            startupLocationPrefetched = true
+            viewModel.prefetchCurrentLocation()
         }
     }
 
