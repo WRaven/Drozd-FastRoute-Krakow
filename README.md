@@ -55,8 +55,9 @@ From **1.0.5**, the Live map's “My location” button recenters the map. Desti
 address history scrolls above the keyboard; selecting an address starts the route
 search and hides the keyboard.
 
-From **1.0.6**, current precipitation and wind share one row; no pressure data is
-added.
+From **1.0.6**, current precipitation and wind share one row; no pressure data
+is added. The current details row now includes soil temperature too, and hourly
+precipitation, chance, soil temperature, and wind share one row.
 
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
@@ -82,7 +83,7 @@ the permanent package identity; use the stable APK for normal use.
 | Custom route | Long-press a result to store its endpoints as the single **Własny** shortcut. Saving another custom route replaces the previous one. |
 | Live map | Tap **Live**. The map initially opens on Kraków and centers on your location when available. Tap a vehicle for its whole route and scrollable list of all stops with arrival time and minutes remaining. Tap a stop, choose a line/direction and workday, Saturday or Sunday/holiday for a full hourly timetable. The **Pojazd** value is a fleet number, not a line number. |
 | ZTP notices | Read the scrolling ZTP/active-disruption ticker or tap it to open the corresponding notice/details. It scrolls at 36 dp/s, 20% faster than the previous default. **Komunikaty MPK** and the MPK Kraków X quick action provide additional information. |
-| Weather | Tap **Pogoda** for current conditions and the next 24 hours near your location. The view includes temperature, precipitation, wind and soil temperature. Pressure is omitted; the hourly soil-temperature/wind line remains compact. |
+| Weather | Tap **Pogoda** for current conditions and the next 24 hours near your location. The view includes temperature, precipitation, wind and soil temperature. Pressure is omitted; precipitation, soil temperature and wind share a details row. |
 | Radio | Use **Uruchom radio** / **Zatrzymaj radio**, choose a station, or use the gear button to manage streams. Android media controls remain available while playing. |
 | Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder is scheduled 15 minutes before the calculated departure. |
 | Timetable and diagnostics | Settings provides **Odśwież rozkład GTFS** and a bounded search diagnostic log with copy/clear actions. The automatic updater also checks the timetable at startup and daily. |
@@ -206,8 +207,11 @@ skipped on Windows, where Android's path handling cannot be emulated directly.
   its search controls compact and combines active GTFS-RT service alerts with
   official ZTP RSS notices in a tappable scrolling ticker, with a shortcut to
   the official MPK Kraków profile on X. Recent address and stop suggestions
-  appear only while a search field is focused with the keyboard open; quick
-  actions and route-planning controls hide while typing.
+  appear only while a search field is focused with the keyboard open; focusing
+  the destination also brings its recent-address list above the keyboard.
+  Automatically selected nearby stop names are not repeated beneath the fields;
+  use "Wybierz przystanek" to choose a different stop. Quick actions and
+  route-planning controls hide while typing.
   The ZTP ticker scrolls at 36 dp per second, 20% faster than Compose's default.
 - The launch screen and window background follow the same system light/dark
   profile as Compose, including system tonal colors on Android 12 and newer.
@@ -228,8 +232,8 @@ skipped on Windows, where Android's path handling cannot be emulated directly.
 - The weather quick action requests foreground location only when tapped and
   shows current conditions plus an hourly 24-hour forecast from Open-Meteo,
   including precipitation amounts and probability, wind, and near-surface soil
-  temperature. Pressure is omitted from the weather view to keep the hourly
-  soil-temperature/wind details compact. Weather codes include fog and
+  temperature. Pressure is omitted; precipitation, chance, soil temperature,
+  and wind share one hourly details row. Weather codes include fog and
   thunderstorms.
   Forecasts are cached in memory for 15 minutes by approximate location; no
   weather location is stored. The weather view includes a compact legend,
@@ -373,10 +377,15 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
    origin shows an approximate address. While entering a destination, check
    recent addresses stay visible above the keyboard; selecting one hides the
    keyboard and starts the route search, while dismissing the keyboard restores
-   the full view. Open weather and check that current conditions use the
+   the full view. Check that the automatically chosen nearby stop is not shown
+   beneath either field, while "Wybierz przystanek" still allows another choice.
+   During a timetable update, tap the circular progress indicator, inspect the
+   current stage and percentage, close the dialog, and confirm the app remains
+   usable and route search still works with the existing timetable. Open weather
+   and check that current conditions use the
    available right-side space and remain readable with a larger font. Check that
-   current precipitation and wind share a row. Also check ticker movement and
-   the soil-temperature/wind line.
+   precipitation, soil temperature and wind share a details row in both current
+   conditions and hourly forecasts. Also check ticker movement.
 6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
    the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
    labels. Reopen the same trip and check that passed stops remain accessible.

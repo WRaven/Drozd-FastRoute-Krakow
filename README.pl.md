@@ -56,8 +56,9 @@ Od **1.0.5** przycisk „Moja lokalizacja” w Live ponownie centruje mapę.
 Historia adresów celu jest przewijana nad klawiaturę, a wybranie adresu uruchamia
 wyszukiwanie trasy i chowa klawiaturę.
 
-Od **1.0.6** bieżące opady i wiatr są wyświetlane w jednym wierszu, bez
-dodawania ciśnienia.
+Od **1.0.6** bieżące opady i wiatr są w jednym wierszu, bez dodawania ciśnienia.
+Obecnie ten wiersz zawiera też temperaturę gruntu; prognoza godzinowa łączy
+opady, szansę opadu, grunt i wiatr w jednym wierszu.
 
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
@@ -82,7 +83,7 @@ stałą tożsamość pakietu; do normalnego korzystania wybierz stabilny APK.
 | Własna trasa | Przytrzymaj wynik, aby zapisać jego początek i cel jako pojedynczy skrót **Własny**. Zapis kolejnej własnej trasy zastępuje poprzednią. |
 | Mapa Live | Wybierz **Live**. Mapa startuje na Krakowie i centruje się na dostępnej lokalizacji. Kliknij pojazd po całą trasę i przewijaną listę wszystkich przystanków z godziną przyjazdu i minutami do przyjazdu. Kliknij przystanek, wybierz linię/kierunek i dni robocze, sobotę lub niedzielę/święta po pełny rozkład godzinowy. **Pojazd** oznacza numer taborowy, nie numer linii. |
 | Komunikaty ZTP | Czytaj przewijany pasek ZTP/aktywnych utrudnień albo kliknij go, aby otworzyć komunikat lub szczegóły. Prędkość wynosi 36 dp/s, o 20% więcej niż wcześniej. Dostępne są również **Komunikaty MPK** oraz skrót do profilu MPK Kraków w X. |
-| Pogoda | Wybierz **Pogoda**, aby zobaczyć aktualne warunki i prognozę na najbliższe 24 godziny dla swojej okolicy. Widok pokazuje temperaturę, opady, wiatr i temperaturę gruntu. Ciśnienie usunięto; godzinowy wiersz temperatury gruntu i wiatru jest krótszy. |
+| Pogoda | Wybierz **Pogoda**, aby zobaczyć aktualne warunki i prognozę na najbliższe 24 godziny dla swojej okolicy. Widok pokazuje temperaturę, opady, wiatr i temperaturę gruntu. Ciśnienie usunięto; opady, grunt i wiatr są łączone w jednym wierszu szczegółów. |
 | Radio | Użyj **Uruchom radio** / **Zatrzymaj radio**, wybierz stację lub zarządzaj strumieniami przyciskiem z kołem zębatym. Podczas odtwarzania działają systemowe kontrolki multimediów. |
 | Przypomnienia o dojeździe | Zapisz harmonogram domu/pracy i wybierz **Włącz powiadomienia**. Nadaj wymagane uprawnienia do powiadomień i lokalizacji w tle. Przypomnienie jest planowane 15 minut przed obliczonym wyjazdem. |
 | Rozkład i diagnostyka | W Ustawieniach dostępne są **Odśwież rozkład GTFS** i ograniczony dziennik diagnostyczny z kopiowaniem/czyszczeniem. Automatyczna aktualizacja rozkładu sprawdza dane przy starcie i codziennie. |
@@ -196,7 +197,10 @@ są pomijane, ponieważ androidowej obsługi ścieżek nie da się tam odtworzy�
   pracy otwiera edytor godziny i dni tygodnia. Długie listy podpowiedzi przewijają
   się w ograniczonym obszarze. Ekran główny łączy alerty GTFS-RT i oficjalne
   komunikaty RSS ZTP w klikalnym pasku. Podpowiedzi ostatnich miejsc pojawiają się
-  podczas wpisywania; szybkie akcje i kontrolki planowania wtedy chowają się.
+  podczas wpisywania; wybór pola „Cel” przewija też historię adresów nad klawiaturę.
+  Automatycznie dobrana nazwa przystanku nie jest powtarzana pod polami — inny
+  przystanek można wybrać przez „Wybierz przystanek”. Szybkie akcje i kontrolki
+  planowania chowają się podczas wpisywania.
   Pasek ZTP przewija się z prędkością 36 dp/s, o 20% szybciej niż domyślne Compose.
 - Ekran startowy i tło okna używają tego samego jasnego/ciemnego profilu systemu
   co Compose, z kolorami tonalnymi systemu od Androida 12. Ikony pasków
@@ -216,9 +220,10 @@ są pomijane, ponieważ androidowej obsługi ścieżek nie da się tam odtworzy�
 - Pogoda prosi o lokalizację dopiero po kliknięciu i pokazuje aktualne warunki
   oraz prognozę godzinową na 24 godziny z Open-Meteo. Obejmuje ilość i szansę
   opadów, wiatr oraz temperaturę gruntu przy powierzchni. Ciśnienie nie jest
-  pokazywane, aby skrócić godzinowy wiersz gruntu/wiatru. Obsługiwane są m.in.
-  mgła i burze. Cache działa przez 15 minut dla przybliżonej lokalizacji i tylko
-  w pamięci. Widok ma legendę, źródło i odnośnik do licencji CC BY 4.0.
+  pokazywane; opady, szansa, temperatura gruntu i wiatr są w jednym godzinowym
+  wierszu szczegółów. Obsługiwane są m.in. mgła i burze. Cache działa przez
+  15 minut dla przybliżonej lokalizacji i tylko w pamięci. Widok ma legendę,
+  źródło i odnośnik do licencji CC BY 4.0.
 - Zapisane harmonogramy mogą uruchamiać przypomnienie 15 minut przed obliczonym
   wyjazdem. Zwinięte powiadomienie pokazuje najbliższe odjazdy TTSS; co pięć minut
   odświeżane są alerty GTFS-Realtime istotne dla trasy. Wymagane są uprawnienia
@@ -349,10 +354,15 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
    pobiera ani nie importuje danych od nowa. Użyj „Moja lokalizacja” i sprawdź
    przybliżony adres początku. Podczas wpisywania celu sprawdź, że ostatnie
    adresy są widoczne nad klawiaturą; wybór adresu chowa klawiaturę i uruchamia
-   wyszukiwanie, a samo zamknięcie klawiatury przywraca pełny widok. Otwórz
-   pogodę: bieżące warunki powinny wykorzystywać miejsce po prawej, a układ
+   wyszukiwanie, a samo zamknięcie klawiatury przywraca pełny widok. Sprawdź,
+   że automatycznie dobrany przystanek nie jest powtarzany pod polami, a
+   „Wybierz przystanek” nadal pozwala wskazać inny. Podczas aktualizacji rozkładu
+   kliknij okrągły wskaźnik, sprawdź etap i procent, zamknij okno i potwierdź,
+   że aplikacja pozostaje używalna, a wyszukiwanie działa na dotychczasowym
+   rozkładzie. Otwórz pogodę: bieżące warunki powinny wykorzystywać miejsce po prawej, a układ
    pozostać czytelny przy większej czcionce. Sprawdź też ruch paska ZTP i wiersz
-   gruntu/wiatru oraz jeden wspólny wiersz opadów i wiatru w bieżących warunkach.
+   jeden wspólny wiersz opadów, gruntu i wiatru w bieżących warunkach oraz
+   prognozie godzinowej.
 6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
    do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
    ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.

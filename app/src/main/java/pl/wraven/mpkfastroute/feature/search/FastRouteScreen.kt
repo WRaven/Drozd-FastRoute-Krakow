@@ -50,6 +50,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -79,6 +80,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -129,6 +131,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     val appView = LocalView.current
     val snackbarHostState = remember { SnackbarHostState() }
     var settingsVisible by remember { mutableStateOf(false) }
+    var databaseUpdateDialogVisible by rememberSaveable { mutableStateOf(false) }
     var bugReportVisible by rememberSaveable { mutableStateOf(false) }
     var radioSelectionVisible by remember { mutableStateOf(false) }
     var radioManagementVisible by remember { mutableStateOf(false) }
@@ -360,7 +363,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 title = { Text(stringResource(R.string.app_title)) },
                 actions = {
                     state.databaseUpdateProgressPercent?.let { progressPercent ->
-                        DatabaseUpdateIndicator(progressPercent)
+                        DatabaseUpdateIndicator(progressPercent) {
+                            databaseUpdateDialogVisible = true
+                        }
                     }
                     TextButton(onClick = { settingsVisible = true }) {
                         Text("Ustawienia")
@@ -436,6 +441,49 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     .padding(contentPadding)
             )
         }
+    }
+
+    if (databaseUpdateDialogVisible) {
+        val progressPercent = state.databaseUpdateProgressPercent
+        AlertDialog(
+            onDismissRequest = { databaseUpdateDialogVisible = false },
+            title = { Text("Aktualizacja danych") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        state.progressMessage.ifBlank {
+                            if (progressPercent == null) {
+                                "Aktualizacja nie jest już aktywna."
+                            } else {
+                                "Przygotowywanie aktualizacji..."
+                            }
+                        }
+                    )
+                    if (progressPercent != null) {
+                        Text("Postęp: $progressPercent%")
+                        LinearProgressIndicator(
+                            progress = { progressPercent.coerceIn(0, 100) / 100f },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    Text("Możesz zamknąć to okno — aktualizacja będzie kontynuowana w tle.")
+                    Text(
+                        if (state.isScheduleEmpty) {
+                            "Podczas pierwszego pobierania wyszukiwanie tras będzie dostępne " +
+                                "po przygotowaniu rozkładu."
+                        } else {
+                            "Dostępny rozkład pozostaje używany podczas aktualizacji. " +
+                                "Możesz nadal korzystać z aplikacji i wyszukiwać trasy."
+                        }
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { databaseUpdateDialogVisible = false }) {
+                    Text("Zamknij")
+                }
+            }
+        )
     }
 
     if (settingsVisible) {
@@ -684,12 +732,13 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun DatabaseUpdateIndicator(progressPercent: Int) {
+private fun DatabaseUpdateIndicator(progressPercent: Int, onClick: () -> Unit) {
     val progress = progressPercent.coerceIn(0, 100)
     Box(
         modifier = Modifier
             .padding(end = 8.dp)
             .size(36.dp)
+            .clickable(role = Role.Button, onClick = onClick)
             .semantics {
                 contentDescription = "Aktualizacja bazy rozkładów: $progress%"
             },
@@ -777,6 +826,7 @@ private fun SearchContent(
     val scrollState = rememberScrollState()
     val originCardBringIntoViewRequester = remember { BringIntoViewRequester() }
     val destinationCardBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val destinationSuggestionsBringIntoViewRequester = remember { BringIntoViewRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     var wasKeyboardVisible by remember { mutableStateOf(false) }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
@@ -784,11 +834,21 @@ private fun SearchContent(
         mutableStateOf(false)
     }
 
-    LaunchedEffect(isKeyboardVisible, isOriginFieldFocused, isDestinationFieldFocused) {
+    LaunchedEffect(
+        isKeyboardVisible,
+        isOriginFieldFocused,
+        isDestinationFieldFocused,
+        state.destinationPlace == null
+    ) {
         if (isKeyboardVisible) {
             when {
-                isDestinationFieldFocused ->
-                    destinationCardBringIntoViewRequester.bringIntoView()
+                isDestinationFieldFocused -> {
+                    if (state.destinationPlace == null) {
+                        destinationSuggestionsBringIntoViewRequester.bringIntoView()
+                    } else {
+                        destinationCardBringIntoViewRequester.bringIntoView()
+                    }
+                }
                 isOriginFieldFocused ->
                     originCardBringIntoViewRequester.bringIntoView()
             }
@@ -1048,14 +1108,6 @@ private fun SearchContent(
                         }
                     }
                 }
-                state.originStop?.let { stop ->
-                    Text(
-                        "Przystanek: " +
-                            StopNameGrouper.mainName(stop.stopName),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
             }
         }
 
@@ -1116,7 +1168,10 @@ private fun SearchContent(
                     Column(
                         modifier = Modifier
                             .heightIn(max = 160.dp)
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(rememberScrollState())
+                            .bringIntoViewRequester(
+                                destinationSuggestionsBringIntoViewRequester
+                            ),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         AddressSuggestionPicker(
@@ -1142,14 +1197,6 @@ private fun SearchContent(
                             }
                         )
                     }
-                }
-                state.destinationStop?.let { stop ->
-                    Text(
-                        "Przystanek: " +
-                            StopNameGrouper.mainName(stop.stopName),
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Medium
-                    )
                 }
             }
         }

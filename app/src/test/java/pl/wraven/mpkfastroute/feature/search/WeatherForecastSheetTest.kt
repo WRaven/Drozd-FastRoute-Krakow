@@ -5,25 +5,34 @@ import org.junit.Test
 
 class WeatherForecastSheetTest {
     @Test
-    fun showsOnlySoilTemperatureAndWindInTheCompactDetailsLine() {
-        assertEquals("Grunt 8,2°C · wiatr 8 km/h", formatHourlyWeatherDetails(8.2, 8.4))
+    fun combinesPrecipitationSoilTemperatureAndWindInTheHourlyDetailsLine() {
+        assertEquals(
+            "Opady 1,2 mm · szansa 35% · grunt 8,2°C · wiatr 8 km/h",
+            formatHourlyWeatherDetails(1.2, 35, 8.2, 8.4)
+        )
     }
 
     @Test
     fun preservesNegativeSoilTemperaturesAndStrongWind() {
-        assertEquals("Grunt -12,3°C · wiatr 120 km/h", formatHourlyWeatherDetails(-12.3, 120.9))
+        assertEquals(
+            "Opady 0,0 mm · szansa 0% · grunt -12,3°C · wiatr 120 km/h",
+            formatHourlyWeatherDetails(0.0, 0, -12.3, 120.9)
+        )
     }
 
     @Test
     fun keepsTheMissingSoilTemperatureIndicator() {
-        assertEquals("Grunt —°C · wiatr 0 km/h", formatHourlyWeatherDetails(null, 0.0))
+        assertEquals(
+            "Opady 0,0 mm · szansa 0% · grunt —°C · wiatr 0 km/h",
+            formatHourlyWeatherDetails(0.0, 0, null, 0.0)
+        )
     }
 
     @Test
-    fun combinesCurrentPrecipitationAndWindOnOneCompactLine() {
+    fun combinesCurrentPrecipitationSoilTemperatureAndWindOnOneLine() {
         assertEquals(
-            "Opady 0,0 mm · wiatr 1 km/h",
-            formatCurrentWeatherPrecipitationAndWind(0.0, 1.9)
+            "Opady 0,0 mm · grunt 8,2°C · wiatr 1 km/h",
+            formatCurrentWeatherDetails(0.0, 8.2, 1.9)
         )
     }
 }

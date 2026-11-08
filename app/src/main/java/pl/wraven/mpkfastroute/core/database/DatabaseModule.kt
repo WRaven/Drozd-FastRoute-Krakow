@@ -2,6 +2,7 @@ package pl.wraven.mpkfastroute.core.database
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -21,12 +22,14 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "mpk-krakow.db"
-        ).addMigrations(
-            AppDatabase.MIGRATION_1_2,
-            AppDatabase.MIGRATION_2_3,
-            AppDatabase.MIGRATION_3_4,
-            AppDatabase.MIGRATION_4_5,
-            AppDatabase.MIGRATION_5_6
         )
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+            .addMigrations(
+                AppDatabase.MIGRATION_1_2,
+                AppDatabase.MIGRATION_2_3,
+                AppDatabase.MIGRATION_3_4,
+                AppDatabase.MIGRATION_4_5,
+                AppDatabase.MIGRATION_5_6
+            )
             .build()
 }

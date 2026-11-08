@@ -145,6 +145,15 @@ private fun CurrentWeatherCard(forecast: WeatherForecast) {
                     }
                 }
             }
+            Text(
+                formatCurrentWeatherDetails(
+                    precipitationMillimeters = current.precipitationMillimeters,
+                    soilTemperatureCelsius =
+                        forecast.hourly.firstOrNull()?.soilTemperatureCelsius,
+                    windSpeedKilometersPerHour = current.windSpeedKilometersPerHour
+                ),
+                style = MaterialTheme.typography.bodySmall
+            )
         }
     }
 }
@@ -184,18 +193,6 @@ private fun CurrentWeatherMetrics(
     ) {
         Text("Odczuwalna ${current.apparentTemperatureCelsius.toInt()}°C")
         Text("Wilgotność ${current.relativeHumidityPercent}%")
-        Text(
-            formatCurrentWeatherPrecipitationAndWind(
-                current.precipitationMillimeters,
-                current.windSpeedKilometersPerHour
-            ),
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-            style = MaterialTheme.typography.bodySmall
-        )
-        forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
-            Text("Grunt ${formatWeatherValue(temperature)}°C")
-        }
     }
 }
 
@@ -232,12 +229,12 @@ private fun HourlyWeatherRow(
             Text("${temperature.toInt()}°")
         }
         Text(
-            "Opady ${formatWeatherValue(precipitationMillimeters)} mm · " +
-                "szansa $precipitationProbability%",
-            style = MaterialTheme.typography.bodySmall
-        )
-        Text(
-            formatHourlyWeatherDetails(soilTemperatureCelsius, windSpeed),
+            formatHourlyWeatherDetails(
+                precipitationMillimeters = precipitationMillimeters,
+                precipitationProbability = precipitationProbability,
+                soilTemperatureCelsius = soilTemperatureCelsius,
+                windSpeed = windSpeed
+            ),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
@@ -245,17 +242,23 @@ private fun HourlyWeatherRow(
 }
 
 internal fun formatHourlyWeatherDetails(
+    precipitationMillimeters: Double,
+    precipitationProbability: Int,
     soilTemperatureCelsius: Double?,
     windSpeed: Double
 ): String =
-    "Grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
+    "Opady ${formatWeatherValue(precipitationMillimeters)} mm · " +
+        "szansa $precipitationProbability% · " +
+        "grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
         "wiatr ${windSpeed.toInt()} km/h"
 
-internal fun formatCurrentWeatherPrecipitationAndWind(
+internal fun formatCurrentWeatherDetails(
     precipitationMillimeters: Double,
+    soilTemperatureCelsius: Double?,
     windSpeedKilometersPerHour: Double
 ): String =
     "Opady ${formatWeatherValue(precipitationMillimeters)} mm · " +
+        "grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
         "wiatr ${windSpeedKilometersPerHour.toInt()} km/h"
 
 private fun formatWeatherValue(value: Double): String =
