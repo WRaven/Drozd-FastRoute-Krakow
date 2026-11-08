@@ -43,6 +43,7 @@ private const val CONNECT_TIMEOUT_MILLIS = 30_000
 private const val READ_TIMEOUT_MILLIS = 120_000
 private const val GTFS_ETAG_KEY = "etag"
 private const val GTFS_LAST_MODIFIED_KEY = "last_modified"
+private const val GTFS_CONTENT_LENGTH_KEY = "content_length"
 private const val GTFS_SHAPES_IMPORTED_KEY = "shapes_imported"
 private const val DOWNLOAD_START_PERCENT = 0
 private const val DOWNLOAD_END_PERCENT = 25
@@ -50,6 +51,23 @@ private const val SHAPES_START_PERCENT = 40
 private const val SHAPES_END_PERCENT = 42
 private const val STOP_TIMES_START_PERCENT = SHAPES_END_PERCENT
 private const val STOP_TIMES_END_PERCENT = 82
+
+internal fun gtfsArchiveValidatorsMatch(
+    storedETag: String?,
+    remoteETag: String?,
+    storedLastModified: Long,
+    remoteLastModified: Long,
+    storedContentLength: Long,
+    remoteContentLength: Long
+): Boolean {
+    if (storedETag != null && remoteETag != null) {
+        return storedETag == remoteETag
+    }
+    return storedLastModified > 0L &&
+        storedLastModified == remoteLastModified &&
+        storedContentLength > 0L &&
+        storedContentLength == remoteContentLength
+}
 
 data class GtfsScheduleProgress(
     val percent: Int,
@@ -234,6 +252,9 @@ class GtfsZipParser @Inject constructor(
         onProgress: suspend (GtfsScheduleProgress) -> Unit,
         onlyIfUpdated: Boolean
     ): DownloadedArchive? {
+        if (onlyIfUpdated && isRemoteArchiveUnchanged()) {
+            return null
+        }
         val archive = File.createTempFile("gtfs-krakow-", ".zip", context.cacheDir)
         var downloadCompleted = false
         try {
@@ -257,6 +278,7 @@ class GtfsZipParser @Inject constructor(
 
             var eTag: String? = null
             var lastModified = 0L
+            var downloadedBytes = 0L
             try {
                 val responseCode = connection.responseCode
                 if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
@@ -269,7 +291,6 @@ class GtfsZipParser @Inject constructor(
                 eTag = connection.getHeaderField("ETag")
                 lastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
                 val contentLength = connection.contentLengthLong
-                var downloadedBytes = 0L
                 var nextDownloadPercent = 5
                 var nextProgressBytes = DOWNLOAD_PROGRESS_INTERVAL_BYTES
                 onProgress(GtfsScheduleProgress(0, "Pobieranie rozkładu GTFS z ZTP..."))
@@ -329,11 +350,39 @@ class GtfsZipParser @Inject constructor(
             }
 
             downloadCompleted = true
-            return DownloadedArchive(archive, eTag, lastModified)
+            return DownloadedArchive(archive, eTag, lastModified, downloadedBytes)
         } finally {
             if (!downloadCompleted) {
                 archive.delete()
             }
+        }
+    }
+
+    private fun isRemoteArchiveUnchanged(): Boolean {
+        val preferences = context.getSharedPreferences(
+            GTFS_UPDATE_PREFERENCES,
+            Context.MODE_PRIVATE
+        )
+        val connection = URL(GTFS_KRAKOW_URL).openConnection() as HttpURLConnection
+        connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
+        connection.readTimeout = READ_TIMEOUT_MILLIS
+        connection.instanceFollowRedirects = true
+        connection.requestMethod = "HEAD"
+        return try {
+            if (connection.responseCode !in 200..299) {
+                false
+            } else {
+                gtfsArchiveValidatorsMatch(
+                    storedETag = preferences.getString(GTFS_ETAG_KEY, null),
+                    remoteETag = connection.getHeaderField("ETag"),
+                    storedLastModified = preferences.getLong(GTFS_LAST_MODIFIED_KEY, 0L),
+                    remoteLastModified = connection.getHeaderFieldDate("Last-Modified", 0L),
+                    storedContentLength = preferences.getLong(GTFS_CONTENT_LENGTH_KEY, 0L),
+                    remoteContentLength = connection.contentLengthLong
+                )
+            }
+        } finally {
+            connection.disconnect()
         }
     }
 
@@ -349,6 +398,7 @@ class GtfsZipParser @Inject constructor(
             .edit()
             .putString(GTFS_ETAG_KEY, downloadedArchive.eTag)
             .putLong(GTFS_LAST_MODIFIED_KEY, downloadedArchive.lastModified)
+            .putLong(GTFS_CONTENT_LENGTH_KEY, downloadedArchive.contentLength)
             .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
             .putBoolean(GTFS_SHAPES_IMPORTED_KEY, true)
             .apply()
@@ -357,7 +407,8 @@ class GtfsZipParser @Inject constructor(
     private data class DownloadedArchive(
         val file: File,
         val eTag: String?,
-        val lastModified: Long
+        val lastModified: Long,
+        val contentLength: Long
     )
 
     private suspend fun readLookupTables(

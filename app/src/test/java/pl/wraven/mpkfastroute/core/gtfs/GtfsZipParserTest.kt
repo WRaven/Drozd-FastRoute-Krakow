@@ -1,7 +1,9 @@
 package pl.wraven.mpkfastroute.core.gtfs
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class GtfsZipParserTest {
@@ -54,5 +56,61 @@ class GtfsZipParserTest {
     @Test
     fun keepsProgressAtThePhaseStartWhenTheTotalIsUnknown() {
         assertEquals(40, scaleProgress(40, 82, 500, -1))
+    }
+
+    @Test
+    fun matchingEtagIdentifiesTheSameArchive() {
+        assertTrue(
+            gtfsArchiveValidatorsMatch(
+                storedETag = "\"archive-v1\"",
+                remoteETag = "\"archive-v1\"",
+                storedLastModified = 100L,
+                remoteLastModified = 200L,
+                storedContentLength = 1_000L,
+                remoteContentLength = 2_000L
+            )
+        )
+    }
+
+    @Test
+    fun changedEtagsRequireDownloadingEvenWhenOtherHeadersMatch() {
+        assertFalse(
+            gtfsArchiveValidatorsMatch(
+                storedETag = "\"archive-v1\"",
+                remoteETag = "\"archive-v2\"",
+                storedLastModified = 100L,
+                remoteLastModified = 100L,
+                storedContentLength = 1_000L,
+                remoteContentLength = 1_000L
+            )
+        )
+    }
+
+    @Test
+    fun matchingLastModifiedAndSizeAreUsedWhenEtagsAreUnavailable() {
+        assertTrue(
+            gtfsArchiveValidatorsMatch(
+                storedETag = null,
+                remoteETag = null,
+                storedLastModified = 100L,
+                remoteLastModified = 100L,
+                storedContentLength = 1_000L,
+                remoteContentLength = 1_000L
+            )
+        )
+    }
+
+    @Test
+    fun missingFallbackMetadataDoesNotMarkTheArchiveUnchanged() {
+        assertFalse(
+            gtfsArchiveValidatorsMatch(
+                storedETag = null,
+                remoteETag = null,
+                storedLastModified = 100L,
+                remoteLastModified = 100L,
+                storedContentLength = 0L,
+                remoteContentLength = 1_000L
+            )
+        )
     }
 }

@@ -48,6 +48,9 @@ values remain unchanged internally, preserving night-trip order and durations.
 From **1.0.3**, choosing “My location” fills the origin field with an
 approximate address when geocoding is available.
 
+From **1.0.4**, the app checks the timetable ETag before downloading. If the ZTP
+archive is unchanged, it skips downloading and importing the data again.
+
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
 the form or choose an existing image with Android's photo picker. Preview or
@@ -358,10 +361,11 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
    stop dots should grow smoothly and shrink again when zooming out; a selected
    stop remains highlighted.
 4. Rename both shortcuts, save and restart; check names, destinations and schedules.
-5. Choose “My location” and check that the origin shows an approximate address.
-   Open weather and check that current conditions use the available right-side
-   space and remain readable with a larger font. Also check ticker movement and
-   the soil-temperature/wind line.
+5. Relaunch the app with an unchanged timetable and check that it does not
+   download or import the data again. Choose “My location” and check that the
+   origin shows an approximate address. Open weather and check that current
+   conditions use the available right-side space and remain readable with a
+   larger font. Also check ticker movement and the soil-temperature/wind line.
 6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
    the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
    labels. Reopen the same trip and check that passed stops remain accessible.

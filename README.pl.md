@@ -49,6 +49,9 @@ nocnych kursów i prawidłowy czas przejazdu.
 Od **1.0.3** wybranie „Moja lokalizacja” uzupełnia pole początku przybliżonym
 adresem, jeśli usługa geokodowania jest dostępna.
 
+Od **1.0.4** aplikacja sprawdza ETag rozkładu przed pobraniem. Jeśli archiwum
+ZTP się nie zmieniło, pomija ponowne pobieranie i import danych.
+
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
 wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
@@ -334,10 +337,11 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
    następnie przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć
    po oddaleniu; wybrany przystanek pozostaje wyróżniony.
 4. Zmień obie nazwy skrótów, zapisz i zrestartuj; sprawdź nazwy, cele i harmonogramy.
-5. Użyj „Moja lokalizacja” i sprawdź przybliżony adres początku. Otwórz pogodę:
-   bieżące warunki powinny wykorzystywać miejsce po prawej, a układ pozostać
-   czytelny przy większej czcionce. Sprawdź też ruch paska ZTP i wiersz
-   gruntu/wiatru.
+5. Uruchom aplikację ponownie przy niezmienionym rozkładzie i sprawdź, że nie
+   pobiera ani nie importuje danych od nowa. Użyj „Moja lokalizacja” i sprawdź
+   przybliżony adres początku. Otwórz pogodę: bieżące warunki powinny
+   wykorzystywać miejsce po prawej, a układ pozostać czytelny przy większej
+   czcionce. Sprawdź też ruch paska ZTP i wiersz gruntu/wiatru.
 6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
    do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
    ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.
