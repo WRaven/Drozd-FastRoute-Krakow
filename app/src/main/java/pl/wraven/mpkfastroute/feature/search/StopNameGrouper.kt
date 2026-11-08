@@ -16,6 +16,12 @@ object StopNameGrouper {
     fun mainName(stopName: String): String =
         stopName.trim().replace(platformSuffix, "").trim()
 
+    fun displayName(stop: StopEntity): String {
+        val name = mainName(stop.stopName)
+        val platform = platformSuffix.find(stop.stopName)?.groupValues?.get(1)
+        return if (platform == null) name else "$name $platform"
+    }
+
     fun matches(query: String, candidate: String): Boolean {
         val normalizedQuery = normalizeForSearch(query)
         return normalizedQuery.isNotEmpty() &&

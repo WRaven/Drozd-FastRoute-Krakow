@@ -36,6 +36,18 @@ class StopNameGrouperTest {
     }
 
     @Test
+    fun displayNameIncludesOnlyThePlatformSuffixFromTheStopName() {
+        assertEquals(
+            "Bieńczycka 2",
+            StopNameGrouper.displayName(stop("stop-1", "Bieńczycka 2", "117-04"))
+        )
+        assertEquals(
+            "Plac Inwalidów",
+            StopNameGrouper.displayName(stop("stop-2", "Plac Inwalidów", "117-04"))
+        )
+    }
+
+    @Test
     fun matchesPolishStopNamesWithoutDiacritics() {
         assertTrue(StopNameGrouper.matches("krakow", "Kraków Główny"))
         assertTrue(StopNameGrouper.matches("lodz", "Łódź Fabryczna"))

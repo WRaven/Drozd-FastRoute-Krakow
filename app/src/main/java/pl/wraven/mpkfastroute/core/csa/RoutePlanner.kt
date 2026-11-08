@@ -155,7 +155,8 @@ class RoutePlanner @Inject constructor(
                         departureTime = it.departureTime,
                         arrivalTime = it.arrivalTime,
                         tripId = it.tripId,
-                        routeShortName = it.routeShortName
+                        routeShortName = it.routeShortName,
+                        direction = it.direction.orEmpty()
                     )
                 }
                 .toList()

@@ -124,6 +124,7 @@ data class GtfsConnectionRow(
     val arrivalTime: Int,
     val tripId: String,
     val routeShortName: String,
+    val direction: String?,
     val serviceId: String
 )
 
@@ -205,11 +206,22 @@ interface StopTimeDao {
 interface ConnectionDao {
     @Query(
         """
-        SELECT departureStopId, arrivalStopId, departureTime, arrivalTime,
-               tripId, routeShortName, serviceId
-        FROM connections
-        WHERE departureTime BETWEEN :startTime AND :endTime
-        ORDER BY departureTime
+        SELECT connection.departureStopId AS departureStopId,
+               connection.arrivalStopId AS arrivalStopId,
+               connection.departureTime AS departureTime,
+               connection.arrivalTime AS arrivalTime,
+               connection.tripId AS tripId,
+               connection.routeShortName AS routeShortName,
+               COALESCE(NULLIF(trip.tripHeadsign, ''),
+                   (SELECT stop.stopName FROM stop_times AS lastTime
+                    JOIN stops AS stop ON stop.stopId = lastTime.stopId
+                    WHERE lastTime.tripId = connection.tripId
+                    ORDER BY lastTime.stopSequence DESC LIMIT 1)) AS direction,
+               connection.serviceId AS serviceId
+        FROM connections AS connection
+        LEFT JOIN trips AS trip ON trip.tripId = connection.tripId
+        WHERE connection.departureTime BETWEEN :startTime AND :endTime
+        ORDER BY connection.departureTime
         """
     )
     suspend fun getConnectionsBetween(

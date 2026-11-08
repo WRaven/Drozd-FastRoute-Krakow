@@ -15,6 +15,7 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.MarqueeDefaults
 import androidx.compose.foundation.basicMarquee
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -72,6 +74,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -992,6 +997,13 @@ private fun SearchContent(
                                 Text(if (state.isLoadingWeather) "🌤 Ładowanie..." else "🌤 Pogoda")
                             }
                         )
+                    AssistChip(
+                        onClick = onToggleRadio,
+                        enabled = !state.isSearching,
+                        label = {
+                            Text(if (state.isRadioPlaying) "■ Radio" else "▶ Radio")
+                        }
+                    )
                         AssistChip(
                         onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
                         enabled = !state.isSearching && !state.isImporting,
@@ -1061,17 +1073,6 @@ private fun SearchContent(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Button(
-                        onClick = onToggleRadio,
-                        enabled = !state.isSearching,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(
-                            if (state.isRadioPlaying) "■ Zatrzymaj radio"
-                            else "▶ Uruchom radio"
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
                     TextButton(onClick = onChooseRadio) {
                         Text(
                             state.radioStations
@@ -1614,10 +1615,14 @@ private fun JourneyResult(
         .filterIsInstance<JourneyStep.Transit>()
         .map(JourneyStep.Transit::connection)
     val firstConnection = transitConnections.firstOrNull()
-    val routeLines = transitConnections
-        .map { it.routeShortName }
-        .distinct()
-        .joinToString(" → ")
+    val routeLabels = transitConnections
+        .distinctBy { it.routeShortName to it.direction.trim() }
+        .map { connection ->
+            "Linia ${connection.routeShortName}" +
+                connection.direction.trim().takeIf(String::isNotEmpty)
+                    ?.let { " → $it" }.orEmpty()
+        }
+        .joinToString(" · ")
 
     Card(
         modifier = Modifier
@@ -1645,7 +1650,7 @@ private fun JourneyResult(
             )
             if (firstConnection != null) {
                 Text(
-                    "${stopName(stops, firstConnection.departureStopId)} · Linia $routeLines",
+                    "${stopName(stops, firstConnection.departureStopId)} · $routeLabels",
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -1663,8 +1668,8 @@ private fun JourneyResult(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "${origin?.stopName?.let(StopNameGrouper::mainName).orEmpty()} → " +
-                        destination?.stopName?.let(StopNameGrouper::mainName).orEmpty(),
+                    "${origin?.let(StopNameGrouper::displayName).orEmpty()} → " +
+                        destination?.let(StopNameGrouper::displayName).orEmpty(),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -1753,6 +1758,13 @@ private fun JourneyResult(
                                         modifier = Modifier.weight(1f),
                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
+                                        connection.direction.takeIf(String::isNotBlank)?.let {
+                                            Text(
+                                                "Kierunek: $it",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
                                         Text(
                                             "${stopName(stops, connection.departureStopId)} · " +
                                                 formatJourneyTime(connection.departureTime, journey.departureTime),
@@ -1992,7 +2004,9 @@ private fun SettingsDialog(
 ) {
     var homeShortcutName by rememberSaveable(shortcutNames.home) { mutableStateOf(shortcutNames.home) }
     var workShortcutName by rememberSaveable(shortcutNames.work) { mutableStateOf(shortcutNames.work) }
+    var supportInfoExpanded by rememberSaveable { mutableStateOf(false) }
     val clipboardManager = LocalClipboardManager.current
+    val settingsScrollState = rememberScrollState()
     val diagnosticsScrollState = rememberScrollState()
     LaunchedEffect(diagnosticEntries.lastOrNull()) {
         diagnosticsScrollState.animateScrollTo(diagnosticsScrollState.maxValue)
@@ -2002,12 +2016,18 @@ private fun SettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ustawienia") },
         text = {
-            Column(
+            Box(
                 modifier = Modifier
+                    .fillMaxWidth()
                     .heightIn(max = 560.dp)
-                    .verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(settingsScrollState)
+                        .padding(end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                 Text(
                     stringResource(R.string.app_description),
                     style = MaterialTheme.typography.titleSmall
@@ -2018,35 +2038,51 @@ private fun SettingsDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 HorizontalDivider()
-                Text("Bez reklam, z opcją wsparcia", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    "FastRoute powstał z niechęci do reklam, dlatego ich nie wyświetla. " +
-                        "Jeśli aplikacja Ci się podoba, możesz dobrowolnie przekazać " +
-                        "1,5% podatku na DT u Oli w Legionowie — inicjatywę zaproponowaną " +
-                        "przez żonę autora."
-                )
-                Text("KRS: 0000270261")
-                Text("Cel szczegółowy: DT u Oli w Legionowie 16057")
-                TextButton(onClick = onOpenCharityInfo) {
-                    Text("Poznaj inicjatywę i szczegóły przekazania 1,5%")
-                }
-                when {
-                    taxDonationReminderSent -> {
-                        Text("Przypomnienie o 1,5% podatku zostało już pokazane.")
-                    }
-                    taxDonationReminderEnabled -> {
-                        Text("Przypomnienie w aplikacji pojawi się 15 lutego 2027 około 10:00.")
-                        TextButton(onClick = onCancelTaxDonationReminder) {
-                            Text("Anuluj przypomnienie")
+                TextButton(
+                    onClick = { supportInfoExpanded = !supportInfoExpanded },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        if (supportInfoExpanded) {
+                            "Ukryj informacje o braku reklam i dotacji"
+                        } else {
+                            "Informacje o braku reklam i dotacji"
                         }
+                    )
+                }
+                if (supportInfoExpanded) {
+                    Text(
+                        "FastRoute powstał z niechęci do reklam, dlatego ich nie wyświetla. " +
+                            "Jeśli aplikacja Ci się podoba, możesz dobrowolnie przekazać " +
+                            "1,5% podatku na DT u Oli w Legionowie — inicjatywę zaproponowaną " +
+                            "przez żonę autora."
+                    )
+                    Text("KRS: 0000270261")
+                    Text("Cel szczegółowy: DT u Oli w Legionowie 16057")
+                    TextButton(onClick = onOpenCharityInfo) {
+                        Text("Poznaj inicjatywę i szczegóły przekazania 1,5%")
                     }
-                    else -> {
-                        Text(
-                            "Możesz włączyć jedno przypomnienie w aplikacji na 15 lutego 2027. " +
-                                "Nie wymaga zgody Androida."
-                        )
-                        TextButton(onClick = onEnableTaxDonationReminder) {
-                            Text("Przypomnij mi 15 lutego 2027")
+                    when {
+                        taxDonationReminderSent -> {
+                            Text("Przypomnienie o 1,5% podatku zostało już pokazane.")
+                        }
+                        taxDonationReminderEnabled -> {
+                            Text(
+                                "Przypomnienie w aplikacji pojawi się " +
+                                    "15 lutego 2027 około 10:00."
+                            )
+                            TextButton(onClick = onCancelTaxDonationReminder) {
+                                Text("Anuluj przypomnienie")
+                            }
+                        }
+                        else -> {
+                            Text(
+                                "Możesz włączyć jedno przypomnienie w aplikacji na " +
+                                    "15 lutego 2027. Nie wymaga zgody Androida."
+                            )
+                            TextButton(onClick = onEnableTaxDonationReminder) {
+                                Text("Przypomnij mi 15 lutego 2027")
+                            }
                         }
                     }
                 }
@@ -2084,7 +2120,9 @@ private fun SettingsDialog(
                 ) {
                     Text(if (isSavingShortcutNames) "Zapisuję..." else "Zapisz nazwy skrótów")
                 }
-                shortcutNamesSaveError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    shortcutNamesSaveError?.let {
+                        Text(it, color = MaterialTheme.colorScheme.error)
+                    }
                 HorizontalDivider()
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
@@ -2220,6 +2258,36 @@ private fun SettingsDialog(
                         Text("Wyczyść")
                     }
                 }
+            }
+            if (settingsScrollState.maxValue > 0) {
+                val trackColor = MaterialTheme.colorScheme.outlineVariant
+                val thumbColor = MaterialTheme.colorScheme.primary
+                Canvas(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .width(4.dp)
+                        .fillMaxHeight()
+                ) {
+                    val radius = size.width / 2
+                    drawRoundRect(
+                        color = trackColor,
+                        cornerRadius = CornerRadius(radius, radius)
+                    )
+                    val thumbHeight = (
+                        size.height * size.height /
+                            (size.height + settingsScrollState.maxValue)
+                        ).coerceAtLeast(24.dp.toPx()).coerceAtMost(size.height)
+                    val scrollRange = settingsScrollState.maxValue.coerceAtLeast(1)
+                    val thumbTop = (size.height - thumbHeight) *
+                        settingsScrollState.value / scrollRange
+                    drawRoundRect(
+                        color = thumbColor,
+                        topLeft = Offset(0f, thumbTop),
+                        size = Size(size.width, thumbHeight),
+                        cornerRadius = CornerRadius(radius, radius)
+                    )
+                }
+            }
             }
         },
         confirmButton = {
@@ -2803,7 +2871,7 @@ private fun shortWeekday(day: DayOfWeek): String = when (day) {
 
 private fun stopName(stops: List<StopEntity>, stopId: String): String =
     stops.firstOrNull { it.stopId == stopId }?.let { stop ->
-        StopNameGrouper.mainName(stop.stopName)
+        StopNameGrouper.displayName(stop)
     } ?: "Nieznany przystanek"
 
 private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =

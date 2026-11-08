@@ -6,5 +6,6 @@ data class Connection(
     val departureTime: Int,
     val arrivalTime: Int,
     val tripId: String,
-    val routeShortName: String
+    val routeShortName: String,
+    val direction: String = ""
 )
