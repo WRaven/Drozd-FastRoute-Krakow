@@ -1662,7 +1662,9 @@ private fun JourneyResult(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "$routeNumber. Odjazd ${
+                "$routeNumber. Wyjście ${
+                    formatJourneyTime(journey.departureTime, journey.departureTime)
+                } · odjazd ${
                     firstConnection?.let {
                         formatJourneyTime(it.departureTime, journey.departureTime)
                     } ?: formatJourneyTime(journey.departureTime, journey.departureTime)
@@ -1695,6 +1697,7 @@ private fun JourneyResult(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                val walkingBreakdown = journey.walkingBreakdown()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     JourneyMetric(
                         label = "PRZYJAZD",
@@ -1731,17 +1734,17 @@ private fun JourneyResult(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     JourneyMetric(
                         label = "NA START",
-                        value = formatDistance(journey.originAccess.walkingDistanceMeters),
+                        value = formatDistance(walkingBreakdown.startMeters),
                         modifier = Modifier.weight(1f)
                     )
                     JourneyMetric(
                         label = "PRZESIADKI",
-                        value = formatDistance(journey.transferWalkingDistanceMeters),
+                        value = formatDistance(walkingBreakdown.transferMeters),
                         modifier = Modifier.weight(1f)
                     )
                     JourneyMetric(
                         label = "DO CELU",
-                        value = formatDistance(journey.destinationAccess.walkingDistanceMeters),
+                        value = formatDistance(walkingBreakdown.destinationMeters),
                         modifier = Modifier.weight(1f)
                     )
                 }

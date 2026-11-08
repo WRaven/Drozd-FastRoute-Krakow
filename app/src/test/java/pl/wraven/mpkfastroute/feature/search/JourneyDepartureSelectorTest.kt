@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
 import pl.wraven.mpkfastroute.core.csa.Connection
+import pl.wraven.mpkfastroute.core.csa.Footpath
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.StopAccess
 
@@ -46,6 +47,82 @@ class JourneyDepartureSelectorTest {
         )
     }
 
+    @Test
+    fun arriveByDepartureIncludesOriginWalkInsteadOfTheTwoHourSearchWindow() {
+        val journey = CsaJourney(
+            departureTime = 5 * 3600 + 53 * 60,
+            arrivalTime = 7 * 3600 + 47 * 60,
+            transferPenaltySeconds = 0,
+            steps = listOf(
+                JourneyStep.Transit(
+                    Connection(
+                        departureStopId = "origin",
+                        arrivalStopId = "destination",
+                        departureTime = 7 * 3600 + 23 * 60,
+                        arrivalTime = 7 * 3600 + 47 * 60,
+                        tripId = "trip-1",
+                        routeShortName = "1"
+                    )
+                )
+            ),
+            originAccess = StopAccess("origin", 302.0, 242),
+            destinationAccess = StopAccess("destination", 369.0, 300),
+            transferWalkingDistanceMeters = 0.0
+        )
+
+        val corrected = journey.withOriginDepartureTime()
+
+        assertEquals(7 * 3600 + 18 * 60 + 58, corrected.departureTime)
+        assertEquals(33 * 60 + 2, corrected.totalDurationSeconds)
+    }
+
+    @Test
+    fun terminalWalkIsShownAsDestinationAccessNotAsATransfer() {
+        val journey = CsaJourney(
+            departureTime = 0,
+            arrivalTime = 100,
+            transferPenaltySeconds = 0,
+            steps = listOf(
+                JourneyStep.Transit(testConnection("A", "B", 0, 100, "trip-1")),
+                JourneyStep.Walk(Footpath("B", "C", 60, 63.0))
+            ),
+            originAccess = StopAccess("A", 302.0, 242),
+            destinationAccess = StopAccess("C", 369.0, 296),
+            transferWalkingDistanceMeters = 63.0
+        )
+
+        val walking = journey.walkingBreakdown()
+
+        assertEquals(302.0, walking.startMeters, 0.0)
+        assertEquals(0.0, walking.transferMeters, 0.0)
+        assertEquals(432.0, walking.destinationMeters, 0.0)
+        assertEquals(journey.totalWalkingDistanceMeters, walking.startMeters +
+            walking.transferMeters + walking.destinationMeters, 0.0)
+    }
+
+    @Test
+    fun walkingBetweenTransitLegsIsCountedAsTransferWalking() {
+        val journey = CsaJourney(
+            departureTime = 0,
+            arrivalTime = 200,
+            transferPenaltySeconds = 180,
+            steps = listOf(
+                JourneyStep.Transit(testConnection("A", "B", 0, 100, "trip-1")),
+                JourneyStep.Walk(Footpath("B", "C", 60, 75.0)),
+                JourneyStep.Transit(testConnection("C", "D", 160, 200, "trip-2"))
+            ),
+            originAccess = StopAccess("A", 10.0, 8),
+            destinationAccess = StopAccess("D", 20.0, 16),
+            transferWalkingDistanceMeters = 75.0
+        )
+
+        val walking = journey.walkingBreakdown()
+
+        assertEquals(10.0, walking.startMeters, 0.0)
+        assertEquals(75.0, walking.transferMeters, 0.0)
+        assertEquals(20.0, walking.destinationMeters, 0.0)
+    }
+
     private fun journey(tripId: String, departure: Int, arrival: Int) = CsaJourney(
         departureTime = 0,
         arrivalTime = arrival,
@@ -65,5 +142,20 @@ class JourneyDepartureSelectorTest {
         originAccess = StopAccess("origin", 0.0, 0),
         destinationAccess = StopAccess("destination", 0.0, 0),
         transferWalkingDistanceMeters = 0.0
+    )
+
+    private fun testConnection(
+        departureStopId: String,
+        arrivalStopId: String,
+        departureTime: Int,
+        arrivalTime: Int,
+        tripId: String
+    ) = Connection(
+        departureStopId = departureStopId,
+        arrivalStopId = arrivalStopId,
+        departureTime = departureTime,
+        arrivalTime = arrivalTime,
+        tripId = tripId,
+        routeShortName = "1"
     )
 }
