@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -72,6 +74,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.asImageBitmap
@@ -387,7 +390,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onSelectOriginAddress = viewModel::selectOriginAddress,
                 onDestinationQueryChange = viewModel::setDestinationQuery,
                 onSelectDestination = viewModel::selectDestination,
-                onSelectAddress = viewModel::selectDestinationAddress,
+                onSelectAddress = viewModel::selectDestinationAddressAndSearch,
                 onSearch = viewModel::searchRoute,
                 onGoHome = { runWithLocationPermission(viewModel::routeHome) },
                 onGoToWork = { runWithLocationPermission(viewModel::routeToWork) },
@@ -576,6 +579,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             vehicleTripError = state.selectedLiveVehicleTripError,
             vehicleTripUpdateError = state.selectedLiveVehicleTripUpdateError,
             onRefresh = viewModel::refreshLiveVehiclePositions,
+            onLocateUser = {
+                runWithLocationPermission(viewModel::locateUserOnLiveMap)
+            },
             onSelectStop = viewModel::loadLiveMapStop,
             onSelectVehicle = viewModel::selectLiveVehicle,
             onClearSelectedStop = viewModel::clearLiveMapStop,
@@ -768,21 +774,42 @@ private fun SearchContent(
     val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var isOriginFieldFocused by remember { mutableStateOf(false) }
     var isDestinationFieldFocused by remember { mutableStateOf(false) }
+    val scrollState = rememberScrollState()
+    val originCardBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val destinationCardBringIntoViewRequester = remember { BringIntoViewRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var wasKeyboardVisible by remember { mutableStateOf(false) }
     var showOriginStopPicker by remember(state.originPlace) { mutableStateOf(false) }
     var showDestinationStopPicker by remember(state.destinationPlace) {
         mutableStateOf(false)
     }
 
+    LaunchedEffect(isKeyboardVisible, isOriginFieldFocused, isDestinationFieldFocused) {
+        if (isKeyboardVisible) {
+            when {
+                isDestinationFieldFocused ->
+                    destinationCardBringIntoViewRequester.bringIntoView()
+                isOriginFieldFocused ->
+                    originCardBringIntoViewRequester.bringIntoView()
+            }
+        } else if (wasKeyboardVisible) {
+            scrollState.animateScrollTo(0)
+        }
+        wasKeyboardVisible = isKeyboardVisible
+    }
+
     Column(
         modifier = modifier
             .imePadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         if (!isKeyboardVisible) {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(originCardBringIntoViewRequester),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
@@ -971,7 +998,10 @@ private fun SearchContent(
                             recentPlaces = state.recentAddressPlaces,
                             candidates = state.originAddressCandidates,
                             isSearching = state.isSearchingOriginAddresses,
-                            onSelect = onSelectOriginAddress
+                            onSelect = {
+                                keyboardController?.hide()
+                                onSelectOriginAddress(it)
+                            }
                         )
                         state.originAddressSearchError?.let {
                             Text(it, color = MaterialTheme.colorScheme.error)
@@ -980,7 +1010,10 @@ private fun SearchContent(
                             query = state.originQuery,
                             groups = stopGroups,
                             recentStopNames = state.recentStopSearches,
-                            onSelectGroup = onSelectOrigin
+                            onSelectGroup = {
+                                keyboardController?.hide()
+                                onSelectOrigin(it)
+                            }
                         )
                     }
                 }
@@ -1027,7 +1060,9 @@ private fun SearchContent(
         }
 
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .bringIntoViewRequester(destinationCardBringIntoViewRequester),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
@@ -1089,7 +1124,10 @@ private fun SearchContent(
                             recentPlaces = state.recentAddressPlaces,
                             candidates = state.addressCandidates,
                             isSearching = state.isSearchingDestinationAddresses,
-                            onSelect = onSelectAddress
+                            onSelect = {
+                                keyboardController?.hide()
+                                onSelectAddress(it)
+                            }
                         )
                         state.destinationAddressSearchError?.let {
                             Text(it, color = MaterialTheme.colorScheme.error)
@@ -1098,7 +1136,10 @@ private fun SearchContent(
                             query = state.destinationQuery,
                             groups = stopGroups,
                             recentStopNames = state.recentStopSearches,
-                            onSelectGroup = onSelectDestination
+                            onSelectGroup = {
+                                keyboardController?.hide()
+                                onSelectDestination(it)
+                            }
                         )
                     }
                 }

@@ -52,6 +52,10 @@ adresem, jeśli usługa geokodowania jest dostępna.
 Od **1.0.4** aplikacja sprawdza ETag rozkładu przed pobraniem. Jeśli archiwum
 ZTP się nie zmieniło, pomija ponowne pobieranie i import danych.
 
+Od **1.0.5** przycisk „Moja lokalizacja” w Live ponownie centruje mapę.
+Historia adresów celu jest przewijana nad klawiaturę, a wybranie adresu uruchamia
+wyszukiwanie trasy i chowa klawiaturę.
+
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
 wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
@@ -333,15 +337,19 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
    startu i czytelność ikon pasków systemowych. Sprawdź nową ikonę oraz logo
    startowe: drozd, trasa i ramka nie powinny być obcięte.
 3. Otwórz Live z uprawnieniem lokalizacji i bez niego; sprawdź centrowanie oraz
-   numery linii na znacznikach i po kliknięciu pojazdu. Oddal mapę do widoku miasta,
-   następnie przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć
-   po oddaleniu; wybrany przystanek pozostaje wyróżniony.
+   przycisk „Moja lokalizacja” ponownie centrujący mapę oraz numery linii na
+   znacznikach i po kliknięciu pojazdu. Oddal mapę do widoku miasta, następnie
+   przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć po oddaleniu;
+   wybrany przystanek pozostaje wyróżniony.
 4. Zmień obie nazwy skrótów, zapisz i zrestartuj; sprawdź nazwy, cele i harmonogramy.
 5. Uruchom aplikację ponownie przy niezmienionym rozkładzie i sprawdź, że nie
    pobiera ani nie importuje danych od nowa. Użyj „Moja lokalizacja” i sprawdź
-   przybliżony adres początku. Otwórz pogodę: bieżące warunki powinny
-   wykorzystywać miejsce po prawej, a układ pozostać czytelny przy większej
-   czcionce. Sprawdź też ruch paska ZTP i wiersz gruntu/wiatru.
+   przybliżony adres początku. Podczas wpisywania celu sprawdź, że ostatnie
+   adresy są widoczne nad klawiaturą; wybór adresu chowa klawiaturę i uruchamia
+   wyszukiwanie, a samo zamknięcie klawiatury przywraca pełny widok. Otwórz
+   pogodę: bieżące warunki powinny wykorzystywać miejsce po prawej, a układ
+   pozostać czytelny przy większej czcionce. Sprawdź też ruch paska ZTP i wiersz
+   gruntu/wiatru.
 6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
    do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
    ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.

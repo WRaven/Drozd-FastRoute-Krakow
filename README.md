@@ -51,6 +51,10 @@ approximate address when geocoding is available.
 From **1.0.4**, the app checks the timetable ETag before downloading. If the ZTP
 archive is unchanged, it skips downloading and importing the data again.
 
+From **1.0.5**, the Live map's “My location” button recenters the map. Destination
+address history scrolls above the keyboard; selecting an address starts the route
+search and hides the keyboard.
+
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
 the form or choose an existing image with Android's photo picker. Preview or
@@ -356,16 +360,19 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
 2. Force-stop and relaunch in dark mode, then in light mode; check launch colors
    and readable system-bar icons. Check the new logo on the launcher and startup
    screen: the thrush, route and frame should not be cut off.
-3. Open Live with/without location permission; check centering and line labels on
-   markers and after tapping a vehicle. Zoom out to the whole city, then zoom in:
-   stop dots should grow smoothly and shrink again when zooming out; a selected
-   stop remains highlighted.
+3. Open Live with/without location permission; check the “My location” button
+   recenters the map, and check line labels on markers and after tapping a
+   vehicle. Zoom out to the whole city, then zoom in: stop dots should grow
+   smoothly and shrink again when zooming out; a selected stop remains highlighted.
 4. Rename both shortcuts, save and restart; check names, destinations and schedules.
 5. Relaunch the app with an unchanged timetable and check that it does not
    download or import the data again. Choose “My location” and check that the
-   origin shows an approximate address. Open weather and check that current
-   conditions use the available right-side space and remain readable with a
-   larger font. Also check ticker movement and the soil-temperature/wind line.
+   origin shows an approximate address. While entering a destination, check
+   recent addresses stay visible above the keyboard; selecting one hides the
+   keyboard and starts the route search, while dismissing the keyboard restores
+   the full view. Open weather and check that current conditions use the
+   available right-side space and remain readable with a larger font. Also check
+   ticker movement and the soil-temperature/wind line.
 6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
    the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
    labels. Reopen the same trip and check that passed stops remain accessible.

@@ -110,6 +110,7 @@ internal fun LiveVehicleMapDialog(
     vehicleTripError: String?,
     vehicleTripUpdateError: String?,
     onRefresh: () -> Unit,
+    onLocateUser: () -> Unit,
     onSelectStop: (StopEntity) -> Unit,
     onSelectVehicle: (LiveVehiclePosition) -> Unit,
     onClearSelectedStop: () -> Unit,
@@ -194,6 +195,14 @@ internal fun LiveVehicleMapDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onLocateUser) {
+                        Text("📍 Moja lokalizacja")
+                    }
+                }
 
                 error?.let {
                     Text(it, color = MaterialTheme.colorScheme.error)
@@ -398,10 +407,10 @@ private fun LiveVehicleMap(
                     }
                 )
             }
-            if (userLocation != null && userLocation != centeredOnUserLocation) {
-                view.controller.setCenter(
-                    GeoPoint(userLocation.latitude, userLocation.longitude)
-                )
+            if (userLocation == null) {
+                centeredOnUserLocation = null
+            } else if (userLocation != centeredOnUserLocation) {
+                view.controller.setCenter(GeoPoint(userLocation.latitude, userLocation.longitude))
                 view.controller.setZoom(USER_LOCATION_MAP_ZOOM)
                 centeredOnUserLocation = userLocation
             }

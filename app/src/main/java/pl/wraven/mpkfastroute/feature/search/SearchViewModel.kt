@@ -869,6 +869,17 @@ class SearchViewModel @Inject constructor(
     }
 
     fun selectDestinationAddress(place: GeoPlace) {
+        setDestinationAddress(place, searchAfterSelection = false)
+    }
+
+    fun selectDestinationAddressAndSearch(place: GeoPlace) {
+        setDestinationAddress(place, searchAfterSelection = true)
+    }
+
+    private fun setDestinationAddress(
+        place: GeoPlace,
+        searchAfterSelection: Boolean
+    ) {
         destinationAddressSearchJob?.cancel()
         viewModelScope.launch {
             val nearbyGroups = withContext(Dispatchers.Default) {
@@ -898,6 +909,9 @@ class SearchViewModel @Inject constructor(
                 )
             }
             recordRecentAddress(place)
+            if (searchAfterSelection) {
+                searchRoute()
+            }
         }
     }
 
