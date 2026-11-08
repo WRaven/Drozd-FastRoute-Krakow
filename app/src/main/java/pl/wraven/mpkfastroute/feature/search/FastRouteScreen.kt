@@ -1001,16 +1001,15 @@ private fun SearchContent(
                                 Text(if (state.isLoadingWeather) "🌤 Ładowanie..." else "🌤 Pogoda")
                             }
                         )
-                    AssistChip(
+                    Button(
                         onClick = onToggleRadio,
                         enabled = !state.isSearching,
-                        label = {
-                            Text(
-                                if (state.isRadioPlaying) "■ Zatrzymaj radio"
-                                else "▶ Uruchom radio"
-                            )
-                        }
-                    )
+                    ) {
+                        Text(
+                            if (state.isRadioPlaying) "■ Zatrzymaj radio"
+                            else "▶ Uruchom radio"
+                        )
+                    }
                         AssistChip(
                         onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
                         enabled = !state.isSearching && !state.isImporting,
