@@ -7,11 +7,18 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import pl.wraven.mpkfastroute.core.update.UpdateDownloadCandidate
+
+data class DownloadedAppUpdate(
+    val file: File,
+    val version: String
+)
 
 class AppUpdateDownloader @Inject constructor(
     @param:ApplicationContext private val context: Context
@@ -19,16 +26,47 @@ class AppUpdateDownloader @Inject constructor(
     suspend fun download(
         update: UpdateCheckResult,
         onProgress: (Int?) -> Unit
-    ): File = withContext(Dispatchers.IO) {
-        if (!GitHubUpdateChecker.isTrustedDownloadUrl(update.downloadUrl)) {
-            throw IOException("Adres pobierania APK jest nieprawidłowy.")
+    ): DownloadedAppUpdate = withContext(Dispatchers.IO) {
+        val candidates = update.downloadCandidates.ifEmpty {
+            listOf(
+                UpdateDownloadCandidate(
+                    version = update.latestVersion,
+                    releaseUrl = update.releaseUrl,
+                    downloadUrl = update.downloadUrl
+                )
+            )
         }
 
-        val connection = URL(update.downloadUrl).openConnection() as HttpURLConnection
+        val failures = mutableListOf<String>()
+        for (candidate in candidates) {
+            if (!GitHubUpdateChecker.isTrustedDownloadUrl(candidate.downloadUrl)) {
+                failures += "${candidate.version}: adres pobierania APK jest nieprawidłowy."
+                continue
+            }
+            try {
+                return@withContext DownloadedAppUpdate(
+                    file = downloadCandidate(candidate, onProgress),
+                    version = candidate.version
+                )
+            } catch (exception: IOException) {
+                failures += "${candidate.version}: ${exception.message.orEmpty()}"
+            }
+        }
+        throw IOException(
+            "Nie udało się pobrać żadnej zgodnej wersji aktualizacji: ${failures.joinToString("; ")}"
+        )
+    }
+
+    private suspend fun downloadCandidate(
+        candidate: UpdateDownloadCandidate,
+        onProgress: (Int?) -> Unit
+    ): File {
+        onProgress(0)
+        val connection = URL(candidate.downloadUrl).openConnection() as HttpURLConnection
         connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
         connection.readTimeout = READ_TIMEOUT_MILLIS
         connection.instanceFollowRedirects = true
-        try {
+        return try {
             val statusCode = connection.responseCode
             if (statusCode !in 200..299) {
                 throw IOException("GitHub zwrócił HTTP $statusCode podczas pobierania APK.")
@@ -41,9 +79,10 @@ class AppUpdateDownloader @Inject constructor(
             if (!updateDirectory.isDirectory && !updateDirectory.mkdirs()) {
                 throw IOException("Nie można przygotować miejsca na pobraną aktualizację.")
             }
+
             val targetFile = File(
                 updateDirectory,
-                "mpk-fastroute-${safeFileVersion(update.latestVersion)}.apk"
+                "mpk-fastroute-${safeFileVersion(candidate.version)}.apk"
             )
             val temporaryFile = File.createTempFile("mpk-fastroute-", ".apk", updateDirectory)
             var completed = false
@@ -52,6 +91,7 @@ class AppUpdateDownloader @Inject constructor(
                 if (contentLength <= 0) onProgress(null)
                 val coroutineContext = currentCoroutineContext()
                 var downloadedBytes = 0L
+                val sha256 = candidate.sha256?.let { MessageDigest.getInstance("SHA-256") }
                 connection.inputStream.use { input ->
                     FileOutputStream(temporaryFile).use { output ->
                         val buffer = ByteArray(BUFFER_SIZE)
@@ -60,6 +100,7 @@ class AppUpdateDownloader @Inject constructor(
                             val bytesRead = input.read(buffer)
                             if (bytesRead < 0) break
                             output.write(buffer, 0, bytesRead)
+                            sha256?.update(buffer, 0, bytesRead)
                             downloadedBytes += bytesRead
                             if (contentLength > 0) {
                                 onProgress(
@@ -77,6 +118,12 @@ class AppUpdateDownloader @Inject constructor(
                     (contentLength > 0 && downloadedBytes != contentLength)
                 ) {
                     throw IOException("Pobrany plik APK jest pusty lub niekompletny.")
+                }
+                val actualSha256 = sha256?.digest()?.toHexString()
+                if (candidate.sha256 != null &&
+                    !candidate.sha256.equals(actualSha256, ignoreCase = true)
+                ) {
+                    throw IOException("Suma SHA-256 APK nie zgadza się z danymi GitHuba.")
                 }
                 val packageName = context.packageManager
                     .getPackageArchiveInfo(temporaryFile.absolutePath, 0)
@@ -111,4 +158,11 @@ class AppUpdateDownloader @Inject constructor(
         const val BUFFER_SIZE = 32 * 1024
         val UNSAFE_FILE_NAME_CHARACTERS = Regex("[^A-Za-z0-9._-]")
     }
+}
+
+internal fun ByteArray.toSha256Hex(): String =
+    MessageDigest.getInstance("SHA-256").digest(this).toHexString()
+
+private fun ByteArray.toHexString(): String = joinToString("") { byte ->
+    (byte.toInt() and 0xff).toString(16).padStart(2, '0')
 }

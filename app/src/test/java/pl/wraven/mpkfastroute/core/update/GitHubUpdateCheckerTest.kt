@@ -75,6 +75,44 @@ class GitHubUpdateCheckerTest {
     }
 
     @Test
+    fun fallbackCandidatesAreNewerThanInstalledNewestFirstAndLimited() {
+        val candidates = listOf("1.0.1", "1.0.4", "1.0.5", "1.0.3", "1.0.2")
+            .map { version ->
+                UpdateDownloadCandidate(
+                    version = version,
+                    releaseUrl = "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases/tag/v$version",
+                    downloadUrl = "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/v$version/app.apk"
+                )
+            }
+
+        assertEquals(
+            listOf("1.0.5", "1.0.4", "1.0.3"),
+            GitHubUpdateChecker.newerUpdateCandidates(candidates, "1.0.2")
+                .map(UpdateDownloadCandidate::version)
+        )
+    }
+
+    @Test
+    fun parsesGitHubSha256DigestsAndRejectsMalformedValues() {
+        val digest = "A".repeat(64)
+
+        assertEquals(digest.lowercase(), GitHubUpdateChecker.parseSha256Digest("sha256:$digest"))
+        assertEquals(null, GitHubUpdateChecker.parseSha256Digest(null))
+        assertTrue(
+            runCatching { GitHubUpdateChecker.parseSha256Digest("sha256:invalid") }
+                .exceptionOrNull() is IOException
+        )
+    }
+
+    @Test
+    fun calculatesApkSha256InExpectedHexFormat() {
+        assertEquals(
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "abc".toByteArray().toSha256Hex()
+        )
+    }
+
+    @Test
     fun extractsVersionFromTestReleaseApkName() {
         assertEquals(
             "0.1.0-ci.42",

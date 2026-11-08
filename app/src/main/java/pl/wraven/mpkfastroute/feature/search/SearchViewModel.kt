@@ -1323,7 +1323,7 @@ class SearchViewModel @Inject constructor(
         }
         viewModelScope.launch {
             try {
-                val apkFile = appUpdateDownloader.download(update) { progressPercent ->
+                val downloadedUpdate = appUpdateDownloader.download(update) { progressPercent ->
                     mutableUiState.update { state ->
                         if (state.isDownloadingAppUpdate) {
                             state.copy(appUpdateDownloadProgressPercent = progressPercent)
@@ -1334,8 +1334,8 @@ class SearchViewModel @Inject constructor(
                 }
                 mutableUiState.update {
                     it.copy(
-                        downloadedAppUpdatePath = apkFile.absolutePath,
-                        downloadedAppUpdateVersion = update.latestVersion,
+                        downloadedAppUpdatePath = downloadedUpdate.file.absolutePath,
+                        downloadedAppUpdateVersion = downloadedUpdate.version,
                         appUpdateDownloadError = null
                     )
                 }

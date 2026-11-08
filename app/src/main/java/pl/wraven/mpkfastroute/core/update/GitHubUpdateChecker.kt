@@ -14,6 +14,7 @@ import javax.inject.Named
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -24,13 +25,22 @@ data class UpdateCheckResult(
     val latestVersion: String,
     val releaseUrl: String,
     val downloadUrl: String,
-    val updateAvailable: Boolean
+    val updateAvailable: Boolean,
+    val downloadCandidates: List<UpdateDownloadCandidate> = emptyList()
+)
+
+data class UpdateDownloadCandidate(
+    val version: String,
+    val releaseUrl: String,
+    val downloadUrl: String,
+    val sha256: String? = null
 )
 
 private data class ReleaseCandidate(
     val version: String,
     val releaseUrl: String,
-    val downloadUrl: String
+    val downloadUrl: String,
+    val sha256: String?
 )
 
 class NoReleaseAvailableException : IOException()
@@ -73,14 +83,25 @@ class GitHubUpdateChecker @Inject constructor(
                     val assetObject = asset.jsonObject
                     val assetName = assetObject["name"]?.jsonPrimitive?.content
                         ?: return@mapNotNull null
-                    assetName to assetObject["browser_download_url"]?.jsonPrimitive?.content
+                    val digest = assetObject["digest"]?.jsonPrimitive?.contentOrNull
+                    ReleaseAsset(
+                        name = assetName,
+                        downloadUrl = assetObject["browser_download_url"]
+                            ?.jsonPrimitive
+                            ?.contentOrNull,
+                        sha256 = parseSha256Digest(digest)
+                    )
                 }
                 .orEmpty()
-            val downloadUrl = selectApkDownloadUrl(assets) ?: return@mapNotNull null
+            val downloadUrl = selectApkDownloadUrl(
+                assets.map { it.name to it.downloadUrl }
+            ) ?: return@mapNotNull null
+            val apkAsset = assets.first { it.downloadUrl == downloadUrl }
             ReleaseCandidate(
-                version = versionForRelease(tagName, assets.map { it.first }),
+                version = versionForRelease(tagName, assets.map(ReleaseAsset::name)),
                 releaseUrl = releaseUrl,
-                downloadUrl = downloadUrl
+                downloadUrl = downloadUrl,
+                sha256 = apkAsset.sha256
             )
         }
         val latestVersion = latestVersion(releaseCandidates.map(ReleaseCandidate::version))
@@ -96,7 +117,18 @@ class GitHubUpdateChecker @Inject constructor(
             latestVersion = latestVersion,
             releaseUrl = latestRelease.releaseUrl,
             downloadUrl = latestRelease.downloadUrl,
-            updateAvailable = compareVersions(latestVersion, currentVersion) > 0
+            updateAvailable = compareVersions(latestVersion, currentVersion) > 0,
+            downloadCandidates = newerUpdateCandidates(
+                releaseCandidates.map {
+                    UpdateDownloadCandidate(
+                        version = it.version,
+                        releaseUrl = it.releaseUrl,
+                        downloadUrl = it.downloadUrl,
+                        sha256 = it.sha256
+                    )
+                },
+                currentVersion
+            )
         )
     }
 
@@ -116,6 +148,8 @@ class GitHubUpdateChecker @Inject constructor(
             Regex("""(?i)(?:^|[-_])v?(\d+\.\d+\.\d+(?:-ci\.\d+)?)\b""")
         private val APK_BUILD_NUMBER_PATTERN =
             Regex("""(?i)(?:^|[-_])build(\d+)(?:[-_.]|$)""")
+        private val SHA256_DIGEST_PATTERN = Regex("""(?i)^sha256:[a-f0-9]{64}$""")
+        private const val MAX_UPDATE_DOWNLOAD_CANDIDATES = 3
 
         internal fun releaseMatchesChannel(
             prerelease: Boolean?,
@@ -173,6 +207,23 @@ class GitHubUpdateChecker @Inject constructor(
         internal fun latestVersion(versions: List<String>): String? =
             versions.maxWithOrNull { left, right -> compareVersions(left, right) }
 
+        internal fun newerUpdateCandidates(
+            candidates: List<UpdateDownloadCandidate>,
+            currentVersion: String
+        ): List<UpdateDownloadCandidate> = candidates
+            .filter { compareVersions(it.version, currentVersion) > 0 }
+            .distinctBy(UpdateDownloadCandidate::version)
+            .sortedWith { left, right -> compareVersions(right.version, left.version) }
+            .take(MAX_UPDATE_DOWNLOAD_CANDIDATES)
+
+        internal fun parseSha256Digest(digest: String?): String? {
+            if (digest == null) return null
+            if (!SHA256_DIGEST_PATTERN.matches(digest)) {
+                throw IOException("GitHub returned an invalid APK SHA-256 digest.")
+            }
+            return digest.substringAfter(':').lowercase()
+        }
+
         internal fun versionForRelease(tagName: String, assetNames: List<String>): String {
             if (VERSION_PATTERN.matches(tagName)) {
                 return tagName.removePrefix("v").removePrefix("V")
@@ -202,5 +253,11 @@ class GitHubUpdateChecker @Inject constructor(
             val ciBuild = match.groupValues[4].toIntOrNull() ?: -1
             return baseVersion + ciBuild
         }
+
+        private data class ReleaseAsset(
+            val name: String,
+            val downloadUrl: String?,
+            val sha256: String?
+        )
     }
 }

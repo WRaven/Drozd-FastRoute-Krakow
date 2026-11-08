@@ -570,7 +570,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             appUpdateDownloadProgressPercent = state.appUpdateDownloadProgressPercent,
             appUpdateDownloadError = state.appUpdateDownloadError,
             isAppUpdateDownloaded = state.downloadedAppUpdatePath != null &&
-                state.downloadedAppUpdateVersion == state.updateCheckResult?.latestVersion,
+                state.downloadedAppUpdateVersion != null,
+            downloadedAppUpdateVersion = state.downloadedAppUpdateVersion,
             canInstallAppUpdates = canInstallAppUpdates,
             onRefresh = viewModel::refreshSchedule,
             onCheckUpdates = viewModel::checkForUpdates,
@@ -660,12 +661,15 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             downloadProgressPercent = state.appUpdateDownloadProgressPercent,
             downloadError = state.appUpdateDownloadError,
             isDownloaded = state.downloadedAppUpdatePath != null &&
-                state.downloadedAppUpdateVersion == update.latestVersion,
+                state.downloadedAppUpdateVersion != null,
+            downloadedVersion = state.downloadedAppUpdateVersion,
             canInstall = canInstallAppUpdates,
             onDownload = { viewModel.downloadAppUpdate(update) },
             onInstall = ::installDownloadedAppUpdate,
             onRequestInstallPermission = ::requestAppUpdateInstallPermission,
-            onOpenRelease = { openExternalUrl(update.releaseUrl) },
+            onOpenRelease = {
+                openExternalUrl(GitHubUpdateChecker.RELEASES_PAGE)
+            },
             onSkip = viewModel::skipUpdatePrompt,
             onDismiss = viewModel::dismissUpdatePrompt
         )
@@ -1981,6 +1985,7 @@ private fun SettingsDialog(
     appUpdateDownloadProgressPercent: Int?,
     appUpdateDownloadError: String?,
     isAppUpdateDownloaded: Boolean,
+    downloadedAppUpdateVersion: String?,
     canInstallAppUpdates: Boolean,
     onRefresh: () -> Unit,
     onCheckUpdates: () -> Unit,
@@ -2164,6 +2169,12 @@ private fun SettingsDialog(
                     Text(if (isCheckingUpdates) "Sprawdzam..." else "Sprawdź aktualizacje")
                 }
                 updateCheckMessage?.let { Text(it) }
+                if (isAppUpdateDownloaded) {
+                    Text("Pobrano wersję ${downloadedAppUpdateVersion.orEmpty()}.")
+                }
+                TextButton(onClick = onOpenLatestRelease) {
+                    Text("Archiwum wydań i starsze wersje APK")
+                }
                 if (updateCheckResult?.updateAvailable == true) {
                     Button(
                         onClick = {
@@ -2211,9 +2222,6 @@ private fun SettingsDialog(
                     "Zeskanuj kod, aby otworzyć najnowsze wydanie na GitHub.",
                     style = MaterialTheme.typography.bodySmall
                 )
-                TextButton(onClick = onOpenLatestRelease) {
-                    Text("Otwórz stronę wydań")
-                }
                 TextButton(onClick = onContactAuthor) {
                     Text("Autor: lukasz@drozd.cc")
                 }
@@ -2333,6 +2341,7 @@ private fun UpdateAvailableDialog(
     downloadProgressPercent: Int?,
     downloadError: String?,
     isDownloaded: Boolean,
+    downloadedVersion: String?,
     canInstall: Boolean,
     onDownload: () -> Unit,
     onInstall: () -> Unit,
@@ -2356,7 +2365,13 @@ private fun UpdateAvailableDialog(
                             ?: "Pobieranie APK..."
                     )
                 } else if (isDownloaded) {
-                    Text("APK pobrano i sprawdzono. Możesz przejść do instalacji.")
+                    Text(
+                        "APK wersji ${downloadedVersion.orEmpty()} pobrano i sprawdzono. " +
+                            "Możesz przejść do instalacji."
+                    )
+                    if (downloadedVersion != update.latestVersion) {
+                        Text("Najnowszy plik był niedostępny; użyto wcześniejszej zgodnej wersji.")
+                    }
                     if (!canInstall) {
                         Text(
                             "Android wymaga zgody na instalację aplikacji pobranych spoza sklepu."
@@ -2367,7 +2382,7 @@ private fun UpdateAvailableDialog(
                     Text(it, color = MaterialTheme.colorScheme.error)
                 }
                 TextButton(onClick = onOpenRelease) {
-                    Text("Szczegóły wydania na GitHubie")
+                    Text("Archiwum wydań i starsze wersje APK")
                 }
             }
         },
