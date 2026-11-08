@@ -7,6 +7,7 @@ import dagger.hilt.components.SingletonComponent
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
 import io.ktor.client.plugins.HttpTimeout
+import javax.inject.Named
 import javax.inject.Singleton
 import kotlinx.serialization.json.Json
 
@@ -15,11 +16,18 @@ import kotlinx.serialization.json.Json
 object LiveModule {
     @Provides
     @Singleton
-    fun provideHttpClient(): HttpClient = HttpClient(Android) {
+    fun provideHttpClient(): HttpClient = createHttpClient(REQUEST_TIMEOUT_MILLIS)
+
+    @Provides
+    @Singleton
+    @Named(UPDATE_HTTP_CLIENT)
+    fun provideUpdateHttpClient(): HttpClient = createHttpClient(UPDATE_REQUEST_TIMEOUT_MILLIS)
+
+    private fun createHttpClient(timeoutMillis: Long): HttpClient = HttpClient(Android) {
         install(HttpTimeout) {
-            connectTimeoutMillis = REQUEST_TIMEOUT_MILLIS
-            requestTimeoutMillis = REQUEST_TIMEOUT_MILLIS
-            socketTimeoutMillis = REQUEST_TIMEOUT_MILLIS
+            connectTimeoutMillis = timeoutMillis
+            requestTimeoutMillis = timeoutMillis
+            socketTimeoutMillis = timeoutMillis
         }
     }
 
@@ -34,4 +42,6 @@ object LiveModule {
     fun provideTtssLiveMapper(): TtssLiveMapper = TtssLiveMapper()
 
     private const val REQUEST_TIMEOUT_MILLIS = 10_000L
+    private const val UPDATE_REQUEST_TIMEOUT_MILLIS = 30_000L
+    private const val UPDATE_HTTP_CLIENT = "githubUpdate"
 }

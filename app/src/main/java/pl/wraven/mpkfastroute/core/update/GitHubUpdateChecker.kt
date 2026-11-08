@@ -10,6 +10,7 @@ import java.io.IOException
 import java.net.URI
 import java.net.URISyntaxException
 import javax.inject.Inject
+import javax.inject.Named
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.boolean
@@ -36,6 +37,7 @@ class NoReleaseAvailableException : IOException()
 
 class GitHubUpdateChecker @Inject constructor(
     @param:ApplicationContext private val context: Context,
+    @param:Named("githubUpdate")
     private val httpClient: HttpClient,
     private val json: Json
 ) {
