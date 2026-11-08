@@ -67,8 +67,10 @@ allocate 1.5% of your tax to **DT u Oli w Legionowie**, suggested by the author'
 wife. Enter KRS **0000270261** and the specific purpose **DT u Oli w Legionowie
 16057**. [Read about the initiative and how to support it](https://fsmm.pl/partner/aleksandra-lachnowicz/).
 This is entirely optional and does not affect app functionality. Settings also
-lets users opt in to one system reminder on **February 15, 2027, at about 10:00**
-(Android notification permission required); it can be canceled beforehand.
+lets users opt in to one in-app reminder on **February 15, 2027, at about
+10:00**. It appears when the app is used that day or later if the app was not
+open then; no Android notification permission is required, and it can be
+canceled before it appears.
 
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath

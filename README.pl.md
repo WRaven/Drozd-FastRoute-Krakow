@@ -68,8 +68,10 @@ przekazać 1,5% podatku na **DT u Oli w Legionowie** — inicjatywę zaproponowa
 przez żonę autora. W zeznaniu wpisz KRS **0000270261** i cel szczegółowy
 **DT u Oli w Legionowie 16057**. [Poznaj inicjatywę i szczegóły wsparcia](https://fsmm.pl/partner/aleksandra-lachnowicz/).
 To całkowicie dobrowolne i nie wpływa na działanie aplikacji. W Ustawieniach
-możesz także włączyć jedno przypomnienie systemowe na **15 lutego 2027 około
-10:00**; wymaga ono zgody Androida na powiadomienia i można je anulować.
+możesz także włączyć jedno przypomnienie wewnątrz aplikacji na **15 lutego 2027
+około 10:00**. Pojawi się przy korzystaniu z aplikacji tego dnia lub później,
+jeśli aplikacja nie była wtedy otwarta. Nie wymaga zgody Androida i można je
+anulować przed wyświetleniem.
 
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo

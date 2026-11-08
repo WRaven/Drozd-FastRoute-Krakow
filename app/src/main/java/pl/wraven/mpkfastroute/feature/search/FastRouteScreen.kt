@@ -92,6 +92,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import java.io.File
 import java.net.URI
 import java.net.URISyntaxException
@@ -140,6 +141,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var taxDonationReminderSent by remember {
         mutableStateOf(TaxDonationReminderScheduler.wasSent(context))
     }
+    var taxDonationReminderDialogVisible by rememberSaveable { mutableStateOf(false) }
     var bugReportVisible by rememberSaveable { mutableStateOf(false) }
     var radioSelectionVisible by remember { mutableStateOf(false) }
     var radioManagementVisible by remember { mutableStateOf(false) }
@@ -191,57 +193,32 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         }
     }
 
-    fun scheduleTaxDonationReminder() {
-        when (TaxDonationReminderScheduler.schedule(context)) {
-            TaxDonationReminderScheduleResult.SCHEDULED,
-            TaxDonationReminderScheduleResult.ALREADY_SCHEDULED -> {
-                taxDonationReminderEnabled = true
-                viewModel.showMessage("Jednorazowe przypomnienie zaplanowano na 15 lutego 2027.")
-            }
-            TaxDonationReminderScheduleResult.ALREADY_SENT -> {
-                taxDonationReminderSent = true
-                viewModel.showMessage("Przypomnienie o 1,5% podatku zostało już wysłane.")
-            }
-            TaxDonationReminderScheduleResult.DATE_PASSED -> {
-                viewModel.showMessage("Termin przypomnienia 15 lutego 2027 już minął.")
-            }
-            TaxDonationReminderScheduleResult.NOTIFICATIONS_DISABLED -> {
-                viewModel.showMessage(
-                    "Włącz powiadomienia aplikacji w Androidzie, aby otrzymać przypomnienie."
-                )
-            }
+    fun showTaxDonationReminderIfDue() {
+        if (TaxDonationReminderScheduler.markShownIfDue(context)) {
+            taxDonationReminderEnabled = false
+            taxDonationReminderSent = true
+            taxDonationReminderDialogVisible = true
         }
     }
 
-    val taxDonationNotificationPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        if (granted) {
-            scheduleTaxDonationReminder()
-        } else {
-            viewModel.showMessage(
-                "Bez zgody na powiadomienia nie można zaplanować przypomnienia systemowego."
-            )
+    fun scheduleTaxDonationReminder() {
+        when (TaxDonationReminderScheduler.schedule(context)) {
+            TaxDonationReminderScheduleResult.SCHEDULED -> {
+                taxDonationReminderEnabled = true
+                viewModel.showMessage("Jednorazowe przypomnienie w aplikacji ustawiono.")
+            }
+            TaxDonationReminderScheduleResult.ALREADY_SCHEDULED -> {
+                taxDonationReminderEnabled = true
+            }
+            TaxDonationReminderScheduleResult.ALREADY_SENT -> {
+                taxDonationReminderSent = true
+                viewModel.showMessage("Przypomnienie o 1,5% podatku zostało już pokazane.")
+            }
         }
     }
 
     fun enableTaxDonationReminder() {
-        TaxDonationReminderScheduler.prepareNotifications(context)
-        if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            if (isTaxDonationReminderDateInFuture()) {
-                taxDonationNotificationPermissionLauncher.launch(
-                    Manifest.permission.POST_NOTIFICATIONS
-                )
-            } else {
-                scheduleTaxDonationReminder()
-            }
-        } else {
-            scheduleTaxDonationReminder()
-        }
+        scheduleTaxDonationReminder()
     }
 
     val backgroundLocationPermissionLauncher = rememberLauncherForActivityResult(
@@ -316,6 +293,19 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         hasSavedCommuteSchedule && hasCommuteReminderPermissions(context)
     }
 
+    LaunchedEffect(Unit) {
+        TaxDonationReminderScheduler.cancelLegacySystemReminder(context)
+        showTaxDonationReminderIfDue()
+    }
+
+    LaunchedEffect(taxDonationReminderEnabled, taxDonationReminderSent) {
+        if (taxDonationReminderEnabled && !taxDonationReminderSent) {
+            val delayMillis = taxDonationReminderDelayMillis()
+            if (delayMillis > 0) delay(delayMillis)
+            showTaxDonationReminderIfDue()
+        }
+    }
+
     LaunchedEffect(hasSavedCommuteSchedule) {
         CommuteReminderScheduler.synchronize(context, commuteRemindersEnabled)
         if (
@@ -332,6 +322,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         permissionStateRevision += 1
         taxDonationReminderEnabled = TaxDonationReminderScheduler.isEnabled(context)
         taxDonationReminderSent = TaxDonationReminderScheduler.wasSent(context)
+        showTaxDonationReminderIfDue()
         viewModel.refreshServiceNews()
         viewModel.refreshLiveServiceAlerts()
         CommuteReminderScheduler.synchronize(
@@ -621,6 +612,35 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
             onClearDiagnostics = viewModel::clearDiagnostics,
             onDiagnosticsCopied = viewModel::diagnosticsCopied,
             onDismiss = { settingsVisible = false }
+        )
+    }
+
+    if (taxDonationReminderDialogVisible) {
+        AlertDialog(
+            onDismissRequest = { taxDonationReminderDialogVisible = false },
+            title = { Text("FastRoute bez reklam") },
+            text = {
+                Text(
+                    "Jeśli podoba Ci się aplikacja, możesz dobrowolnie przekazać 1,5% " +
+                        "podatku na DT u Oli w Legionowie. KRS: 0000270261. " +
+                        "Cel szczegółowy: DT u Oli w Legionowie 16057."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        taxDonationReminderDialogVisible = false
+                        openExternalUrl(OLA_SUPPORT_INFO_URL)
+                    }
+                ) {
+                    Text("Poznaj inicjatywę")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { taxDonationReminderDialogVisible = false }) {
+                    Text("Zamknij")
+                }
+            }
         )
     }
 
@@ -1980,18 +2000,18 @@ private fun SettingsDialog(
                 }
                 when {
                     taxDonationReminderSent -> {
-                        Text("Przypomnienie o 1,5% podatku zostało już wysłane.")
+                        Text("Przypomnienie o 1,5% podatku zostało już pokazane.")
                     }
                     taxDonationReminderEnabled -> {
-                        Text("Jedno powiadomienie zaplanowano na 15 lutego 2027, około 10:00.")
+                        Text("Przypomnienie w aplikacji pojawi się 15 lutego 2027 około 10:00.")
                         TextButton(onClick = onCancelTaxDonationReminder) {
                             Text("Anuluj przypomnienie")
                         }
                     }
                     else -> {
                         Text(
-                            "Możesz włączyć jedno powiadomienie na 15 lutego 2027. " +
-                                "Android poprosi o zgodę na powiadomienia."
+                            "Możesz włączyć jedno przypomnienie w aplikacji na 15 lutego 2027. " +
+                                "Nie wymaga zgody Androida."
                         )
                         TextButton(onClick = onEnableTaxDonationReminder) {
                             Text("Przypomnij mi 15 lutego 2027")
