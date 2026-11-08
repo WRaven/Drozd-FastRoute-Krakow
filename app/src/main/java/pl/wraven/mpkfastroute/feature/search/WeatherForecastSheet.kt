@@ -1,6 +1,7 @@
 package pl.wraven.mpkfastroute.feature.search
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -121,32 +122,72 @@ private fun CurrentWeatherCard(forecast: WeatherForecast) {
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(condition.symbol, style = MaterialTheme.typography.headlineLarge)
-                Column {
-                    Text(
-                        "${current.temperatureCelsius.toInt()}°C",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(condition.description)
+            BoxWithConstraints {
+                if (maxWidth >= 320.dp) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        CurrentWeatherConditions(
+                            condition = condition,
+                            temperatureCelsius = current.temperatureCelsius,
+                            modifier = Modifier.weight(1f)
+                        )
+                        CurrentWeatherMetrics(forecast, Modifier.weight(1f))
+                    }
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        CurrentWeatherConditions(
+                            condition = condition,
+                            temperatureCelsius = current.temperatureCelsius
+                        )
+                        CurrentWeatherMetrics(forecast)
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CurrentWeatherConditions(
+    condition: WeatherCondition,
+    temperatureCelsius: Double,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier,
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(condition.symbol, style = MaterialTheme.typography.headlineLarge)
+        Column {
             Text(
-                "Odczuwalna ${current.apparentTemperatureCelsius.toInt()}°C · " +
-                    "wilgotność ${current.relativeHumidityPercent}%"
+                "${temperatureCelsius.toInt()}°C",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
             )
-            Text(
-                "Opady ${current.precipitationMillimeters} mm · " +
-                    "wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h"
-            )
-            forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
-                Text("Temperatura gruntu ${formatWeatherValue(temperature)}°C (najbliższa godz.)")
-            }
+            Text(condition.description)
+        }
+    }
+}
+
+@Composable
+private fun CurrentWeatherMetrics(
+    forecast: WeatherForecast,
+    modifier: Modifier = Modifier
+) {
+    val current = forecast.current
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text("Odczuwalna ${current.apparentTemperatureCelsius.toInt()}°C")
+        Text("Wilgotność ${current.relativeHumidityPercent}%")
+        Text("Opady ${formatWeatherValue(current.precipitationMillimeters)} mm")
+        Text("Wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h")
+        forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
+            Text("Grunt ${formatWeatherValue(temperature)}°C")
         }
     }
 }

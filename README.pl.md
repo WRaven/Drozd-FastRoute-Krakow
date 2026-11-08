@@ -46,6 +46,9 @@ pojawia się tylko przy godzinie z dnia kalendarzowego po rozpoczęciu podróży
 Wewnętrzne czasy dnia kursowania pozostają bez zmian, aby zachować kolejność
 nocnych kursów i prawidłowy czas przejazdu.
 
+Od **1.0.3** wybranie „Moja lokalizacja” uzupełnia pole początku przybliżonym
+adresem, jeśli usługa geokodowania jest dostępna.
+
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
 wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
@@ -321,7 +324,7 @@ Testy ostatnich zmian prezentacji:
 Zestaw testów obejmuje także planer, import GTFS, mapowanie feedów Live, zapytania
 pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telefonu:
 
-1. Zainstaluj aktualizację na poprzednią wersję testową; sprawdź zachowanie celów
+1. Zainstaluj aktualizację na poprzednią zgodną wersję; sprawdź zachowanie celów
    i nazw.
 2. Wymuś zatrzymanie i uruchom w trybie ciemnym, następnie jasnym; sprawdź kolory
    startu i czytelność ikon pasków systemowych. Sprawdź nową ikonę oraz logo
@@ -331,8 +334,10 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
    następnie przybliż: kropki przystanków powinny płynnie rosnąć i ponownie maleć
    po oddaleniu; wybrany przystanek pozostaje wyróżniony.
 4. Zmień obie nazwy skrótów, zapisz i zrestartuj; sprawdź nazwy, cele i harmonogramy.
-5. Sprawdź ruch paska ZTP i wiersz gruntu/wiatru w pogodzie, także przy większej
-   czcionce.
+5. Użyj „Moja lokalizacja” i sprawdź przybliżony adres początku. Otwórz pogodę:
+   bieżące warunki powinny wykorzystywać miejsce po prawej, a układ pozostać
+   czytelny przy większej czcionce. Sprawdź też ruch paska ZTP i wiersz
+   gruntu/wiatru.
 6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
    do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
    ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.

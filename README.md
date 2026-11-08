@@ -45,6 +45,9 @@ GTFS hours such as `25:06` (displayed as `01:06`). Route times show `(+1)` only
 when that time is on the calendar day after the journey starts. GTFS service-day
 values remain unchanged internally, preserving night-trip order and durations.
 
+From **1.0.3**, choosing “My location” fills the origin field with an
+approximate address when geocoding is available.
+
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
 the form or choose an existing image with Android's photo picker. Preview or
@@ -345,7 +348,7 @@ Focused tests for the recent presentation changes:
 The suite also covers route planning, GTFS parsing, live-feed mapping, weather
 requests and persistent shortcut names. Unit tests do not replace device checks:
 
-1. Install an update over the preceding test build; confirm saved destinations
+1. Install an update over the preceding compatible app; confirm saved destinations
    and names remain.
 2. Force-stop and relaunch in dark mode, then in light mode; check launch colors
    and readable system-bar icons. Check the new logo on the launcher and startup
@@ -355,8 +358,10 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
    stop dots should grow smoothly and shrink again when zooming out; a selected
    stop remains highlighted.
 4. Rename both shortcuts, save and restart; check names, destinations and schedules.
-5. Check ticker movement and the weather soil-temperature/wind line on the phone,
-   including a larger font setting.
+5. Choose “My location” and check that the origin shows an approximate address.
+   Open weather and check that current conditions use the available right-side
+   space and remain readable with a larger font. Also check ticker movement and
+   the soil-temperature/wind line.
 6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
    the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
    labels. Reopen the same trip and check that passed stops remain accessible.

@@ -2,6 +2,7 @@ package pl.wraven.mpkfastroute.feature.search
 
 import android.content.Context
 import android.database.sqlite.SQLiteException
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -307,16 +308,24 @@ class SearchViewModel @Inject constructor(
             mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
             try {
                 val origin = contextEngine.findCurrentOrigin()
+                val originPlace = try {
+                    origin.place.copy(
+                        label = addressGeocoder.reverseGeocode(origin.place) ?: origin.place.label
+                    )
+                } catch (exception: IOException) {
+                    Log.w(TAG, "Could not resolve the current location to an address.", exception)
+                    origin.place
+                }
                 val allStops = mutableUiState.value.stops.ifEmpty {
                     database.stopDao().getAll()
                 }
                 val nearbyGroups = withContext(Dispatchers.Default) {
-                    nearbyStopGroups(allStops, origin.place)
+                    nearbyStopGroups(allStops, originPlace)
                 }
                 mutableUiState.update {
                     it.copy(
-                        originQuery = "",
-                        originPlace = origin.place,
+                        originQuery = originPlace.label,
+                        originPlace = originPlace,
                         originStop = origin.stop,
                         originStopOptions = origin.stopOptions,
                         originAddressCandidates = emptyList(),
@@ -1993,6 +2002,7 @@ class SearchViewModel @Inject constructor(
     }
 
     private companion object {
+        const val TAG = "SearchViewModel"
         const val SERVICE_NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1_000L
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3
