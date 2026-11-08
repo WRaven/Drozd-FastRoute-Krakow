@@ -122,7 +122,7 @@ class BugReportEmailTest {
         val uri = Uri.parse("content://picker/image/42")
         shadowOf(context.contentResolver).registerInputStream(uri, ByteArrayInputStream(bytes))
         val attachment = runBlocking { importBugReportScreenshot(context, uri) }
-        assertEquals(reports.canonicalFile, attachment.parentFile.canonicalFile)
+        assertEquals(reports.canonicalFile, requireNotNull(attachment.parentFile).canonicalFile)
         assertTrue(attachment.name.endsWith(".png"))
         val decoded = decodeBugReportImage(attachment, 2_000_000)
         assertTrue(decoded.width.toLong() * decoded.height <= 2_000_000)

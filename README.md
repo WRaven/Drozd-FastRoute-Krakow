@@ -315,7 +315,8 @@ External data availability and accuracy remain the responsibility of the provide
 The [app build configuration](./app/build.gradle.kts) targets Java 17 and Android
 SDK 36, with Android 8.0/API 26 as its minimum. Use the checked-in Gradle wrapper,
 a JDK compatible with the project, Android SDK Platform 36 and Build Tools 36.0.0.
-The [CI workflow](./.github/workflows/release.yml) uses Java 17.
+The [CI workflow](./.github/workflows/release.yml) uses Java 21; Robolectric's
+Android API 36 tests require JDK 21 or newer. The app's bytecode target remains 17.
 
 Windows/PowerShell example:
 

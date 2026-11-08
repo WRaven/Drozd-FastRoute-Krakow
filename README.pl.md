@@ -290,7 +290,8 @@ Za dostępność i dokładność danych zewnętrznych odpowiadają ich dostawcy.
 [Konfiguracja aplikacji](./app/build.gradle.kts) używa Java 17 oraz Android
 SDK 36, z minimum Android 8.0/API 26. Korzystaj z dołączonego wrappera Gradle,
 JDK zgodnego z projektem, Android SDK Platform 36 i Build Tools 36.0.0.
-[Workflow CI](./.github/workflows/release.yml) korzysta z Java 17.
+[Workflow CI](./.github/workflows/release.yml) korzysta z Java 21; testy Robolectric
+dla Android API 36 wymagają JDK 21 lub nowszego. Docelowy bytecode aplikacji nadal ma wersję 17.
 
 Przykład dla Windows/PowerShell:
 
