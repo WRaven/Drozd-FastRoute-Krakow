@@ -28,6 +28,8 @@ class OpenMeteoClientTest {
                 assertTrue(request.url.parameters["hourly"].orEmpty().contains("precipitation_probability"))
                 assertTrue(request.url.parameters["hourly"].orEmpty().contains("precipitation"))
                 assertTrue(request.url.parameters["hourly"].orEmpty().contains("soil_temperature_0cm"))
+                assertTrue(request.url.parameters["current"].orEmpty().contains("is_day"))
+                assertTrue(request.url.parameters["hourly"].orEmpty().contains("is_day"))
                 assertTrue(request.url.parameters["current"].orEmpty().contains("surface_pressure"))
                 respond(
                     content = FORECAST_RESPONSE,
@@ -43,7 +45,10 @@ class OpenMeteoClientTest {
 
             assertEquals(1, requestCount)
             assertEquals(12.5, first.current.temperatureCelsius, 0.0)
+            assertEquals(true, first.current.isDay)
             assertEquals(2, first.hourly.size)
+            assertEquals(true, first.hourly[0].isDay)
+            assertEquals(false, first.hourly[1].isDay)
             assertEquals("Europe/Warsaw", first.timezone)
             assertEquals(1007.5, requireNotNull(first.current.surfacePressureHpa), 0.0)
             assertEquals(2.4, first.hourly[1].precipitationMillimeters, 0.0)
@@ -88,6 +93,39 @@ class OpenMeteoClientTest {
         assertEquals("Burza", weatherConditionForCode(95).description)
     }
 
+    @Test
+    fun usesMoonPhasesForClearNightHoursAndKeepsDaytimeAndRainIcons() {
+        val newMoon = weatherConditionForTime(
+            code = 0,
+            isDay = false,
+            time = java.time.LocalDateTime.parse("2024-04-08T18:21"),
+            timezone = "UTC"
+        )
+        val fullMoon = weatherConditionForTime(
+            code = 0,
+            isDay = false,
+            time = java.time.LocalDateTime.parse("2024-04-23T23:49"),
+            timezone = "UTC"
+        )
+        val daytime = weatherConditionForTime(
+            code = 0,
+            isDay = true,
+            time = java.time.LocalDateTime.parse("2024-04-08T12:00"),
+            timezone = "UTC"
+        )
+        val rainyNight = weatherConditionForTime(
+            code = 61,
+            isDay = false,
+            time = java.time.LocalDateTime.parse("2024-04-08T22:00"),
+            timezone = "UTC"
+        )
+
+        assertEquals("🌑", newMoon.symbol)
+        assertEquals("🌕", fullMoon.symbol)
+        assertEquals("☀️", daytime.symbol)
+        assertEquals("🌧️", rainyNight.symbol)
+    }
+
     private companion object {
         const val FORECAST_RESPONSE = """
             {
@@ -99,6 +137,7 @@ class OpenMeteoClientTest {
                 "apparent_temperature": 11.2,
                 "precipitation": 0.1,
                 "weather_code": 2,
+                "is_day": 1,
                 "wind_speed_10m": 8.4,
                 "surface_pressure": 1007.5
               },
@@ -108,6 +147,7 @@ class OpenMeteoClientTest {
                 "precipitation": [0.1, 2.4],
                 "precipitation_probability": [20, 35],
                 "weather_code": [2, 61],
+                "is_day": [1, 0],
                 "wind_speed_10m": [8.4, 9.0],
                 "surface_pressure": [1007.5, 1006.8],
                 "soil_temperature_0cm": [8.2, 7.9]

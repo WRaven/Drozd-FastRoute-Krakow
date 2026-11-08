@@ -7,6 +7,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import java.io.IOException
 import java.time.LocalDateTime
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.serialization.SerialName
@@ -30,6 +31,7 @@ data class CurrentWeather(
     val relativeHumidityPercent: Int,
     val precipitationMillimeters: Double,
     val weatherCode: Int,
+    val isDay: Boolean?,
     val windSpeedKilometersPerHour: Double,
     val surfacePressureHpa: Double?
 )
@@ -40,6 +42,7 @@ data class HourlyWeather(
     val precipitationMillimeters: Double,
     val precipitationProbabilityPercent: Int,
     val weatherCode: Int,
+    val isDay: Boolean?,
     val windSpeedKilometersPerHour: Double,
     val surfacePressureHpa: Double?,
     val soilTemperatureCelsius: Double?
@@ -80,11 +83,11 @@ class OpenMeteoClient @Inject constructor(
             parameter("longitude", longitude)
             parameter(
                 "current",
-                "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,surface_pressure"
+                "temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,is_day,wind_speed_10m,surface_pressure"
             )
             parameter(
                 "hourly",
-                "temperature_2m,precipitation,precipitation_probability,weather_code,wind_speed_10m,surface_pressure,soil_temperature_0cm"
+                "temperature_2m,precipitation,precipitation_probability,weather_code,is_day,wind_speed_10m,surface_pressure,soil_temperature_0cm"
             )
             parameter("forecast_hours", FORECAST_HOURS)
             parameter("temperature_unit", "celsius")
@@ -148,6 +151,7 @@ class OpenMeteoClient @Inject constructor(
                 relativeHumidityPercent = current.relativeHumidityPercent,
                 precipitationMillimeters = current.precipitationMillimeters,
                 weatherCode = current.weatherCode,
+                isDay = current.isDay?.let { it == 1 },
                 windSpeedKilometersPerHour = current.windSpeedKilometersPerHour,
                 surfacePressureHpa = current.surfacePressureHpa
             ),
@@ -159,6 +163,7 @@ class OpenMeteoClient @Inject constructor(
                     precipitationProbabilityPercent =
                         hourly.precipitationProbabilityPercent[index],
                     weatherCode = hourly.weatherCode[index],
+                    isDay = hourly.isDay.getOrNull(index)?.let { it == 1 },
                     windSpeedKilometersPerHour = hourly.windSpeedKilometersPerHour[index],
                     surfacePressureHpa = hourly.surfacePressureHpa.getOrNull(index),
                     soilTemperatureCelsius = hourly.soilTemperatureCelsius.getOrNull(index)
@@ -187,6 +192,8 @@ class OpenMeteoClient @Inject constructor(
         val precipitation: Double,
         @SerialName("weather_code")
         val weatherCode: Int,
+        @SerialName("is_day")
+        val isDay: Int? = null,
         @SerialName("wind_speed_10m")
         val windSpeedKilometersPerHour: Double,
         @SerialName("surface_pressure")
@@ -207,6 +214,8 @@ class OpenMeteoClient @Inject constructor(
         val precipitationProbabilityPercent: List<Int>,
         @SerialName("weather_code")
         val weatherCode: List<Int>,
+        @SerialName("is_day")
+        val isDay: List<Int> = emptyList(),
         @SerialName("wind_speed_10m")
         val windSpeedKilometersPerHour: List<Double>,
         @SerialName("surface_pressure")
@@ -244,3 +253,35 @@ fun weatherConditionForCode(code: Int): WeatherCondition = when (code) {
     in 95..99 -> WeatherCondition("⛈️", "Burza")
     else -> WeatherCondition("🌡️", "Warunki zmienne")
 }
+
+fun weatherConditionForTime(
+    code: Int,
+    isDay: Boolean?,
+    time: LocalDateTime,
+    timezone: String
+): WeatherCondition {
+    val condition = weatherConditionForCode(code)
+    if (isDay != false) return condition
+
+    val moon = moonPhaseSymbol(time, timezone)
+    return when (code) {
+        0 -> condition.copy(symbol = moon)
+        1, 2 -> condition.copy(symbol = "$moon☁️")
+        else -> condition
+    }
+}
+
+internal fun moonPhaseSymbol(time: LocalDateTime, timezone: String): String {
+    val instant = time.atZone(ZoneId.of(timezone)).toInstant()
+    val cyclePosition = (
+        (instant.epochSecond - NEW_MOON_EPOCH_SECONDS).toDouble() /
+            SYNODIC_MONTH_SECONDS
+        ).mod(1.0)
+    val phaseIndex = (cyclePosition * MOON_PHASE_SYMBOLS.size).roundToInt() %
+        MOON_PHASE_SYMBOLS.size
+    return MOON_PHASE_SYMBOLS[phaseIndex]
+}
+
+private const val NEW_MOON_EPOCH_SECONDS = 947_182_440L
+private const val SYNODIC_MONTH_SECONDS = 2_551_442.9
+private val MOON_PHASE_SYMBOLS = listOf("🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘")

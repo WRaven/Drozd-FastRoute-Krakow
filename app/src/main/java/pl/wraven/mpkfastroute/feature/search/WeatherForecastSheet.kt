@@ -30,6 +30,7 @@ import java.util.Locale
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
 import pl.wraven.mpkfastroute.core.weather.WeatherCondition
 import pl.wraven.mpkfastroute.core.weather.weatherConditionForCode
+import pl.wraven.mpkfastroute.core.weather.weatherConditionForTime
 
 @Composable
 internal fun WeatherForecastSheet(
@@ -72,7 +73,12 @@ internal fun WeatherForecastSheet(
                 forecast.hourly.forEach { hour ->
                     HourlyWeatherRow(
                         time = hour.time.format(HOURLY_TIME_FORMATTER),
-                        condition = weatherConditionForCode(hour.weatherCode),
+                        condition = weatherConditionForTime(
+                            code = hour.weatherCode,
+                            isDay = hour.isDay,
+                            time = hour.time,
+                            timezone = forecast.timezone
+                        ),
                         temperature = hour.temperatureCelsius,
                         precipitationProbability = hour.precipitationProbabilityPercent,
                         precipitationMillimeters = hour.precipitationMillimeters,
@@ -111,7 +117,12 @@ internal fun WeatherForecastSheet(
 @Composable
 private fun CurrentWeatherCard(forecast: WeatherForecast) {
     val current = forecast.current
-    val condition = weatherConditionForCode(current.weatherCode)
+    val condition = weatherConditionForTime(
+        code = current.weatherCode,
+        isDay = current.isDay,
+        time = current.time,
+        timezone = forecast.timezone
+    )
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
             modifier = Modifier.padding(16.dp),
