@@ -55,6 +55,9 @@ From **1.0.5**, the Live map's “My location” button recenters the map. Desti
 address history scrolls above the keyboard; selecting an address starts the route
 search and hides the keyboard.
 
+From **1.0.6**, current precipitation and wind share one row; no pressure data is
+added.
+
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
 the form or choose an existing image with Android's photo picker. Preview or
@@ -371,8 +374,9 @@ requests and persistent shortcut names. Unit tests do not replace device checks:
    recent addresses stay visible above the keyboard; selecting one hides the
    keyboard and starts the route search, while dismissing the keyboard restores
    the full view. Open weather and check that current conditions use the
-   available right-side space and remain readable with a larger font. Also check
-   ticker movement and the soil-temperature/wind line.
+   available right-side space and remain readable with a larger font. Check that
+   current precipitation and wind share a row. Also check ticker movement and
+   the soil-temperature/wind line.
 6. Tap a tram (for example line 22) and a bus: check the whole route, scroll from
    the first to last stop, and compare arrival time/minutes with LIVE or ROZKŁAD
    labels. Reopen the same trip and check that passed stops remain accessible.

@@ -184,8 +184,15 @@ private fun CurrentWeatherMetrics(
     ) {
         Text("Odczuwalna ${current.apparentTemperatureCelsius.toInt()}°C")
         Text("Wilgotność ${current.relativeHumidityPercent}%")
-        Text("Opady ${formatWeatherValue(current.precipitationMillimeters)} mm")
-        Text("Wiatr ${current.windSpeedKilometersPerHour.toInt()} km/h")
+        Text(
+            formatCurrentWeatherPrecipitationAndWind(
+                current.precipitationMillimeters,
+                current.windSpeedKilometersPerHour
+            ),
+            maxLines = 1,
+            overflow = TextOverflow.Clip,
+            style = MaterialTheme.typography.bodySmall
+        )
         forecast.hourly.firstOrNull()?.soilTemperatureCelsius?.let { temperature ->
             Text("Grunt ${formatWeatherValue(temperature)}°C")
         }
@@ -243,6 +250,13 @@ internal fun formatHourlyWeatherDetails(
 ): String =
     "Grunt ${soilTemperatureCelsius?.let(::formatWeatherValue) ?: "—"}°C · " +
         "wiatr ${windSpeed.toInt()} km/h"
+
+internal fun formatCurrentWeatherPrecipitationAndWind(
+    precipitationMillimeters: Double,
+    windSpeedKilometersPerHour: Double
+): String =
+    "Opady ${formatWeatherValue(precipitationMillimeters)} mm · " +
+        "wiatr ${windSpeedKilometersPerHour.toInt()} km/h"
 
 private fun formatWeatherValue(value: Double): String =
     String.format(Locale.forLanguageTag("pl-PL"), "%.1f", value)

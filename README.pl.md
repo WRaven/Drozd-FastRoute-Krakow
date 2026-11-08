@@ -56,6 +56,9 @@ Od **1.0.5** przycisk „Moja lokalizacja” w Live ponownie centruje mapę.
 Historia adresów celu jest przewijana nad klawiaturę, a wybranie adresu uruchamia
 wyszukiwanie trasy i chowa klawiaturę.
 
+Od **1.0.6** bieżące opady i wiatr są wyświetlane w jednym wierszu, bez
+dodawania ciśnienia.
+
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
 wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
@@ -349,7 +352,7 @@ pogodowe i trwały zapis nazw skrótów. Testy jednostkowe nie zastępują telef
    wyszukiwanie, a samo zamknięcie klawiatury przywraca pełny widok. Otwórz
    pogodę: bieżące warunki powinny wykorzystywać miejsce po prawej, a układ
    pozostać czytelny przy większej czcionce. Sprawdź też ruch paska ZTP i wiersz
-   gruntu/wiatru.
+   gruntu/wiatru oraz jeden wspólny wiersz opadów i wiatru w bieżących warunkach.
 6. Kliknij tramwaj (np. 22) i autobus: sprawdź całą trasę, przewiń od pierwszego
    do ostatniego przystanku i porównaj godzinę/minuty z oznaczeniem LIVE lub
    ROZKŁAD. Otwórz ponownie ten kurs; minięte przystanki mają pozostać dostępne.

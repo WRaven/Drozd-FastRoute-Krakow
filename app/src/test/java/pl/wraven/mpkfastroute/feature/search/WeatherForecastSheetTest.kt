@@ -18,4 +18,12 @@ class WeatherForecastSheetTest {
     fun keepsTheMissingSoilTemperatureIndicator() {
         assertEquals("Grunt —°C · wiatr 0 km/h", formatHourlyWeatherDetails(null, 0.0))
     }
+
+    @Test
+    fun combinesCurrentPrecipitationAndWindOnOneCompactLine() {
+        assertEquals(
+            "Opady 0,0 mm · wiatr 1 km/h",
+            formatCurrentWeatherPrecipitationAndWind(0.0, 1.9)
+        )
+    }
 }
