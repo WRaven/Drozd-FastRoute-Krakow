@@ -26,6 +26,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -994,22 +995,6 @@ private fun SearchContent(
                             enabled = !state.isImporting,
                             label = { Text("🗺 Live") }
                     )
-                    AssistChip(
-                            onClick = onOpenWeather,
-                            enabled = !state.isLoadingWeather,
-                            label = {
-                                Text(if (state.isLoadingWeather) "🌤 Ładowanie..." else "🌤 Pogoda")
-                            }
-                        )
-                    Button(
-                        onClick = onToggleRadio,
-                        enabled = !state.isSearching,
-                    ) {
-                        Text(
-                            if (state.isRadioPlaying) "■ Zatrzymaj radio"
-                            else "▶ Uruchom radio"
-                        )
-                    }
                         AssistChip(
                         onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
                         enabled = !state.isSearching && !state.isImporting,
@@ -1077,16 +1062,47 @@ private fun SearchContent(
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onChooseRadio) {
+                    Button(
+                        onClick = onToggleRadio,
+                        enabled = !state.isSearching,
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            if (state.isRadioPlaying) "■ Zatrzymaj radio"
+                            else "▶ Uruchom radio",
+                            maxLines = 1
+                        )
+                    }
+                    TextButton(
+                        onClick = onChooseRadio,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
                         Text(
                             state.radioStations
                                 .firstOrNull { it.id == state.lastSelectedRadioId }
-                                ?.name ?: "Wybierz"
+                                ?.name ?: "Wybierz",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
-                    TextButton(onClick = onManageRadio) {
+                    TextButton(
+                        onClick = onOpenWeather,
+                        enabled = !state.isLoadingWeather,
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
+                        Text(
+                            if (state.isLoadingWeather) "🌤 Ładowanie..." else "🌤 Pogoda",
+                            maxLines = 1
+                        )
+                    }
+                    TextButton(
+                        onClick = onManageRadio,
+                        contentPadding = PaddingValues(horizontal = 4.dp)
+                    ) {
                         Text("⚙")
                     }
                 }
