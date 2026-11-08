@@ -59,6 +59,17 @@ From **1.0.6**, current precipitation and wind share one row; no pressure data
 is added. The current details row now includes soil temperature too, and hourly
 precipitation, chance, soil temperature, and wind share one row.
 
+## No ads and optional support
+
+Drozd FastRoute was created out of dislike of advertising, so it displays no
+ads. If you like the app and want to support a good cause, you can optionally
+allocate 1.5% of your tax to **DT u Oli w Legionowie**, suggested by the author's
+wife. Enter KRS **0000270261** and the specific purpose **DT u Oli w Legionowie
+16057**. [Read about the initiative and how to support it](https://fsmm.pl/partner/aleksandra-lachnowicz/).
+This is entirely optional and does not affect app functionality. Settings also
+lets users opt in to one system reminder on **February 15, 2027, at about 10:00**
+(Android notification permission required); it can be canceled beforehand.
+
 **Settings → Zgłoś błąd (Report a bug)** opens a form with a title, description
 and optional reproduction steps. Add a screenshot of the app screen underneath
 the form or choose an existing image with Android's photo picker. Preview or
@@ -87,7 +98,7 @@ the permanent package identity; use the stable APK for normal use.
 | Radio | Use **Uruchom radio** / **Zatrzymaj radio**, choose a station, or use the gear button to manage streams. Android media controls remain available while playing. |
 | Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder is scheduled 15 minutes before the calculated departure. |
 | Timetable and diagnostics | Settings provides **Odśwież rozkład GTFS** and a bounded search diagnostic log with copy/clear actions. The automatic updater also checks the timetable at startup and daily. |
-| Sharing | Settings contains a QR code and a link to GitHub Releases, plus contact and release-detail actions. |
+| Sharing | Settings contains a QR code, a link to GitHub Releases, contact details, and optional information about supporting DT u Oli w Legionowie. |
 
 At city-wide map zoom (level 13 or lower), unselected stops are 5 dp dots. They
 grow smoothly between zoom levels 13 and 15 and regain their previous 14 dp size

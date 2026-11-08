@@ -60,6 +60,17 @@ Od **1.0.6** bieżące opady i wiatr są w jednym wierszu, bez dodawania ciśnie
 Obecnie ten wiersz zawiera też temperaturę gruntu; prognoza godzinowa łączy
 opady, szansę opadu, grunt i wiatr w jednym wierszu.
 
+## Bez reklam i opcjonalne wsparcie
+
+Drozd FastRoute powstał z niechęci do reklam, dlatego ich nie wyświetla. Jeśli
+aplikacja Ci się podoba i chcesz wesprzeć dobry cel, możesz dobrowolnie
+przekazać 1,5% podatku na **DT u Oli w Legionowie** — inicjatywę zaproponowaną
+przez żonę autora. W zeznaniu wpisz KRS **0000270261** i cel szczegółowy
+**DT u Oli w Legionowie 16057**. [Poznaj inicjatywę i szczegóły wsparcia](https://fsmm.pl/partner/aleksandra-lachnowicz/).
+To całkowicie dobrowolne i nie wpływa na działanie aplikacji. W Ustawieniach
+możesz także włączyć jedno przypomnienie systemowe na **15 lutego 2027 około
+10:00**; wymaga ono zgody Androida na powiadomienia i można je anulować.
+
 **Ustawienia → Zgłoś błąd** otwiera formularz z tytułem, opisem i opcjonalnymi
 krokami odtworzenia. Możesz wykonać zrzut ekranu aplikacji pod formularzem albo
 wybrać istniejący obraz w systemowym selektorze zdjęć. Sprawdź podgląd lub usuń
@@ -87,7 +98,7 @@ stałą tożsamość pakietu; do normalnego korzystania wybierz stabilny APK.
 | Radio | Użyj **Uruchom radio** / **Zatrzymaj radio**, wybierz stację lub zarządzaj strumieniami przyciskiem z kołem zębatym. Podczas odtwarzania działają systemowe kontrolki multimediów. |
 | Przypomnienia o dojeździe | Zapisz harmonogram domu/pracy i wybierz **Włącz powiadomienia**. Nadaj wymagane uprawnienia do powiadomień i lokalizacji w tle. Przypomnienie jest planowane 15 minut przed obliczonym wyjazdem. |
 | Rozkład i diagnostyka | W Ustawieniach dostępne są **Odśwież rozkład GTFS** i ograniczony dziennik diagnostyczny z kopiowaniem/czyszczeniem. Automatyczna aktualizacja rozkładu sprawdza dane przy starcie i codziennie. |
-| Udostępnianie | Ustawienia zawierają kod QR i link do wydań na GitHub, kontakt oraz szczegóły wydania. |
+| Udostępnianie | Ustawienia zawierają kod QR, link do wydań na GitHub, kontakt oraz opcjonalne informacje o wsparciu DT u Oli w Legionowie. |
 
 Przy widoku całego miasta (zoom 13 lub mniejszy) niezaznaczone przystanki mają
 kropki 5 dp. Między poziomami 13 i 15 płynnie rosną, a od poziomu 15 odzyskują
