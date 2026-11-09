@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
@@ -905,6 +906,7 @@ private fun DestinationQuickActionChip(
     Surface(
         modifier = Modifier
             .heightIn(min = 32.dp)
+            .widthIn(max = 120.dp)
             .combinedClickable(
                 enabled = enabled,
                 role = Role.Button,
@@ -926,9 +928,10 @@ private fun DestinationQuickActionChip(
     ) {
         Text(
             text = label,
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             style = MaterialTheme.typography.labelLarge,
-            maxLines = 1
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -1027,38 +1030,50 @@ private fun SearchContent(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                Text("Szybkie akcje", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        "Szybkie akcje",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    DestinationQuickActionChip(
+                        label = "🏠 " + if (state.hasHomeDestination) {
+                            state.destinationShortcutNames.home
+                        } else {
+                            "Ustaw: ${state.destinationShortcutNames.home}"
+                        },
+                        enabled = !state.isSearching && !state.isImporting,
+                        longClickLabel = "Zapisz wybrany cel jako dom",
+                        onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
+                        onLongClick = onSetHome
+                    )
+                    DestinationQuickActionChip(
+                        label = "🏢 " + if (state.hasWorkDestination) {
+                            state.destinationShortcutNames.work
+                        } else {
+                            "Ustaw: ${state.destinationShortcutNames.work}"
+                        },
+                        enabled = !state.isSearching && !state.isImporting,
+                        longClickLabel = "Zapisz wybrany cel jako pracę",
+                        onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
+                        onLongClick = onSetWork
+                    )
+                }
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AssistChip(
-                            onClick = onOpenLiveMap,
-                            enabled = !state.isImporting,
-                            label = { Text("🗺 Live") }
+                        onClick = onOpenLiveMap,
+                        enabled = !state.isImporting,
+                        label = { Text("🗺 Live") }
                     )
-                        DestinationQuickActionChip(
-                            label = "🏠 " + if (state.hasHomeDestination) {
-                                state.destinationShortcutNames.home
-                            } else {
-                                "Ustaw: ${state.destinationShortcutNames.home}"
-                            },
-                            enabled = !state.isSearching && !state.isImporting,
-                            longClickLabel = "Zapisz wybrany cel jako dom",
-                            onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
-                            onLongClick = onSetHome
-                        )
-                        DestinationQuickActionChip(
-                            label = "🏢 " + if (state.hasWorkDestination) {
-                                state.destinationShortcutNames.work
-                            } else {
-                                "Ustaw: ${state.destinationShortcutNames.work}"
-                            },
-                            enabled = !state.isSearching && !state.isImporting,
-                            longClickLabel = "Zapisz wybrany cel jako pracę",
-                            onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
-                            onLongClick = onSetWork
-                        )
                     if (state.hasWorkDestination) {
                         AssistChip(
                             onClick = onEditWorkSchedule,
