@@ -23,4 +23,24 @@ class RouteSearchWindowTest {
         assertEquals(anchor.minusHours(2), window.startDateTime)
         assertEquals(anchor, window.endDateTime)
     }
+
+    @Test
+    fun earlierWindowJoinsAtCurrentWindowStart() {
+        val current = routeSearchWindow(anchor, JourneyTimeMode.DEPART_AFTER)
+
+        val earlier = adjacentRouteSearchWindow(current, RouteSearchDirection.EARLIER)
+
+        assertEquals(current.startDateTime.minusHours(2), earlier.startDateTime)
+        assertEquals(current.startDateTime, earlier.endDateTime)
+    }
+
+    @Test
+    fun laterWindowJoinsAtCurrentWindowEnd() {
+        val current = routeSearchWindow(anchor, JourneyTimeMode.DEPART_AFTER)
+
+        val later = adjacentRouteSearchWindow(current, RouteSearchDirection.LATER)
+
+        assertEquals(current.endDateTime, later.startDateTime)
+        assertEquals(current.endDateTime.plusHours(2), later.endDateTime)
+    }
 }

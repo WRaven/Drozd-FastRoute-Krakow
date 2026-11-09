@@ -1430,9 +1430,11 @@ private fun SearchContent(
                 style = MaterialTheme.typography.headlineSmall
             )
         }
-        val routeSearchAnchor = state.routeSearchAnchor
+        val routeSearchWindowStart = state.routeSearchWindowStart
+        val routeSearchWindowEnd = state.routeSearchWindowEnd
         if (
-            routeSearchAnchor != null &&
+            routeSearchWindowStart != null &&
+            routeSearchWindowEnd != null &&
             !state.isSearching &&
             (
                 state.journeyOptions.isNotEmpty() ||
@@ -1440,17 +1442,13 @@ private fun SearchContent(
                     state.routeSearchMessage != null
                 )
         ) {
-            val searchWindow = routeSearchWindow(
-                routeSearchAnchor,
-                state.routeTimePlan?.mode
-            )
             val timeFormatter = DateTimeFormatter.ofPattern("dd.MM HH:mm")
             Text(
-                "Zakres: ${searchWindow.startDateTime.format(timeFormatter)} – " +
-                    searchWindow.endDateTime.format(timeFormatter),
+                "Zakres: ${routeSearchWindowStart.format(timeFormatter)} – " +
+                    routeSearchWindowEnd.format(timeFormatter),
                 style = MaterialTheme.typography.bodyMedium
             )
-            if (!searchWindow.endDateTime.isAfter(LocalDateTime.now())) {
+            if (!routeSearchWindowEnd.isAfter(LocalDateTime.now())) {
                 Text(
                     "Odjazdy z rozkładu, nie dane na żywo.",
                     style = MaterialTheme.typography.bodySmall
@@ -1462,14 +1460,14 @@ private fun SearchContent(
                     enabled = !state.isImporting,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("← Wcześniejsze")
+                    Text("← 4 wcześniejsze")
                 }
                 TextButton(
                     onClick = onSearchLater,
                     enabled = !state.isImporting,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("Następne →")
+                    Text("4 następne →")
                 }
             }
         }

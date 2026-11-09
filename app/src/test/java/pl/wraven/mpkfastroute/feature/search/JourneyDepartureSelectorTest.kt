@@ -48,6 +48,18 @@ class JourneyDepartureSelectorTest {
     }
 
     @Test
+    fun limitsAJourneyPageToFourDistinctDepartures() {
+        val selected = selectDistinctJourneyDepartures(
+            candidates = (1..6).map { index ->
+                journey("trip-$index", departure = index * 100, arrival = index * 100 + 500)
+            },
+            maxResults = ROUTE_SEARCH_PAGE_SIZE
+        )
+
+        assertEquals(4, selected.size)
+    }
+
+    @Test
     fun terminalWalkIsShownAsDestinationAccessNotAsATransfer() {
         val journey = CsaJourney(
             departureTime = 0,

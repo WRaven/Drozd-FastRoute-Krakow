@@ -4,11 +4,18 @@ import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import java.time.LocalDateTime
 
 internal const val ROUTE_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
+internal const val ROUTE_SEARCH_PAGE_SIZE = 4
+internal const val MAX_ROUTE_SEARCH_WINDOWS_PER_PAGE = 12
 
 internal data class RouteSearchWindow(
     val startDateTime: LocalDateTime,
     val endDateTime: LocalDateTime
 )
+
+internal enum class RouteSearchDirection {
+    EARLIER,
+    LATER
+}
 
 internal fun routeSearchWindow(
     anchor: LocalDateTime,
@@ -22,5 +29,19 @@ internal fun routeSearchWindow(
     RouteSearchWindow(
         startDateTime = anchor,
         endDateTime = anchor.plusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
+    )
+}
+
+internal fun adjacentRouteSearchWindow(
+    window: RouteSearchWindow,
+    direction: RouteSearchDirection
+): RouteSearchWindow = when (direction) {
+    RouteSearchDirection.EARLIER -> RouteSearchWindow(
+        startDateTime = window.startDateTime.minusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong()),
+        endDateTime = window.startDateTime
+    )
+    RouteSearchDirection.LATER -> RouteSearchWindow(
+        startDateTime = window.endDateTime,
+        endDateTime = window.endDateTime.plusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
     )
 }
