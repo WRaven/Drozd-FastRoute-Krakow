@@ -25,11 +25,6 @@ object RadioStations {
             id = "radio-pogoda",
             name = "Radio Pogoda",
             streamUrl = "https://radiostream.pl/tuba140-1.aac"
-        ),
-        RadioStation(
-            id = "radio-krakow",
-            name = "Radio Kraków",
-            streamUrl = "http://stream3.nadaje.com:9118/radiokrakow"
         )
     )
 }

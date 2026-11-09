@@ -7,6 +7,10 @@ import pl.wraven.mpkfastroute.core.csa.Connection
 import pl.wraven.mpkfastroute.core.csa.Footpath
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.StopAccess
+import pl.wraven.mpkfastroute.core.live.LiveTripStopUpdate
+import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 class JourneyDepartureSelectorTest {
     @Test
@@ -57,6 +61,91 @@ class JourneyDepartureSelectorTest {
         )
 
         assertEquals(4, selected.size)
+    }
+
+    @Test
+    fun ordersPagedJourneysByTransitDepartureInsteadOfSearchWindowStart() {
+        val selected = selectDistinctJourneyDepartures(
+            candidates = listOf(
+                journey("trip-1", departure = 100, arrival = 700),
+                journey("trip-2", departure = 300, arrival = 800).copy(departureTime = 100),
+                journey("trip-3", departure = 500, arrival = 900).copy(departureTime = 100),
+                journey("trip-4", departure = 700, arrival = 1_000).copy(departureTime = 100),
+                journey("trip-5", departure = 900, arrival = 1_100).copy(departureTime = 100)
+            ),
+            maxResults = ROUTE_SEARCH_PAGE_SIZE,
+            latestFirst = true,
+            orderByTransitDeparture = true
+        )
+
+        assertEquals(
+            listOf("trip-5", "trip-4", "trip-3", "trip-2"),
+            selected.map { it.firstTransitConnection()?.tripId }
+        )
+    }
+
+    @Test
+    fun convertsOvernightGtfsDepartureToTheCorrectDateTime() {
+        val journey = journey(
+            "trip-overnight",
+            departure = 24 * 60 * 60 + 2 * 60 * 60 + 15 * 60,
+            arrival = 24 * 60 * 60 + 2 * 60 * 60 + 45 * 60
+        )
+
+        assertEquals(
+            LocalDateTime.of(2026, 11, 10, 2, 15),
+            journey.firstTransitDepartureDateTime(LocalDate.of(2026, 11, 9))
+        )
+    }
+
+    @Test
+    fun usesLiveDelayToOrderPagedJourneys() {
+        val delayed = journey("trip-delayed", departure = 100, arrival = 700)
+        val onTime = journey("trip-on-time", departure = 200, arrival = 800)
+        val selected = selectDistinctJourneyDepartures(
+            candidates = listOf(delayed, onTime),
+            maxResults = ROUTE_SEARCH_PAGE_SIZE,
+            latestFirst = true,
+            orderByTransitDeparture = true,
+            departureDateTimeOverrides = mapOf(
+                delayed to LocalDateTime.of(2026, 11, 9, 16, 35),
+                onTime to LocalDateTime.of(2026, 11, 9, 16, 20)
+            )
+        )
+
+        assertEquals(
+            listOf("trip-delayed", "trip-on-time"),
+            selected.map { it.firstTransitConnection()?.tripId }
+        )
+    }
+
+    @Test
+    fun estimatesFirstDepartureFromLiveStopDelay() {
+        val scheduledDeparture = LocalDateTime.of(2026, 11, 9, 16, 0)
+        val journey = journey("trip-delayed", departure = 16 * 60 * 60, arrival = 16 * 60 * 60 + 600)
+        val update = LiveTripUpdate(
+            tripId = "trip-delayed",
+            stopTimeUpdates = listOf(
+                LiveTripStopUpdate(
+                    stopSequence = null,
+                    stopId = "origin",
+                    arrivalDelaySeconds = null,
+                    departureDelaySeconds = 15 * 60,
+                    departureTimeEpochSeconds = null
+                )
+            ),
+            tripDelaySeconds = null,
+            fetchedAt = scheduledDeparture,
+            serviceDate = LocalDate.of(2026, 11, 9)
+        )
+
+        assertEquals(
+            scheduledDeparture.plusMinutes(15),
+            journey.estimatedFirstTransitDepartureDateTime(
+                scheduledDeparture = scheduledDeparture,
+                tripUpdates = mapOf(update.tripId to update)
+            )
+        )
     }
 
     @Test

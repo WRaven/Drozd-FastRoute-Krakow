@@ -15,7 +15,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.DateTimeException
+import java.time.Instant
 import java.time.LocalDateTime
+import java.util.IdentityHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import javax.inject.Inject
@@ -47,6 +49,9 @@ import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsScheduleUpdateScheduler
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
+import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
+import pl.wraven.mpkfastroute.core.live.isLiveTripUpdateFresh
+import pl.wraven.mpkfastroute.core.live.transitVehicleModeForGtfsRouteType
 import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
 import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
@@ -77,6 +82,16 @@ import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoRequestException
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
+
+data class LiveJourneyDepartureEstimate(
+    val scheduledDeparture: LocalDateTime,
+    val estimatedDeparture: LocalDateTime
+)
+
+private data class LiveDepartureLookup(
+    val tripUpdates: Map<String, LiveTripUpdate>,
+    val warning: String?
+)
 
 data class SearchUiState(
     val destinationShortcutNames: DestinationShortcutNames = DestinationShortcutNames(),
@@ -116,6 +131,7 @@ data class SearchUiState(
     val routeTimePlan: JourneyTimePlan? = null,
     val routeSearchWindowStart: LocalDateTime? = null,
     val routeSearchWindowEnd: LocalDateTime? = null,
+    val liveJourneyDepartureEstimates: Map<String, LiveJourneyDepartureEstimate> = emptyMap(),
     val liveDepartures: LiveDeparturesResult? = null,
     val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
     val isLoadingLiveVehicles: Boolean = false,
@@ -1002,20 +1018,33 @@ class SearchViewModel @Inject constructor(
         val state = mutableUiState.value
         val start = state.routeSearchWindowStart ?: return
         val end = state.routeSearchWindowEnd ?: return
-        searchRouteAt(
-            window = adjacentRouteSearchWindow(
+        val boundary = when (direction) {
+            RouteSearchDirection.EARLIER -> start
+            RouteSearchDirection.LATER -> end
+        }
+        val searchWindow = when (direction) {
+            RouteSearchDirection.EARLIER -> adjacentRouteSearchWindow(
                 RouteSearchWindow(start, end),
                 direction
-            ),
+            )
+            RouteSearchDirection.LATER -> RouteSearchWindow(
+                startDateTime = boundary.minusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong()),
+                endDateTime = boundary.plusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
+            )
+        }
+        searchRouteAt(
+            window = searchWindow,
             allowPastPlan = true,
-            pageDirection = direction
+            pageDirection = direction,
+            pageBoundary = boundary
         )
     }
 
     private fun searchRouteAt(
         window: RouteSearchWindow,
         allowPastPlan: Boolean,
-        pageDirection: RouteSearchDirection? = null
+        pageDirection: RouteSearchDirection? = null,
+        pageBoundary: LocalDateTime? = null
     ) {
         cancelCurrentLocationResolution()
         val state = mutableUiState.value
@@ -1082,6 +1111,7 @@ class SearchViewModel @Inject constructor(
                     statusMessage = null,
                     journey = null,
                     journeyOptions = emptyList(),
+                    liveJourneyDepartureEstimates = emptyMap(),
                     arrivalTarget = null,
                     routeSearchWindowStart = window.startDateTime,
                     routeSearchWindowEnd = window.endDateTime,
@@ -1090,7 +1120,7 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val now = LocalDateTime.now()
-                val candidates = mutableListOf<CsaJourney>()
+                val candidateEntries = mutableListOf<Pair<CsaJourney, LocalDateTime>>()
                 var searchedWindow = window
                 var searchedPageWindow = window
                 val searchWindowCount = if (pageDirection == null) {
@@ -1099,7 +1129,7 @@ class SearchViewModel @Inject constructor(
                     MAX_ROUTE_SEARCH_WINDOWS_PER_PAGE
                 }
                 for (windowIndex in 0 until searchWindowCount) {
-                    candidates += routePlanner.findJourneys(
+                    val windowCandidates = routePlanner.findJourneys(
                         originAccesses = originAccesses,
                         destinationAccesses = destinationAccesses,
                         startDateTime = searchedWindow.startDateTime,
@@ -1109,13 +1139,27 @@ class SearchViewModel @Inject constructor(
                             ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
                             ?.let { searchedWindow.endDateTime }
                     )
+                    val serviceDate = GtfsServiceClock
+                        .from(searchedWindow.startDateTime)
+                        .serviceDate
+                    candidateEntries += windowCandidates.map { journey ->
+                        journey to journey.firstTransitDepartureDateTime(serviceDate)
+                    }
                     if (pageDirection == null) {
                         break
                     }
+                    val eligibleCandidates = candidateEntries.filter { (_, departureDateTime) ->
+                        isDepartureWithinPage(
+                            departureDateTime = departureDateTime,
+                            boundary = pageBoundary,
+                            direction = pageDirection
+                        )
+                    }
                     val pageJourneyCount = selectDistinctJourneyDepartures(
-                        candidates = candidates,
+                        candidates = eligibleCandidates.map { it.first },
                         maxResults = ROUTE_SEARCH_PAGE_SIZE,
-                        latestFirst = pageDirection == RouteSearchDirection.EARLIER
+                        latestFirst = pageDirection == RouteSearchDirection.EARLIER,
+                        orderByTransitDeparture = true
                     ).size
                     if (pageDirection == RouteSearchDirection.EARLIER) {
                         searchedPageWindow = RouteSearchWindow(
@@ -1134,6 +1178,27 @@ class SearchViewModel @Inject constructor(
                     searchedWindow = adjacentRouteSearchWindow(searchedWindow, pageDirection)
                 }
                 val currentServiceTime = GtfsServiceClock.from(now)
+                val liveDepartureLookup = if (pageDirection != null) {
+                    getLiveDepartureLookup(candidateEntries, now)
+                } else {
+                    LiveDepartureLookup(emptyMap(), null)
+                }
+                val departureDateTimeOverrides = IdentityHashMap<CsaJourney, LocalDateTime>()
+                candidateEntries.forEach { (journey, scheduledDeparture) ->
+                    departureDateTimeOverrides[journey] =
+                        journey.estimatedFirstTransitDepartureDateTime(
+                            scheduledDeparture = scheduledDeparture,
+                            tripUpdates = liveDepartureLookup.tripUpdates
+                        )
+                }
+                val eligibleCandidates = candidateEntries.filter { (journey, departureDateTime) ->
+                    isDepartureWithinPage(
+                        departureDateTime = departureDateTimeOverrides[journey] ?: departureDateTime,
+                        boundary = pageBoundary,
+                        direction = pageDirection
+                    )
+                }
+                val candidates = eligibleCandidates.map { it.first }
                 val journeyOptions = selectDistinctJourneyDepartures(
                     candidates = candidates,
                     maxResults = pageDirection?.let { ROUTE_SEARCH_PAGE_SIZE }
@@ -1142,10 +1207,44 @@ class SearchViewModel @Inject constructor(
                         RouteSearchDirection.EARLIER -> true
                         RouteSearchDirection.LATER -> false
                         null -> routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
-                    }
+                    },
+                    orderByTransitDeparture = pageDirection != null,
+                    departureDateTimeOverrides = departureDateTimeOverrides
+                        .takeIf { pageDirection != null }
                 )
+                val displayedDepartureTimes = journeyOptions.mapNotNull { journey ->
+                    departureDateTimeOverrides[journey]
+                        ?: eligibleCandidates.firstOrNull { it.first === journey }?.second
+                }
+                val liveJourneyDepartureEstimates = journeyOptions.mapNotNull { journey ->
+                    val tripId = journey.firstTransitConnection()?.tripId ?: return@mapNotNull null
+                    val scheduledDeparture = eligibleCandidates
+                        .firstOrNull { it.first === journey }
+                        ?.second
+                        ?: return@mapNotNull null
+                    val estimatedDeparture = departureDateTimeOverrides[journey]
+                        ?: scheduledDeparture
+                    if (estimatedDeparture == scheduledDeparture) {
+                        null
+                    } else {
+                        tripId to LiveJourneyDepartureEstimate(
+                            scheduledDeparture = scheduledDeparture,
+                            estimatedDeparture = estimatedDeparture
+                        )
+                    }
+                }.toMap()
+                val earliestDisplayedDeparture = displayedDepartureTimes.minOrNull()
+                val latestDisplayedDeparture = displayedDepartureTimes.maxOrNull()
+                val earlierBoundary = if (pageDirection == null) {
+                    earliestDisplayedDeparture
+                        ?: routeTimePlan?.dateTime
+                        ?: searchedPageWindow.startDateTime
+                } else {
+                    earliestDisplayedDeparture ?: searchedPageWindow.startDateTime
+                }
+                val laterBoundary = latestDisplayedDeparture ?: searchedPageWindow.endDateTime
                 diagnostics.record(
-                    "Wyniki: ${candidates.size} kandydatów, " +
+                    "Wyniki: ${candidateEntries.size} kandydatów, " +
                         "${journeyOptions.size} tras po wyborze alternatyw."
                 )
                 val firstJourney = journeyOptions.firstOrNull()
@@ -1185,8 +1284,9 @@ class SearchViewModel @Inject constructor(
                         destinationStop = selectedDestination,
                         journey = firstJourney,
                         journeyOptions = journeyOptions,
-                        routeSearchWindowStart = searchedPageWindow.startDateTime,
-                        routeSearchWindowEnd = searchedPageWindow.endDateTime,
+                        liveJourneyDepartureEstimates = liveJourneyDepartureEstimates,
+                        routeSearchWindowStart = earlierBoundary,
+                        routeSearchWindowEnd = laterBoundary,
                         liveDepartures = null,
                         routeSearchMessage = if (firstJourney == null) {
                             noJourneyMessage
@@ -1196,7 +1296,7 @@ class SearchViewModel @Inject constructor(
                         statusMessage = if (firstJourney == null) {
                             noJourneyMessage
                         } else {
-                            null
+                            liveDepartureLookup.warning
                         }
                     )
                 }
@@ -1278,6 +1378,75 @@ class SearchViewModel @Inject constructor(
                 mutableUiState.update { it.copy(isSearching = false) }
             }
         }
+    }
+
+    private suspend fun getLiveDepartureLookup(
+        candidateEntries: List<Pair<CsaJourney, LocalDateTime>>,
+        now: LocalDateTime
+    ): LiveDepartureLookup {
+        val serviceDate = GtfsServiceClock.from(now).serviceDate
+        val tripIds = candidateEntries.asSequence()
+            .filter { (_, scheduledDeparture) ->
+                GtfsServiceClock.from(scheduledDeparture).serviceDate == serviceDate
+            }
+            .mapNotNull { (journey, _) -> journey.firstTransitConnection()?.tripId }
+            .toSet()
+        if (tripIds.isEmpty()) {
+            return LiveDepartureLookup(emptyMap(), null)
+        }
+
+        val routeRows = try {
+            tripIds.toList().chunked(TRIP_ROUTE_LOOKUP_BATCH_SIZE)
+                .flatMap { database.tripDao().getRouteShortNamesByTripIds(it) }
+        } catch (exception: SQLiteException) {
+            diagnostics.record(
+                "Nie udało się odczytać typu linii do sprawdzenia opóźnień: " +
+                    exception.message.orEmpty()
+            )
+            return LiveDepartureLookup(
+                emptyMap(),
+                "Nie udało się sprawdzić opóźnień na żywo; pokazuję godziny z rozkładu."
+            )
+        }
+        val modesByTripId = routeRows.mapNotNull { row ->
+            transitVehicleModeForGtfsRouteType(row.routeType)?.let { row.tripId to it }
+        }.toMap()
+        val liveUpdates = mutableMapOf<String, LiveTripUpdate>()
+        var feedUnavailable = false
+        TransitVehicleMode.entries.forEach { mode ->
+            val modeTripIds = modesByTripId
+                .filterValues { it == mode }
+                .keys
+            if (modeTripIds.isEmpty()) {
+                return@forEach
+            }
+            try {
+                liveUpdates += ztpTripUpdatesRepository.getTripUpdates(mode, modeTripIds)
+            } catch (exception: IOException) {
+                feedUnavailable = true
+                diagnostics.record(
+                    "Nie udało się pobrać opóźnień live dla ${mode.pluralLabel}: " +
+                        exception.message.orEmpty()
+                )
+            }
+        }
+
+        val nowInstant = Instant.now()
+        val freshUpdates = liveUpdates.filterValues { update ->
+            (update.serviceDate == null || update.serviceDate == serviceDate) &&
+                isLiveTripUpdateFresh(update, nowInstant)
+        }
+        diagnostics.record(
+            "Sprawdzono opóźnienia live: ${freshUpdates.size} kursów z aktualną prognozą."
+        )
+        return LiveDepartureLookup(
+            tripUpdates = freshUpdates,
+            warning = if (feedUnavailable) {
+                "Nie udało się sprawdzić wszystkich opóźnień na żywo; część wyników pokazuje rozkład."
+            } else {
+                null
+            }
+        )
     }
 
     fun refreshSchedule() {
@@ -2092,5 +2261,6 @@ class SearchViewModel @Inject constructor(
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3
         const val MAX_CSA_JOURNEY_CANDIDATES = 100
+        const val TRIP_ROUTE_LOOKUP_BATCH_SIZE = 500
     }
 }

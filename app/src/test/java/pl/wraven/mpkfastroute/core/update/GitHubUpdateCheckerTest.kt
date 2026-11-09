@@ -7,6 +7,33 @@ import org.junit.Test
 
 class GitHubUpdateCheckerTest {
     @Test
+    fun summarizesTheFirstThreeReleaseNoteItemsAndRemovesMarkdownFormatting() {
+        val notes = GitHubUpdateChecker.summarizeReleaseNotes(
+            """
+                ## Poprawki
+                - Naprawiono [błędne wyszukiwanie](https://example.com).
+                - `Odjazdy` uwzględniają nowe dane.
+                - Poprawiono kolejny błąd.
+                - Ten punkt nie powinien się pojawić.
+            """.trimIndent()
+        )
+
+        assertEquals(
+            listOf(
+                "Naprawiono błędne wyszukiwanie.",
+                "Odjazdy uwzględniają nowe dane.",
+                "Poprawiono kolejny błąd."
+            ),
+            notes
+        )
+    }
+
+    @Test
+    fun returnsNoReleaseNotesForAnEmptyDescription() {
+        assertEquals(emptyList<String>(), GitHubUpdateChecker.summarizeReleaseNotes("  "))
+    }
+
+    @Test
     fun primaryUpdateAndQrAddressesUseTheRenamedRepository() {
         assertEquals(
             "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases",

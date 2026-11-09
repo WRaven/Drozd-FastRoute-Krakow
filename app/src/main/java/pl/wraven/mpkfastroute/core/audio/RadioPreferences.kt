@@ -16,7 +16,9 @@ class RadioPreferences @Inject constructor(
     private val json: Json
 ) {
     val stations: Flow<List<RadioStation>> = appPreferences.radioStationsJson.map { encoded ->
-        encoded?.let { json.decodeFromString<List<RadioStation>>(it) } ?: RadioStations.all
+        val configuredStations =
+            encoded?.let { json.decodeFromString<List<RadioStation>>(it) } ?: RadioStations.all
+        filterUnavailableRadioStations(configuredStations).ifEmpty { RadioStations.all }
     }
 
     val lastSelectedRadioId: Flow<String?> = combine(
@@ -30,11 +32,12 @@ class RadioPreferences @Inject constructor(
     }
 
     suspend fun saveStations(stations: List<RadioStation>) {
-        validateStations(stations)
+        val availableStations = filterUnavailableRadioStations(stations)
+        validateStations(availableStations)
         val selectedId = lastSelectedRadioId.first()
-        appPreferences.saveRadioStations(stations)
-        if (selectedId !in stations.map(RadioStation::id)) {
-            appPreferences.saveLastSelectedRadioId(stations.first().id)
+        appPreferences.saveRadioStations(availableStations)
+        if (selectedId !in availableStations.map(RadioStation::id)) {
+            appPreferences.saveLastSelectedRadioId(availableStations.first().id)
         }
     }
 
@@ -71,3 +74,8 @@ class RadioPreferences @Inject constructor(
             ) && !uri.host.isNullOrBlank()
     }
 }
+
+internal fun filterUnavailableRadioStations(stations: List<RadioStation>): List<RadioStation> =
+    stations.filterNot { it.id == UNAVAILABLE_RADIO_STATION_ID }
+
+private const val UNAVAILABLE_RADIO_STATION_ID = "radio-krakow"

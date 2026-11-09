@@ -222,6 +222,12 @@ jobs:
           set -euo pipefail
           notes_file="$RUNNER_TEMP/release-notes.md"
           {
+            echo "## Poprawki"
+            echo
+            echo "- Poprawiono strony wcześniejszych i następnych odjazdów; kolejność uwzględnia godziny kursów i opóźnienia live."
+            echo "- Dodano krótkie podsumowanie poprawek w oknie i ręcznym sprawdzaniu aktualizacji."
+            echo "- Usunięto niedziałający strumień Radia Kraków."
+            echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"
             echo "Source commit: $GITHUB_SHA"

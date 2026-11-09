@@ -104,6 +104,32 @@ class ZtpTripUpdatesRepositoryTest {
     }
 
     @Test
+    fun mapsMultipleRequestedTripsFromOneFeed() {
+        val feed = GtfsRealtime.FeedMessage.newBuilder()
+            .setHeader(GtfsRealtime.FeedHeader.newBuilder().setGtfsRealtimeVersion("2.0"))
+            .addEntity(
+                GtfsRealtime.FeedEntity.newBuilder().setId("first").setTripUpdate(
+                    GtfsRealtime.TripUpdate.newBuilder()
+                        .setTrip(GtfsRealtime.TripDescriptor.newBuilder().setTripId("trip-1"))
+                )
+            )
+            .addEntity(
+                GtfsRealtime.FeedEntity.newBuilder().setId("second").setTripUpdate(
+                    GtfsRealtime.TripUpdate.newBuilder()
+                        .setTrip(GtfsRealtime.TripDescriptor.newBuilder().setTripId("trip-2"))
+                )
+            )
+            .build()
+
+        val updates = mapTripUpdates(feed, setOf("trip-1", "trip-2", "unknown"))
+
+        assertEquals(setOf("trip-1", "trip-2"), updates.keys)
+        assertEquals(TransitVehicleMode.TRAM, transitVehicleModeForGtfsRouteType(0))
+        assertEquals(TransitVehicleMode.BUS, transitVehicleModeForGtfsRouteType(3))
+        assertNull(transitVehicleModeForGtfsRouteType(999))
+    }
+
+    @Test
     fun returnsNullWhenTheTripHasNoRealtimeUpdate() {
         val feed = GtfsRealtime.FeedMessage.newBuilder()
             .setHeader(

@@ -91,9 +91,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -105,6 +108,7 @@ import java.io.File
 import java.net.URI
 import java.net.URISyntaxException
 import java.time.DayOfWeek
+import java.time.Duration
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -1482,6 +1486,7 @@ private fun SearchContent(
             val departureKey = journey.firstTransitConnection()?.tripId ?: "departure-$index"
             JourneyResult(
                 journey = journey,
+                liveDepartureEstimate = state.liveJourneyDepartureEstimates[departureKey],
                 stops = state.stops,
                 origin = state.stops.firstOrNull {
                     it.stopId == journey.originAccess.stopId
@@ -1504,6 +1509,8 @@ private fun SearchContent(
                     journey.firstTransitConnection()?.tripId ?: "departure-fallback"
                 JourneyResult(
                     journey = journey,
+                    liveDepartureEstimate =
+                        state.liveJourneyDepartureEstimates[departureKey],
                     stops = state.stops,
                     origin = state.originStop,
                     destination = state.destinationStop,
@@ -1723,6 +1730,7 @@ private fun StopGroupPicker(
 @Composable
 private fun JourneyResult(
     journey: CsaJourney,
+    liveDepartureEstimate: LiveJourneyDepartureEstimate?,
     stops: List<StopEntity>,
     origin: StopEntity?,
     destination: StopEntity?,
@@ -1770,6 +1778,36 @@ private fun JourneyResult(
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
+            liveDepartureEstimate?.let { estimate ->
+                val delaySeconds = Duration.between(
+                    estimate.scheduledDeparture,
+                    estimate.estimatedDeparture
+                ).seconds
+                if (delaySeconds > 0) {
+                    val delayMinutes = (delaySeconds + 59) / 60
+                    Text(
+                        buildAnnotatedString {
+                            append(
+                                "Rozkład: ${
+                                    estimate.scheduledDeparture.format(
+                                        DateTimeFormatter.ofPattern("HH:mm")
+                                    )
+                                } "
+                            )
+                            withStyle(
+                                SpanStyle(
+                                    color = MaterialTheme.colorScheme.error,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            ) {
+                                append("+$delayMinutes")
+                            }
+                            append(" min")
+                        },
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
             if (firstConnection != null) {
                 Text(
                     "${stopName(stops, firstConnection.departureStopId)} · $routeLabels",
@@ -2295,6 +2333,7 @@ private fun SettingsDialog(
                     Text("Archiwum wydań i starsze wersje APK")
                 }
                 if (updateCheckResult?.updateAvailable == true) {
+                    UpdateReleaseNotes(updateCheckResult.releaseNotes)
                     Button(
                         onClick = {
                             when {
@@ -2454,6 +2493,27 @@ private fun ReleaseQrCode(modifier: Modifier = Modifier) {
 }
 
 @Composable
+private fun UpdateReleaseNotes(notes: List<String>) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "Poprawki w tym wydaniu",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        if (notes.isEmpty()) {
+            Text(
+                "Brak szczegółowego opisu poprawek dla tego wydania.",
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            notes.forEach { note ->
+                Text("• $note", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable
 private fun UpdateAvailableDialog(
     update: UpdateCheckResult,
     isDownloading: Boolean,
@@ -2478,6 +2538,7 @@ private fun UpdateAvailableDialog(
                     "Wersja ${update.latestVersion} jest dostępna " +
                         "(zainstalowana: ${update.currentVersion})."
                 )
+                UpdateReleaseNotes(update.releaseNotes)
                 if (isDownloading) {
                     Text(
                         downloadProgressPercent?.let { "Pobieranie APK: $it%" }

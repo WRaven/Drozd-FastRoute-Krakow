@@ -1,12 +1,48 @@
 package pl.wraven.mpkfastroute.feature.search
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import java.time.LocalDateTime
 
 class RouteSearchWindowTest {
     private val anchor = LocalDateTime.of(2026, 11, 9, 7, 0)
+
+    @Test
+    fun earlierAndLaterPagesExcludeTheBoundaryAndOppositeSideDepartures() {
+        val boundary = LocalDateTime.of(2026, 11, 9, 16, 18)
+
+        assertTrue(
+            isDepartureWithinPage(
+                LocalDateTime.of(2026, 11, 9, 16, 17),
+                boundary,
+                RouteSearchDirection.EARLIER
+            )
+        )
+        assertFalse(
+            isDepartureWithinPage(
+                boundary,
+                boundary,
+                RouteSearchDirection.EARLIER
+            )
+        )
+        assertFalse(
+            isDepartureWithinPage(
+                LocalDateTime.of(2026, 11, 9, 16, 17),
+                boundary,
+                RouteSearchDirection.LATER
+            )
+        )
+        assertTrue(
+            isDepartureWithinPage(
+                LocalDateTime.of(2026, 11, 9, 16, 19),
+                boundary,
+                RouteSearchDirection.LATER
+            )
+        )
+    }
 
     @Test
     fun departureAfterWindowStartsAtAnchorAndSpansTwoHours() {

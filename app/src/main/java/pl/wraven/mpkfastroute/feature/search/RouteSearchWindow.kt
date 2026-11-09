@@ -17,6 +17,18 @@ internal enum class RouteSearchDirection {
     LATER
 }
 
+internal fun isDepartureWithinPage(
+    departureDateTime: LocalDateTime,
+    boundary: LocalDateTime?,
+    direction: RouteSearchDirection?
+): Boolean = when (direction) {
+    RouteSearchDirection.EARLIER ->
+        boundary == null || departureDateTime.isBefore(boundary)
+    RouteSearchDirection.LATER ->
+        boundary == null || departureDateTime.isAfter(boundary)
+    null -> true
+}
+
 internal fun routeSearchWindow(
     anchor: LocalDateTime,
     mode: JourneyTimeMode?
