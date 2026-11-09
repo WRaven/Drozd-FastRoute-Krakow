@@ -37,11 +37,9 @@ import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
-import pl.wraven.mpkfastroute.core.csa.FootpathGenerator
 import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
-import pl.wraven.mpkfastroute.core.csa.StopAccess
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
@@ -1968,20 +1966,6 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private fun nearbyStopGroups(stops: List<StopEntity>, place: GeoPlace): List<StopGroup> =
-        StopNameGrouper.group(stops)
-            .sortedBy { group ->
-                group.stops.minOf { stop ->
-                    Haversine.distanceMeters(
-                        place.latitude,
-                        place.longitude,
-                        stop.stopLat,
-                        stop.stopLon
-                    )
-                }
-            }
-            .take(MAX_NEARBY_STOPS)
-
     private fun nearestStopToPlace(group: StopGroup, place: GeoPlace): StopEntity =
         group.stops.minByOrNull { stop ->
             Haversine.distanceMeters(
@@ -1991,39 +1975,6 @@ class SearchViewModel @Inject constructor(
                 stop.stopLon
             )
         } ?: throw IllegalStateException("A stop group cannot be empty.")
-
-    private fun buildStopAccesses(
-        place: GeoPlace,
-        selectedStops: List<StopEntity>,
-        nearbyGroups: List<StopGroup>,
-        allStops: List<StopEntity>,
-        manuallySelected: Boolean
-    ): List<StopAccess> {
-        val candidates = if (manuallySelected) {
-            selectedStops
-        } else {
-            val groups = nearbyGroups.ifEmpty { nearbyStopGroups(allStops, place) }
-            groups.flatMap(StopGroup::stops)
-        }
-
-        return candidates.distinctBy(StopEntity::stopId).mapNotNull { stop ->
-            val distanceMeters = Haversine.distanceMeters(
-                place.latitude,
-                place.longitude,
-                stop.stopLat,
-                stop.stopLon
-            )
-            if (!manuallySelected && distanceMeters > MAX_AUTO_STOP_ACCESS_METERS) {
-                return@mapNotNull null
-            }
-            StopAccess(
-                stopId = stop.stopId,
-                walkingDistanceMeters = distanceMeters,
-                walkingDurationSeconds =
-                    FootpathGenerator.walkingDurationSeconds(distanceMeters)
-            )
-        }
-    }
 
     private fun placeForStop(stop: StopEntity): GeoPlace = GeoPlace(
         label = StopNameGrouper.mainName(stop.stopName),
@@ -2140,8 +2091,6 @@ class SearchViewModel @Inject constructor(
         const val SERVICE_NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1_000L
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3
-        const val MAX_NEARBY_STOPS = 6
-        const val MAX_AUTO_STOP_ACCESS_METERS = 1_500.0
         const val MAX_CSA_JOURNEY_CANDIDATES = 100
     }
 }
