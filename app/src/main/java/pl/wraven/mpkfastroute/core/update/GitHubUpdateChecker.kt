@@ -26,6 +26,7 @@ data class UpdateCheckResult(
     val releaseUrl: String,
     val downloadUrl: String,
     val updateAvailable: Boolean,
+    val releaseNotes: List<String> = emptyList(),
     val downloadCandidates: List<UpdateDownloadCandidate> = emptyList()
 )
 
@@ -40,7 +41,8 @@ private data class ReleaseCandidate(
     val version: String,
     val releaseUrl: String,
     val downloadUrl: String,
-    val sha256: String?
+    val sha256: String?,
+    val releaseNotes: List<String>
 )
 
 class NoReleaseAvailableException : IOException()
@@ -101,7 +103,10 @@ class GitHubUpdateChecker @Inject constructor(
                 version = versionForRelease(tagName, assets.map(ReleaseAsset::name)),
                 releaseUrl = releaseUrl,
                 downloadUrl = downloadUrl,
-                sha256 = apkAsset.sha256
+                sha256 = apkAsset.sha256,
+                releaseNotes = summarizeReleaseNotes(
+                    candidate["body"]?.jsonPrimitive?.contentOrNull
+                )
             )
         }
         val latestVersion = latestVersion(releaseCandidates.map(ReleaseCandidate::version))
@@ -118,6 +123,7 @@ class GitHubUpdateChecker @Inject constructor(
             releaseUrl = latestRelease.releaseUrl,
             downloadUrl = latestRelease.downloadUrl,
             updateAvailable = compareVersions(latestVersion, currentVersion) > 0,
+            releaseNotes = latestRelease.releaseNotes,
             downloadCandidates = newerUpdateCandidates(
                 releaseCandidates.map {
                     UpdateDownloadCandidate(
@@ -150,6 +156,37 @@ class GitHubUpdateChecker @Inject constructor(
             Regex("""(?i)(?:^|[-_])build(\d+)(?:[-_.]|$)""")
         private val SHA256_DIGEST_PATTERN = Regex("""(?i)^sha256:[a-f0-9]{64}$""")
         private const val MAX_UPDATE_DOWNLOAD_CANDIDATES = 3
+        private const val MAX_RELEASE_NOTE_ITEMS = 3
+        private const val MAX_RELEASE_NOTE_LENGTH = 180
+
+        internal fun summarizeReleaseNotes(releaseBody: String?): List<String> {
+            val lines = releaseBody.orEmpty()
+                .replace(Regex("""\[([^\]]+)]\([^)]+\)"""), "$1")
+                .replace(Regex("""`([^`]+)`"""), "$1")
+                .lineSequence()
+                .map(String::trim)
+                .filter { it.isNotEmpty() && !it.startsWith("#") }
+                .toList()
+            val bulletLines = lines.filter {
+                Regex("""^(?:[-*•]|\d+[.)])\s+""").containsMatchIn(it)
+            }
+            val selectedLines = (bulletLines.ifEmpty { lines })
+                .map {
+                    it.replace(Regex("""^(?:[-*•]|\d+[.)])\s+"""), "")
+                        .replace(Regex("""\s+"""), " ")
+                        .trim()
+                }
+                .filter(String::isNotEmpty)
+                .distinct()
+                .take(MAX_RELEASE_NOTE_ITEMS)
+            return selectedLines.map { line ->
+                if (line.length <= MAX_RELEASE_NOTE_LENGTH) {
+                    line
+                } else {
+                    line.take(MAX_RELEASE_NOTE_LENGTH - 1).trimEnd() + "…"
+                }
+            }
+        }
 
         internal fun releaseMatchesChannel(
             prerelease: Boolean?,

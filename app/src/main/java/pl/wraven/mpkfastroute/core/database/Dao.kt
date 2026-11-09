@@ -55,7 +55,9 @@ interface TripDao {
 
     @Query(
         """
-        SELECT trip.tripId AS tripId, route.routeShortName AS routeShortName
+        SELECT trip.tripId AS tripId,
+               route.routeShortName AS routeShortName,
+               route.routeType AS routeType
         FROM trips AS trip
         JOIN routes AS route ON route.routeId = trip.routeId
         WHERE trip.tripId IN (:tripIds)
@@ -73,7 +75,8 @@ interface TripDao {
 
 data class TripRouteShortNameRow(
     val tripId: String,
-    val routeShortName: String
+    val routeShortName: String,
+    val routeType: Int?
 )
 
 @Dao

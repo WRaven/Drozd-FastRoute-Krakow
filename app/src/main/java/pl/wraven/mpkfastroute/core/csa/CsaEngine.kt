@@ -130,10 +130,10 @@ class CsaEngine @Inject constructor() {
         fun addLabel(candidate: JourneyState): Boolean {
             val labelsByTrip = labelsByStop.getOrPut(candidate.stopId) { mutableMapOf() }
             val labels = labelsByTrip.getOrPut(candidate.lastTripId) { mutableListOf() }
-            if (labels.any { it.dominates(candidate) }) {
+            if (labels.any { it.dominates(candidate, arrivalDeadline != null) }) {
                 return false
             }
-            labels.removeAll { candidate.dominates(it) }
+            labels.removeAll { candidate.dominates(it, arrivalDeadline != null) }
             labels += candidate
             return true
         }
@@ -179,6 +179,15 @@ class CsaEngine @Inject constructor() {
                             footpath.distanceMeters,
                         transferWalkingDistanceMeters = current.transferWalkingDistanceMeters +
                             footpath.distanceMeters,
+                        originDepartureTime = current.originDepartureTime,
+                        initialFootpathDurationSeconds = if (current.originDepartureTime == null) {
+                            Math.addExact(
+                                current.initialFootpathDurationSeconds,
+                                footpath.durationSeconds
+                            )
+                        } else {
+                            current.initialFootpathDurationSeconds
+                        },
                         previous = current,
                         step = JourneyStep.Walk(footpath)
                     )
@@ -202,6 +211,8 @@ class CsaEngine @Inject constructor() {
                     originAccess = originAccess,
                     walkedDistanceMeters = originAccess.walkingDistanceMeters,
                     transferWalkingDistanceMeters = 0.0,
+                    originDepartureTime = null,
+                    initialFootpathDurationSeconds = 0,
                     previous = null,
                     step = null
                 )
@@ -255,6 +266,14 @@ class CsaEngine @Inject constructor() {
                         originAccess = label.originAccess,
                         walkedDistanceMeters = label.walkedDistanceMeters,
                         transferWalkingDistanceMeters = label.transferWalkingDistanceMeters,
+                        originDepartureTime = label.originDepartureTime ?: Math.subtractExact(
+                            Math.subtractExact(
+                                connection.departureTime,
+                                label.originAccess.walkingDurationSeconds
+                            ),
+                            label.initialFootpathDurationSeconds
+                        ),
+                        initialFootpathDurationSeconds = label.initialFootpathDurationSeconds,
                         previous = label,
                         step = JourneyStep.Transit(connection)
                     )
@@ -274,6 +293,7 @@ class CsaEngine @Inject constructor() {
                         destinationAccess = destinationAccess,
                         estimatedArrivalTime = state.generalizedArrivalTime +
                             destinationAccess.walkingDurationSeconds,
+                        departureFromOriginTime = state.originDepartureTime ?: startTime,
                         totalWalkingDistanceMeters = state.walkedDistanceMeters +
                             destinationAccess.walkingDistanceMeters
                     )
@@ -289,7 +309,11 @@ class CsaEngine @Inject constructor() {
                     .thenBy { it.totalWalkingDistanceMeters }
                     .thenBy { it.state.transferCount }
             } else {
-                compareByDescending<JourneyCandidate> { it.estimatedArrivalTime }
+                compareByDescending<JourneyCandidate> { it.departureFromOriginTime }
+                    .thenBy {
+                        it.estimatedArrivalTime - it.departureFromOriginTime
+                    }
+                    .thenByDescending { it.estimatedArrivalTime }
                     .thenBy { it.totalWalkingDistanceMeters }
                     .thenBy { it.state.transferCount }
             }
@@ -325,7 +349,11 @@ class CsaEngine @Inject constructor() {
                 steps.reverse()
 
                 CsaJourney(
-                    departureTime = startTime,
+                    departureTime = if (arrivalDeadline == null) {
+                        startTime
+                    } else {
+                        candidate.departureFromOriginTime
+                    },
                     arrivalTime = candidate.state.arrivalTime,
                     transferPenaltySeconds =
                         candidate.state.transferCount * TRANSFER_PENALTY_SECONDS,
@@ -359,6 +387,7 @@ class CsaEngine @Inject constructor() {
         val state: JourneyState,
         val destinationAccess: StopAccess,
         val estimatedArrivalTime: Long,
+        val departureFromOriginTime: Int,
         val totalWalkingDistanceMeters: Double
     )
 
@@ -372,17 +401,22 @@ class CsaEngine @Inject constructor() {
         val originAccess: StopAccess,
         val walkedDistanceMeters: Double,
         val transferWalkingDistanceMeters: Double,
+        val originDepartureTime: Int?,
+        val initialFootpathDurationSeconds: Int,
         val previous: JourneyState?,
         val step: JourneyStep?
     ) {
         val generalizedArrivalTime: Long
             get() = arrivalTime.toLong() + transferCount * TRANSFER_PENALTY_SECONDS
 
-        fun dominates(other: JourneyState): Boolean =
+        fun dominates(other: JourneyState, preferLatestDeparture: Boolean): Boolean =
             arrivalTime <= other.arrivalTime &&
                 readyTime <= other.readyTime &&
                 transferCount <= other.transferCount &&
-                walkedDistanceMeters <= other.walkedDistanceMeters
+                walkedDistanceMeters <= other.walkedDistanceMeters &&
+                (!preferLatestDeparture ||
+                    (originDepartureTime ?: Int.MIN_VALUE) >=
+                    (other.originDepartureTime ?: Int.MIN_VALUE))
     }
 
     private companion object {

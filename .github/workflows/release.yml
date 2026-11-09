@@ -222,6 +222,11 @@ jobs:
           set -euo pipefail
           notes_file="$RUNNER_TEMP/release-notes.md"
           {
+            echo "## Poprawki"
+            echo
+            echo "- Naprawiono strony wcześniejszych i następnych odjazdów: wyszukiwanie zachowuje pełny horyzont dla przesiadek i wybiera najbliższe kursy."
+            echo "- Poprawiono prezentację minionych odjazdów i czasu przejazdu oraz przeniesiono skróty Dom/Praca pod pola trasy."
+            echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"
             echo "Source commit: $GITHUB_SHA"

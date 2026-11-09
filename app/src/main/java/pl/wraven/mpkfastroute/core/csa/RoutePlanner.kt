@@ -88,7 +88,7 @@ class RoutePlanner @Inject constructor(
                 .thenBy { it.totalWalkingDistanceMeters }
                 .thenBy { it.transferPenaltySeconds }
         } else {
-            compareByDescending<CsaJourney> { it.estimatedArrivalTime }
+            compareByDescending<CsaJourney> { it.departureTime }
                 .thenBy { it.totalDurationSeconds }
                 .thenBy { it.totalWalkingDistanceMeters }
                 .thenBy { it.transferPenaltySeconds }

@@ -1,7 +1,11 @@
 package pl.wraven.mpkfastroute.feature.search
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
 import android.database.sqlite.SQLiteException
+import android.location.Location
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,7 +15,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.DateTimeException
+import java.time.Instant
 import java.time.LocalDateTime
+import java.util.IdentityHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import javax.inject.Inject
@@ -33,11 +39,9 @@ import pl.wraven.mpkfastroute.core.audio.RadioStations
 import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.CsaJourney
-import pl.wraven.mpkfastroute.core.csa.FootpathGenerator
 import pl.wraven.mpkfastroute.core.csa.Haversine
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.csa.RoutePlanner
-import pl.wraven.mpkfastroute.core.csa.StopAccess
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.diagnostics.SearchDiagnostics
@@ -45,6 +49,9 @@ import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.gtfs.GtfsScheduleUpdateScheduler
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
+import pl.wraven.mpkfastroute.core.live.TransitVehicleMode
+import pl.wraven.mpkfastroute.core.live.isLiveTripUpdateFresh
+import pl.wraven.mpkfastroute.core.live.transitVehicleModeForGtfsRouteType
 import pl.wraven.mpkfastroute.core.live.RouteServiceAlert
 import pl.wraven.mpkfastroute.core.live.ServiceAlertsClient
 import pl.wraven.mpkfastroute.core.live.TtssDepartureRepository
@@ -75,6 +82,16 @@ import pl.wraven.mpkfastroute.core.update.UpdateCheckResult
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoClient
 import pl.wraven.mpkfastroute.core.weather.OpenMeteoRequestException
 import pl.wraven.mpkfastroute.core.weather.WeatherForecast
+
+data class LiveJourneyDepartureEstimate(
+    val scheduledDeparture: LocalDateTime,
+    val estimatedDeparture: LocalDateTime
+)
+
+private data class LiveDepartureLookup(
+    val tripUpdates: Map<String, LiveTripUpdate>,
+    val warning: String?
+)
 
 data class SearchUiState(
     val destinationShortcutNames: DestinationShortcutNames = DestinationShortcutNames(),
@@ -112,6 +129,9 @@ data class SearchUiState(
     val journeyOptions: List<CsaJourney> = emptyList(),
     val arrivalTarget: LocalDateTime? = null,
     val routeTimePlan: JourneyTimePlan? = null,
+    val routeSearchWindowStart: LocalDateTime? = null,
+    val routeSearchWindowEnd: LocalDateTime? = null,
+    val liveJourneyDepartureEstimates: Map<String, LiveJourneyDepartureEstimate> = emptyMap(),
     val liveDepartures: LiveDeparturesResult? = null,
     val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
     val isLoadingLiveVehicles: Boolean = false,
@@ -204,8 +224,16 @@ class SearchViewModel @Inject constructor(
     private var selectedVehicleTripRequestId = 0L
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
+    private var currentLocationPrefetchJob: Job? = null
+    private var currentLocationResolutionJob: Job? = null
+    private var prefetchedCurrentLocation: PrefetchedCurrentLocation? = null
     private var lastServiceNewsAttemptAtMillis = 0L
     private var lastLiveServiceAlertsAttemptAtMillis = 0L
+
+    private data class PrefetchedCurrentLocation(
+        val location: Location,
+        val acquiredAtElapsedRealtime: Long
+    )
 
     init {
         observeStops()
@@ -231,6 +259,8 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
                 liveDepartures = null,
                 routeSearchMessage = null,
                 statusMessage = null,
@@ -241,6 +271,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun setOriginQuery(query: String) {
+        cancelCurrentLocationResolution()
         mutableUiState.update {
             it.copy(
                 originQuery = query,
@@ -254,6 +285,8 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
                 liveDepartures = null,
                 routeSearchMessage = null,
                 statusMessage = null,
@@ -263,18 +296,27 @@ class SearchViewModel @Inject constructor(
         scheduleAddressSuggestions(query, isOrigin = true)
     }
 
-    fun useCurrentLocationIfOriginEmpty() {
-        val state = mutableUiState.value
-        if (
-            state.originPlace == null &&
-            state.originStop == null &&
-            state.originQuery.isBlank()
-        ) {
-            useCurrentLocation()
+    fun prefetchCurrentLocation() {
+        if (!hasCurrentLocationPermission()) return
+        if (currentLocationPrefetchJob?.isActive == true) return
+        if (hasFreshPrefetchedCurrentLocation()) return
+
+        currentLocationPrefetchJob = viewModelScope.launch {
+            try {
+                prefetchedCurrentLocation = PrefetchedCurrentLocation(
+                    location = currentLocationProvider.getCurrentLocation(),
+                    acquiredAtElapsedRealtime = SystemClock.elapsedRealtime()
+                )
+            } catch (exception: LocationUnavailableException) {
+                Log.i(TAG, "Startup location prefetch is unavailable.", exception)
+            } catch (exception: SecurityException) {
+                Log.w(TAG, "Startup location prefetch was denied.", exception)
+            }
         }
     }
 
     fun selectOrigin(group: StopGroup) {
+        cancelCurrentLocationResolution()
         originAddressSearchJob?.cancel()
         val state = mutableUiState.value
         val selectedFromAddress = state.nearbyOriginGroups.any { it.name == group.name }
@@ -294,6 +336,8 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
                 routeSearchMessage = null,
                 originStopManuallySelected = true,
                 liveDepartures = null
@@ -304,10 +348,16 @@ class SearchViewModel @Inject constructor(
 
     fun useCurrentLocation() {
         originAddressSearchJob?.cancel()
-        viewModelScope.launch {
-            mutableUiState.update { it.copy(isSearching = true, statusMessage = null) }
+        if (currentLocationResolutionJob?.isActive == true) return
+        mutableUiState.update { it.copy(statusMessage = null) }
+        currentLocationResolutionJob = viewModelScope.launch {
             try {
-                val origin = contextEngine.findCurrentOrigin()
+                val location = takeFreshPrefetchedCurrentLocation() ?: run {
+                    currentLocationPrefetchJob?.join()
+                    takeFreshPrefetchedCurrentLocation()
+                        ?: currentLocationProvider.getCurrentLocation()
+                }
+                val origin = contextEngine.findCurrentOrigin(location)
                 val originPlace = try {
                     origin.place.copy(
                         label = addressGeocoder.reverseGeocode(origin.place) ?: origin.place.label
@@ -334,11 +384,15 @@ class SearchViewModel @Inject constructor(
                         nearbyOriginGroups = nearbyGroups,
                         journey = null,
                         journeyOptions = emptyList(),
+                        routeSearchWindowStart = null,
+                        routeSearchWindowEnd = null,
                         routeSearchMessage = null,
                         originStopManuallySelected = false,
                         liveDepartures = null
                     )
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: LocationPermissionRequiredException) {
                 showMessage("Aby użyć lokalizacji, zezwól na dostęp do lokalizacji.")
             } catch (exception: LocationUnavailableException) {
@@ -349,8 +403,6 @@ class SearchViewModel @Inject constructor(
                 showMessage("Brak dostępu do lokalizacji.")
             } catch (exception: SQLiteException) {
                 showMessage("Nie można odczytać przystanków: ${exception.message.orEmpty()}")
-            } finally {
-                mutableUiState.update { it.copy(isSearching = false) }
             }
         }
     }
@@ -807,7 +859,31 @@ class SearchViewModel @Inject constructor(
         mutableUiState.update { it.copy(liveServiceAlertsError = message) }
     }
 
+    private fun hasCurrentLocationPermission(): Boolean =
+        appContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            appContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    private fun hasFreshPrefetchedCurrentLocation(): Boolean {
+        val cached = prefetchedCurrentLocation ?: return false
+        val ageMillis = SystemClock.elapsedRealtime() - cached.acquiredAtElapsedRealtime
+        return ageMillis in 0L..CURRENT_LOCATION_CACHE_TTL_MILLIS
+    }
+
+    private fun takeFreshPrefetchedCurrentLocation(): Location? {
+        val cached = prefetchedCurrentLocation ?: return null
+        prefetchedCurrentLocation = null
+        val ageMillis = SystemClock.elapsedRealtime() - cached.acquiredAtElapsedRealtime
+        return cached.location.takeIf { ageMillis in 0L..CURRENT_LOCATION_CACHE_TTL_MILLIS }
+    }
+
+    private fun cancelCurrentLocationResolution() {
+        currentLocationResolutionJob?.cancel()
+    }
+
     fun selectOriginAddress(place: GeoPlace) {
+        cancelCurrentLocationResolution()
         originAddressSearchJob?.cancel()
         viewModelScope.launch {
             val nearbyGroups = withContext(Dispatchers.Default) {
@@ -828,6 +904,8 @@ class SearchViewModel @Inject constructor(
                     routeSearchMessage = null,
                     originStopManuallySelected = false,
                     arrivalTarget = null,
+                    routeSearchWindowStart = null,
+                    routeSearchWindowEnd = null,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
@@ -860,6 +938,8 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
                 routeSearchMessage = null,
                 destinationStopManuallySelected = true,
                 liveDepartures = null
@@ -900,6 +980,8 @@ class SearchViewModel @Inject constructor(
                     routeSearchMessage = null,
                     destinationStopManuallySelected = false,
                     arrivalTarget = null,
+                    routeSearchWindowStart = null,
+                    routeSearchWindowEnd = null,
                     liveDepartures = null,
                     statusMessage = if (nearbyGroups.isEmpty()) {
                         "Nie znaleziono przystanków w rozkładzie."
@@ -917,6 +999,49 @@ class SearchViewModel @Inject constructor(
 
     fun searchRoute() {
         val state = mutableUiState.value
+        val anchor = state.routeTimePlan?.dateTime ?: LocalDateTime.now()
+        searchRouteAt(
+            window = routeSearchWindow(anchor, state.routeTimePlan?.mode),
+            allowPastPlan = false
+        )
+    }
+
+    fun searchEarlierJourneys() {
+        searchAdjacentJourneys(RouteSearchDirection.EARLIER)
+    }
+
+    fun searchLaterJourneys() {
+        searchAdjacentJourneys(RouteSearchDirection.LATER)
+    }
+
+    private fun searchAdjacentJourneys(direction: RouteSearchDirection) {
+        val state = mutableUiState.value
+        val start = state.routeSearchWindowStart ?: return
+        val end = state.routeSearchWindowEnd ?: return
+        val boundary = when (direction) {
+            RouteSearchDirection.EARLIER -> start
+            RouteSearchDirection.LATER -> end
+        }
+        val searchWindow = routeSearchPageWindow(boundary, direction)
+        searchRouteAt(
+            window = searchWindow,
+            allowPastPlan = true,
+            pageDirection = direction,
+            pageBoundary = boundary
+        )
+    }
+
+    private fun searchRouteAt(
+        window: RouteSearchWindow,
+        allowPastPlan: Boolean,
+        pageDirection: RouteSearchDirection? = null,
+        pageBoundary: LocalDateTime? = null
+    ) {
+        cancelCurrentLocationResolution()
+        val state = mutableUiState.value
+        if (state.isSearching) {
+            return
+        }
         if (state.isImporting) {
             diagnostics.record("Wyszukiwanie wstrzymane: trwa przygotowanie indeksu.")
             showMessage("Trwa przygotowanie lokalnego indeksu połączeń. Spróbuj ponownie za chwilę.")
@@ -929,7 +1054,11 @@ class SearchViewModel @Inject constructor(
             return
         }
         val routeTimePlan = state.routeTimePlan
-        if (routeTimePlan != null && !routeTimePlan.dateTime.isAfter(LocalDateTime.now())) {
+        if (
+            !allowPastPlan &&
+            routeTimePlan != null &&
+            !routeTimePlan.dateTime.isAfter(LocalDateTime.now())
+        ) {
             showMessage("Wybrana data i godzina już minęła.")
             return
         }
@@ -973,41 +1102,144 @@ class SearchViewModel @Inject constructor(
                     statusMessage = null,
                     journey = null,
                     journeyOptions = emptyList(),
+                    liveJourneyDepartureEstimates = emptyMap(),
                     arrivalTarget = null,
+                    routeSearchWindowStart = window.startDateTime,
+                    routeSearchWindowEnd = window.endDateTime,
                     liveDepartures = null
                 )
             }
             try {
                 val now = LocalDateTime.now()
-                val plannedDateTime = routeTimePlan?.dateTime ?: now
-                val searchStart = if (routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY) {
-                    plannedDateTime.minusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
+                val candidateEntries = mutableListOf<Pair<CsaJourney, LocalDateTime>>()
+                var searchedWindow = window
+                var searchedPageWindow = window
+                val searchWindowCount = if (pageDirection == null) {
+                    1
                 } else {
-                    plannedDateTime
+                    MAX_ROUTE_SEARCH_WINDOWS_PER_PAGE
                 }
-                val candidates = routePlanner.findJourneys(
-                    originAccesses = originAccesses,
-                    destinationAccesses = destinationAccesses,
-                    startDateTime = searchStart,
-                    searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
-                    maxResults = MAX_CSA_JOURNEY_CANDIDATES,
-                    arrivalDeadline = routeTimePlan
-                        ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
-                        ?.dateTime
-                )
-                val journeysForDisplay = if (routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY) {
-                    candidates.map(CsaJourney::withOriginDepartureTime)
-                } else {
-                    candidates
+                for (windowIndex in 0 until searchWindowCount) {
+                    val windowCandidates = routePlanner.findJourneys(
+                        originAccesses = originAccesses,
+                        destinationAccesses = destinationAccesses,
+                        startDateTime = searchedWindow.startDateTime,
+                        searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
+                        maxResults = MAX_CSA_JOURNEY_CANDIDATES,
+                        arrivalDeadline = routeTimePlan
+                            ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
+                            ?.let { searchedWindow.endDateTime }
+                    )
+                    val serviceDate = GtfsServiceClock
+                        .from(searchedWindow.startDateTime)
+                        .serviceDate
+                    candidateEntries += windowCandidates.map { journey ->
+                        journey to journey.firstTransitDepartureDateTime(serviceDate)
+                    }
+                    if (pageDirection == null) {
+                        break
+                    }
+                    val eligibleCandidates = candidateEntries.filter { (_, departureDateTime) ->
+                        isDepartureWithinPage(
+                            departureDateTime = departureDateTime,
+                            boundary = pageBoundary,
+                            direction = pageDirection
+                        )
+                    }
+                    val pageJourneyCount = selectDistinctJourneyDepartures(
+                        candidates = eligibleCandidates.map { it.first },
+                        maxResults = ROUTE_SEARCH_PAGE_SIZE,
+                        latestFirst = pageDirection == RouteSearchDirection.EARLIER,
+                        orderByTransitDeparture = true
+                    ).size
+                    if (pageDirection == RouteSearchDirection.EARLIER) {
+                        searchedPageWindow = RouteSearchWindow(
+                            startDateTime = searchedWindow.startDateTime,
+                            endDateTime = searchedPageWindow.endDateTime
+                        )
+                    } else {
+                        searchedPageWindow = RouteSearchWindow(
+                            startDateTime = searchedPageWindow.startDateTime,
+                            endDateTime = searchedWindow.endDateTime
+                        )
+                    }
+                    if (pageJourneyCount >= ROUTE_SEARCH_PAGE_SIZE) {
+                        break
+                    }
+                    searchedWindow = adjacentRouteSearchWindow(
+                        window = searchedWindow,
+                        direction = pageDirection,
+                        windowSeconds = ROUTE_SEARCH_PAGE_WINDOW_SECONDS
+                    )
                 }
                 val currentServiceTime = GtfsServiceClock.from(now)
-                val preferLatestArrival = routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
+                val liveDepartureLookup = if (pageDirection != null) {
+                    getLiveDepartureLookup(candidateEntries, now)
+                } else {
+                    LiveDepartureLookup(emptyMap(), null)
+                }
+                val departureDateTimeOverrides = IdentityHashMap<CsaJourney, LocalDateTime>()
+                candidateEntries.forEach { (journey, scheduledDeparture) ->
+                    departureDateTimeOverrides[journey] =
+                        journey.estimatedFirstTransitDepartureDateTime(
+                            scheduledDeparture = scheduledDeparture,
+                            tripUpdates = liveDepartureLookup.tripUpdates
+                        )
+                }
+                val eligibleCandidates = candidateEntries.filter { (journey, departureDateTime) ->
+                    isDepartureWithinPage(
+                        departureDateTime = departureDateTimeOverrides[journey] ?: departureDateTime,
+                        boundary = pageBoundary,
+                        direction = pageDirection
+                    )
+                }
+                val candidates = eligibleCandidates.map { it.first }
                 val journeyOptions = selectDistinctJourneyDepartures(
-                    journeysForDisplay,
-                    latestFirst = preferLatestArrival
+                    candidates = candidates,
+                    maxResults = pageDirection?.let { ROUTE_SEARCH_PAGE_SIZE }
+                        ?: MAX_DISPLAYED_ROUTE_DEPARTURES,
+                    latestFirst = when (pageDirection) {
+                        RouteSearchDirection.EARLIER -> true
+                        RouteSearchDirection.LATER -> false
+                        null -> routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
+                    },
+                    orderByTransitDeparture = pageDirection != null,
+                    departureDateTimeOverrides = departureDateTimeOverrides
+                        .takeIf { pageDirection != null }
                 )
+                val displayedDepartureTimes = journeyOptions.mapNotNull { journey ->
+                    departureDateTimeOverrides[journey]
+                        ?: eligibleCandidates.firstOrNull { it.first === journey }?.second
+                }
+                val liveJourneyDepartureEstimates = journeyOptions.mapNotNull { journey ->
+                    val tripId = journey.firstTransitConnection()?.tripId ?: return@mapNotNull null
+                    val scheduledDeparture = eligibleCandidates
+                        .firstOrNull { it.first === journey }
+                        ?.second
+                        ?: return@mapNotNull null
+                    val estimatedDeparture = departureDateTimeOverrides[journey]
+                        ?: scheduledDeparture
+                    if (estimatedDeparture == scheduledDeparture) {
+                        null
+                    } else {
+                        tripId to LiveJourneyDepartureEstimate(
+                            scheduledDeparture = scheduledDeparture,
+                            estimatedDeparture = estimatedDeparture
+                        )
+                    }
+                }.toMap()
+                val earliestDisplayedDeparture = displayedDepartureTimes.minOrNull()
+                val latestDisplayedDeparture = displayedDepartureTimes.maxOrNull()
+                val earlierBoundary = if (pageDirection == null) {
+                    earliestDisplayedDeparture
+                        ?: routeTimePlan?.dateTime
+                        ?: searchedPageWindow.startDateTime
+                } else {
+                    earliestDisplayedDeparture ?: searchedPageWindow.startDateTime
+                }
+                val laterBoundary = latestDisplayedDeparture ?: searchedPageWindow.endDateTime
                 diagnostics.record(
-                    "Wyniki: ${candidates.size} kandydatów, " +
+                    "Wyniki: ${candidateEntries.size} kandydatów, " +
                         "${journeyOptions.size} tras po wyborze alternatyw."
                 )
                 val firstJourney = journeyOptions.firstOrNull()
@@ -1027,13 +1259,19 @@ class SearchViewModel @Inject constructor(
                 val selectedDestination = lastTransitStopId?.let(stopsById::get)
                     ?: firstJourney?.destinationAccess?.stopId?.let(stopsById::get)
                     ?: state.destinationStop
-                val noJourneyMessage = when (routeTimePlan?.mode) {
-                    JourneyTimeMode.DEPART_AFTER ->
-                        "Nie znaleziono połączenia w ciągu dwóch godzin od wybranej godziny."
-                    JourneyTimeMode.ARRIVE_BY ->
-                        "Nie znaleziono połączenia przed wybraną godziną przyjazdu."
-                    null ->
-                        "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                val noJourneyMessage = when (pageDirection) {
+                    RouteSearchDirection.EARLIER ->
+                        "Nie znaleziono wcześniejszych przejazdów w dostępnym rozkładzie."
+                    RouteSearchDirection.LATER ->
+                        "Nie znaleziono następnych przejazdów w dostępnym rozkładzie."
+                    null -> when (routeTimePlan?.mode) {
+                        JourneyTimeMode.DEPART_AFTER ->
+                            "Nie znaleziono połączenia w ciągu dwóch godzin od wybranej godziny."
+                        JourneyTimeMode.ARRIVE_BY ->
+                            "Nie znaleziono połączenia przed wybraną godziną przyjazdu."
+                        null ->
+                            "Nie znaleziono połączenia w ciągu najbliższych dwóch godzin."
+                    }
                 }
                 mutableUiState.update {
                     it.copy(
@@ -1041,6 +1279,9 @@ class SearchViewModel @Inject constructor(
                         destinationStop = selectedDestination,
                         journey = firstJourney,
                         journeyOptions = journeyOptions,
+                        liveJourneyDepartureEstimates = liveJourneyDepartureEstimates,
+                        routeSearchWindowStart = earlierBoundary,
+                        routeSearchWindowEnd = laterBoundary,
                         liveDepartures = null,
                         routeSearchMessage = if (firstJourney == null) {
                             noJourneyMessage
@@ -1050,11 +1291,17 @@ class SearchViewModel @Inject constructor(
                         statusMessage = if (firstJourney == null) {
                             noJourneyMessage
                         } else {
-                            null
+                            liveDepartureLookup.warning
                         }
                     )
                 }
-                if (routeTimePlan == null && firstJourney != null && firstTransitStopId != null) {
+                if (
+                    pageDirection == null &&
+                    !allowPastPlan &&
+                    routeTimePlan == null &&
+                    firstJourney != null &&
+                    firstTransitStopId != null
+                ) {
                     diagnostics.record("Trasa gotowa; odjazdy TTSS pobierane w tle.")
                     viewModelScope.launch {
                         try {
@@ -1128,6 +1375,75 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    private suspend fun getLiveDepartureLookup(
+        candidateEntries: List<Pair<CsaJourney, LocalDateTime>>,
+        now: LocalDateTime
+    ): LiveDepartureLookup {
+        val serviceDate = GtfsServiceClock.from(now).serviceDate
+        val tripIds = candidateEntries.asSequence()
+            .filter { (_, scheduledDeparture) ->
+                GtfsServiceClock.from(scheduledDeparture).serviceDate == serviceDate
+            }
+            .mapNotNull { (journey, _) -> journey.firstTransitConnection()?.tripId }
+            .toSet()
+        if (tripIds.isEmpty()) {
+            return LiveDepartureLookup(emptyMap(), null)
+        }
+
+        val routeRows = try {
+            tripIds.toList().chunked(TRIP_ROUTE_LOOKUP_BATCH_SIZE)
+                .flatMap { database.tripDao().getRouteShortNamesByTripIds(it) }
+        } catch (exception: SQLiteException) {
+            diagnostics.record(
+                "Nie udało się odczytać typu linii do sprawdzenia opóźnień: " +
+                    exception.message.orEmpty()
+            )
+            return LiveDepartureLookup(
+                emptyMap(),
+                "Nie udało się sprawdzić opóźnień na żywo; pokazuję godziny z rozkładu."
+            )
+        }
+        val modesByTripId = routeRows.mapNotNull { row ->
+            transitVehicleModeForGtfsRouteType(row.routeType)?.let { row.tripId to it }
+        }.toMap()
+        val liveUpdates = mutableMapOf<String, LiveTripUpdate>()
+        var feedUnavailable = false
+        TransitVehicleMode.entries.forEach { mode ->
+            val modeTripIds = modesByTripId
+                .filterValues { it == mode }
+                .keys
+            if (modeTripIds.isEmpty()) {
+                return@forEach
+            }
+            try {
+                liveUpdates += ztpTripUpdatesRepository.getTripUpdates(mode, modeTripIds)
+            } catch (exception: IOException) {
+                feedUnavailable = true
+                diagnostics.record(
+                    "Nie udało się pobrać opóźnień live dla ${mode.pluralLabel}: " +
+                        exception.message.orEmpty()
+                )
+            }
+        }
+
+        val nowInstant = Instant.now()
+        val freshUpdates = liveUpdates.filterValues { update ->
+            (update.serviceDate == null || update.serviceDate == serviceDate) &&
+                isLiveTripUpdateFresh(update, nowInstant)
+        }
+        diagnostics.record(
+            "Sprawdzono opóźnienia live: ${freshUpdates.size} kursów z aktualną prognozą."
+        )
+        return LiveDepartureLookup(
+            tripUpdates = freshUpdates,
+            warning = if (feedUnavailable) {
+                "Nie udało się sprawdzić wszystkich opóźnień na żywo; część wyników pokazuje rozkład."
+            } else {
+                null
+            }
+        )
+    }
+
     fun refreshSchedule() {
         GtfsScheduleUpdateScheduler.requestRefresh(appContext)
     }
@@ -1159,6 +1475,8 @@ class SearchViewModel @Inject constructor(
                 journey = null,
                 journeyOptions = emptyList(),
                 arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
                 liveDepartures = null,
                 routeSearchMessage = null,
                 statusMessage = null
@@ -1171,6 +1489,7 @@ class SearchViewModel @Inject constructor(
     }
 
     fun routeCustom() {
+        cancelCurrentLocationResolution()
         viewModelScope.launch {
             try {
                 val route = appPreferences.customRoute.first()
@@ -1208,6 +1527,8 @@ class SearchViewModel @Inject constructor(
                         journey = null,
                         journeyOptions = emptyList(),
                         arrivalTarget = null,
+                        routeSearchWindowStart = null,
+                        routeSearchWindowEnd = null,
                         liveDepartures = null,
                         routeSearchMessage = null,
                         statusMessage = null
@@ -1809,20 +2130,6 @@ class SearchViewModel @Inject constructor(
         }
     }
 
-    private fun nearbyStopGroups(stops: List<StopEntity>, place: GeoPlace): List<StopGroup> =
-        StopNameGrouper.group(stops)
-            .sortedBy { group ->
-                group.stops.minOf { stop ->
-                    Haversine.distanceMeters(
-                        place.latitude,
-                        place.longitude,
-                        stop.stopLat,
-                        stop.stopLon
-                    )
-                }
-            }
-            .take(MAX_NEARBY_STOPS)
-
     private fun nearestStopToPlace(group: StopGroup, place: GeoPlace): StopEntity =
         group.stops.minByOrNull { stop ->
             Haversine.distanceMeters(
@@ -1832,39 +2139,6 @@ class SearchViewModel @Inject constructor(
                 stop.stopLon
             )
         } ?: throw IllegalStateException("A stop group cannot be empty.")
-
-    private fun buildStopAccesses(
-        place: GeoPlace,
-        selectedStops: List<StopEntity>,
-        nearbyGroups: List<StopGroup>,
-        allStops: List<StopEntity>,
-        manuallySelected: Boolean
-    ): List<StopAccess> {
-        val candidates = if (manuallySelected) {
-            selectedStops
-        } else {
-            val groups = nearbyGroups.ifEmpty { nearbyStopGroups(allStops, place) }
-            groups.flatMap(StopGroup::stops)
-        }
-
-        return candidates.distinctBy(StopEntity::stopId).mapNotNull { stop ->
-            val distanceMeters = Haversine.distanceMeters(
-                place.latitude,
-                place.longitude,
-                stop.stopLat,
-                stop.stopLon
-            )
-            if (!manuallySelected && distanceMeters > MAX_AUTO_STOP_ACCESS_METERS) {
-                return@mapNotNull null
-            }
-            StopAccess(
-                stopId = stop.stopId,
-                walkingDistanceMeters = distanceMeters,
-                walkingDurationSeconds =
-                    FootpathGenerator.walkingDurationSeconds(distanceMeters)
-            )
-        }
-    }
 
     private fun placeForStop(stop: StopEntity): GeoPlace = GeoPlace(
         label = StopNameGrouper.mainName(stop.stopName),
@@ -1893,6 +2167,7 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun runContextAction(destination: SavedDestination) {
+        cancelCurrentLocationResolution()
         viewModelScope.launch {
             mutableUiState.update {
                 it.copy(
@@ -1902,6 +2177,8 @@ class SearchViewModel @Inject constructor(
                     journeyOptions = emptyList(),
                     arrivalTarget = null,
                     routeTimePlan = null,
+                    routeSearchWindowStart = null,
+                    routeSearchWindowEnd = null,
                     liveDepartures = null
                 )
             }
@@ -1950,6 +2227,8 @@ class SearchViewModel @Inject constructor(
                     journey = result.journey,
                     journeyOptions = emptyList(),
                     arrivalTarget = result.arrivalTarget,
+                    routeSearchWindowStart = null,
+                    routeSearchWindowEnd = null,
                     originStopManuallySelected = false,
                     destinationStopManuallySelected = false,
                     liveDepartures = null,
@@ -1972,12 +2251,11 @@ class SearchViewModel @Inject constructor(
 
     private companion object {
         const val TAG = "SearchViewModel"
+        const val CURRENT_LOCATION_CACHE_TTL_MILLIS = 60_000L
         const val SERVICE_NEWS_REFRESH_INTERVAL_MS = 5 * 60 * 1_000L
         const val ADDRESS_LOOKUP_DEBOUNCE_MILLIS = 450L
         const val MIN_ADDRESS_QUERY_LENGTH = 3
-        const val MAX_NEARBY_STOPS = 6
-        const val MAX_AUTO_STOP_ACCESS_METERS = 1_500.0
-        const val ROUTE_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
         const val MAX_CSA_JOURNEY_CANDIDATES = 100
+        const val TRIP_ROUTE_LOOKUP_BATCH_SIZE = 500
     }
 }

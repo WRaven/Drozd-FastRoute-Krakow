@@ -58,8 +58,10 @@ class ContextEngine @Inject constructor(
         val stopOptions: List<StopEntity>
     )
 
-    suspend fun findCurrentOrigin(): CurrentOrigin {
-        val location = locationProvider.getCurrentLocation()
+    suspend fun findCurrentOrigin(): CurrentOrigin =
+        findCurrentOrigin(locationProvider.getCurrentLocation())
+
+    suspend fun findCurrentOrigin(location: Location): CurrentOrigin {
         val stops = database.stopDao().getAll()
         val stopGroup = withContext(Dispatchers.Default) {
             findNearestStopGroup(stops, location)
@@ -117,20 +119,49 @@ class ContextEngine @Inject constructor(
         }
 
         val stops = database.stopDao().getAll()
-        val (originGroup, destinationGroup) = withContext(Dispatchers.Default) {
-            val originStop = findNearestStop(stops, currentLocation)
-            val destinationStop = legacyTarget
-                ?: findNearestStop(stops, targetPlace.latitude, targetPlace.longitude)
-            findStopGroup(stops, originStop) to findStopGroup(stops, destinationStop)
-        }
         val originPlace = GeoPlace(
             "Moja lokalizacja",
             currentLocation.latitude,
             currentLocation.longitude
         )
+        val (originGroups, destinationGroups) = withContext(Dispatchers.Default) {
+            val originGroup = findNearestStopGroup(stops, currentLocation)
+            val destinationOptions = legacyTarget?.let {
+                listOf(findStopGroup(stops, it))
+            } ?: nearbyStopGroups(stops, targetPlace)
+            listOf(originGroup) to destinationOptions
+        }
+        val originStopOptions = originGroups.flatMap(StopGroup::stops)
+        val destinationStopOptions = destinationGroups.flatMap(StopGroup::stops)
+        val originAccesses = buildStopAccesses(
+            place = originPlace,
+            selectedStops = emptyList(),
+            nearbyGroups = originGroups,
+            allStops = stops,
+            manuallySelected = false
+        )
+        val destinationAccesses = buildStopAccesses(
+            place = targetPlace,
+            selectedStops = emptyList(),
+            nearbyGroups = destinationGroups,
+            allStops = stops,
+            manuallySelected = false
+        )
+        if (originAccesses.isEmpty()) {
+            throw IllegalStateException(
+                "Nie znaleziono przystanków w odległości do 1,5 km od bieżącej lokalizacji."
+            )
+        }
+        if (destinationAccesses.isEmpty()) {
+            throw IllegalStateException(
+                "Nie znaleziono przystanków w odległości do 1,5 km od zapisanego adresu."
+            )
+        }
         return findJourney(
-            originGroup = originGroup,
-            destinationGroup = destinationGroup,
+            originStopOptions = originStopOptions,
+            destinationStopOptions = destinationStopOptions,
+            originAccesses = originAccesses,
+            destinationAccesses = destinationAccesses,
             originPlace = originPlace,
             destinationPlace = targetPlace,
             allStops = stops,
@@ -139,8 +170,10 @@ class ContextEngine @Inject constructor(
     }
 
     private suspend fun findJourney(
-        originGroup: StopGroup,
-        destinationGroup: StopGroup,
+        originStopOptions: List<StopEntity>,
+        destinationStopOptions: List<StopEntity>,
+        originAccesses: List<StopAccess>,
+        destinationAccesses: List<StopAccess>,
         originPlace: GeoPlace,
         destinationPlace: GeoPlace,
         allStops: List<StopEntity>,
@@ -153,11 +186,9 @@ class ContextEngine @Inject constructor(
         val searchWindowSeconds = arrivalTarget?.let {
             Duration.between(searchStart, it).seconds.toInt()
         } ?: DEFAULT_SEARCH_WINDOW_SECONDS
-        val originStopIds = originGroup.stops.mapTo(mutableSetOf()) { it.stopId }
-        val destinationStopIds = destinationGroup.stops.mapTo(mutableSetOf()) { it.stopId }
         val candidateJourney = routePlanner.findJourneys(
-            originAccesses = originStopIds.map { StopAccess(it, 0.0, 0) },
-            destinationAccesses = destinationStopIds.map { StopAccess(it, 0.0, 0) },
+            originAccesses = originAccesses,
+            destinationAccesses = destinationAccesses,
             startDateTime = searchStart,
             searchWindowSeconds = searchWindowSeconds,
             maxResults = 1,
@@ -176,18 +207,18 @@ class ContextEngine @Inject constructor(
             ?.connection
             ?.departureStopId
             ?.let { stopId -> allStops.firstOrNull { it.stopId == stopId } }
-            ?: originGroup.stops.first()
+            ?: originStopOptions.first()
         val destination = transitSteps.lastOrNull()
             ?.connection
             ?.arrivalStopId
             ?.let { stopId -> allStops.firstOrNull { it.stopId == stopId } }
-            ?: destinationGroup.stops.first()
+            ?: destinationStopOptions.first()
 
         return QuickActionResult.JourneyFound(
             origin = origin,
             destination = destination,
-            originStopOptions = originGroup.stops,
-            destinationStopOptions = destinationGroup.stops,
+            originStopOptions = originStopOptions,
+            destinationStopOptions = destinationStopOptions,
             journey = journey,
             originPlace = originPlace,
             destinationPlace = destinationPlace,

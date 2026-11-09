@@ -14,6 +14,9 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import javax.inject.Inject
 
+private const val GTFS_TRAM_ROUTE_TYPE = 0
+private const val GTFS_BUS_ROUTE_TYPE = 3
+
 data class LiveTripStopUpdate(
     val stopSequence: Int?,
     val stopId: String?,
@@ -43,6 +46,22 @@ class ZtpTripUpdatesRepository @Inject constructor(
         tripId: String,
         serviceDate: LocalDate? = null
     ): LiveTripUpdate? {
+        val feed = fetchFeed(mode)
+        return mapTripUpdate(feed, tripId)?.takeIf {
+            serviceDate == null || it.serviceDate == null || it.serviceDate == serviceDate
+        }
+    }
+
+    suspend fun getTripUpdates(
+        mode: TransitVehicleMode,
+        tripIds: Set<String>
+    ): Map<String, LiveTripUpdate> = if (tripIds.isEmpty()) {
+        emptyMap()
+    } else {
+        mapTripUpdates(fetchFeed(mode), tripIds)
+    }
+
+    private suspend fun fetchFeed(mode: TransitVehicleMode): GtfsRealtime.FeedMessage {
         val response = try {
             httpClient.get("${TRIP_UPDATES_URL}${mode.feedSuffix}.pb")
         } catch (exception: HttpRequestTimeoutException) {
@@ -58,17 +77,13 @@ class ZtpTripUpdatesRepository @Inject constructor(
                 "ZTP zwrócił HTTP ${response.status.value} dla aktualizacji kursów."
             )
         }
-
-        val feed = try {
+        return try {
             GtfsRealtime.FeedMessage.parseFrom(response.body<ByteArray>())
         } catch (exception: IOException) {
             throw IOException(
                 "Nie udało się odczytać aktualizacji kursu z ZTP: ${exception.message.orEmpty()}",
                 exception
             )
-        }
-        return mapTripUpdate(feed, tripId)?.takeIf {
-            serviceDate == null || it.serviceDate == null || it.serviceDate == serviceDate
         }
     }
 
@@ -77,19 +92,42 @@ class ZtpTripUpdatesRepository @Inject constructor(
     }
 }
 
+internal fun transitVehicleModeForGtfsRouteType(routeType: Int?): TransitVehicleMode? =
+    when (routeType) {
+        GTFS_TRAM_ROUTE_TYPE -> TransitVehicleMode.TRAM
+        GTFS_BUS_ROUTE_TYPE -> TransitVehicleMode.BUS
+        else -> null
+    }
+
 internal fun mapTripUpdate(
     feed: GtfsRealtime.FeedMessage,
     tripId: String
-): LiveTripUpdate? {
-    val tripUpdate = feed.entityList
+): LiveTripUpdate? = mapTripUpdates(feed, setOf(tripId))[tripId]
+
+internal fun mapTripUpdates(
+    feed: GtfsRealtime.FeedMessage,
+    tripIds: Set<String>
+): Map<String, LiveTripUpdate> {
+    val sourceTimestamp = feed.header.timestamp.takeIf {
+        feed.header.hasTimestamp() && it > 0
+    }?.let(Instant::ofEpochSecond)
+    return feed.entityList
         .asSequence()
         .filter { it.hasTripUpdate() && it.tripUpdate.hasTrip() }
         .map { it.tripUpdate }
-        .firstOrNull { update ->
-            update.trip.hasTripId() && update.trip.tripId == tripId
-        } ?: return null
+        .filter { update -> update.trip.hasTripId() && update.trip.tripId in tripIds }
+        .distinctBy { it.trip.tripId }
+        .associate { update ->
+            val tripId = update.trip.tripId
+            tripId to mapTripUpdate(update, tripId, sourceTimestamp)
+        }
+}
 
-    return LiveTripUpdate(
+private fun mapTripUpdate(
+    tripUpdate: GtfsRealtime.TripUpdate,
+    tripId: String,
+    sourceTimestamp: Instant?
+): LiveTripUpdate = LiveTripUpdate(
         tripId = tripId,
         stopTimeUpdates = tripUpdate.stopTimeUpdateList.map { update ->
             LiveTripStopUpdate(
@@ -128,7 +166,5 @@ internal fun mapTripUpdate(
                 throw IOException("ZTP przekazał nieprawidłową datę prognozy kursu.", exception)
             }
         },
-        sourceTimestamp = feed.header.timestamp.takeIf { feed.header.hasTimestamp() && it > 0 }
-            ?.let(Instant::ofEpochSecond)
+        sourceTimestamp = sourceTimestamp
     )
-}
