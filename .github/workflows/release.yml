@@ -224,9 +224,7 @@ jobs:
           {
             echo "## Poprawki"
             echo
-            echo "- Poprawiono strony wcześniejszych i następnych odjazdów; kolejność uwzględnia godziny kursów i opóźnienia live."
-            echo "- Dodano krótkie podsumowanie poprawek w oknie i ręcznym sprawdzaniu aktualizacji."
-            echo "- Usunięto niedziałający strumień Radia Kraków."
+            echo "- Poprawiono strony wcześniejszych i następnych odjazdów: pokazują najbliższe cztery kursy od granicy bieżącej listy, z uwzględnieniem opóźnień live."
             echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"

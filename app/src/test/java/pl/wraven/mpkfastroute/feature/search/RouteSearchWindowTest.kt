@@ -79,4 +79,45 @@ class RouteSearchWindowTest {
         assertEquals(current.endDateTime, later.startDateTime)
         assertEquals(current.endDateTime.plusHours(2), later.endDateTime)
     }
+
+    @Test
+    fun earlierPageStartsImmediatelyBeforeTheDisplayedBoundary() {
+        val boundary = LocalDateTime.of(2026, 11, 9, 17, 10)
+
+        val earlier = routeSearchPageWindow(boundary, RouteSearchDirection.EARLIER)
+
+        assertEquals(boundary.minusMinutes(15), earlier.startDateTime)
+        assertEquals(boundary, earlier.endDateTime)
+    }
+
+    @Test
+    fun laterPageStartsAtTheDisplayedBoundaryWithoutSkippingTwoHours() {
+        val boundary = LocalDateTime.of(2026, 11, 9, 17, 16)
+
+        val later = routeSearchPageWindow(boundary, RouteSearchDirection.LATER)
+
+        assertEquals(boundary, later.startDateTime)
+        assertEquals(boundary.plusMinutes(15), later.endDateTime)
+    }
+
+    @Test
+    fun pageWindowsAdvanceWithoutGapsInEitherDirection() {
+        val boundary = LocalDateTime.of(2026, 11, 9, 17, 0)
+        val firstEarlier = routeSearchPageWindow(boundary, RouteSearchDirection.EARLIER)
+        val firstLater = routeSearchPageWindow(boundary, RouteSearchDirection.LATER)
+
+        val nextEarlier = adjacentRouteSearchWindow(
+            firstEarlier,
+            RouteSearchDirection.EARLIER,
+            ROUTE_SEARCH_PAGE_WINDOW_SECONDS
+        )
+        val nextLater = adjacentRouteSearchWindow(
+            firstLater,
+            RouteSearchDirection.LATER,
+            ROUTE_SEARCH_PAGE_WINDOW_SECONDS
+        )
+
+        assertEquals(firstEarlier.startDateTime, nextEarlier.endDateTime)
+        assertEquals(firstLater.endDateTime, nextLater.startDateTime)
+    }
 }

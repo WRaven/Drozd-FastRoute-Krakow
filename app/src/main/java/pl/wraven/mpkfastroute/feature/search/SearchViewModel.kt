@@ -1022,16 +1022,7 @@ class SearchViewModel @Inject constructor(
             RouteSearchDirection.EARLIER -> start
             RouteSearchDirection.LATER -> end
         }
-        val searchWindow = when (direction) {
-            RouteSearchDirection.EARLIER -> adjacentRouteSearchWindow(
-                RouteSearchWindow(start, end),
-                direction
-            )
-            RouteSearchDirection.LATER -> RouteSearchWindow(
-                startDateTime = boundary.minusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong()),
-                endDateTime = boundary.plusSeconds(ROUTE_SEARCH_WINDOW_SECONDS.toLong())
-            )
-        }
+        val searchWindow = routeSearchPageWindow(boundary, direction)
         searchRouteAt(
             window = searchWindow,
             allowPastPlan = true,
@@ -1133,7 +1124,11 @@ class SearchViewModel @Inject constructor(
                         originAccesses = originAccesses,
                         destinationAccesses = destinationAccesses,
                         startDateTime = searchedWindow.startDateTime,
-                        searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
+                        searchWindowSeconds = if (pageDirection == null) {
+                            ROUTE_SEARCH_WINDOW_SECONDS
+                        } else {
+                            ROUTE_SEARCH_PAGE_WINDOW_SECONDS
+                        },
                         maxResults = MAX_CSA_JOURNEY_CANDIDATES,
                         arrivalDeadline = routeTimePlan
                             ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
@@ -1175,7 +1170,11 @@ class SearchViewModel @Inject constructor(
                     if (pageJourneyCount >= ROUTE_SEARCH_PAGE_SIZE) {
                         break
                     }
-                    searchedWindow = adjacentRouteSearchWindow(searchedWindow, pageDirection)
+                    searchedWindow = adjacentRouteSearchWindow(
+                        window = searchedWindow,
+                        direction = pageDirection,
+                        windowSeconds = ROUTE_SEARCH_PAGE_WINDOW_SECONDS
+                    )
                 }
                 val currentServiceTime = GtfsServiceClock.from(now)
                 val liveDepartureLookup = if (pageDirection != null) {
