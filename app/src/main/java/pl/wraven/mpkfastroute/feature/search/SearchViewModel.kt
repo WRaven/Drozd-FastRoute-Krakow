@@ -1124,11 +1124,7 @@ class SearchViewModel @Inject constructor(
                         originAccesses = originAccesses,
                         destinationAccesses = destinationAccesses,
                         startDateTime = searchedWindow.startDateTime,
-                        searchWindowSeconds = if (pageDirection == null) {
-                            ROUTE_SEARCH_WINDOW_SECONDS
-                        } else {
-                            ROUTE_SEARCH_PAGE_WINDOW_SECONDS
-                        },
+                        searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
                         maxResults = MAX_CSA_JOURNEY_CANDIDATES,
                         arrivalDeadline = routeTimePlan
                             ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }

@@ -224,7 +224,8 @@ jobs:
           {
             echo "## Poprawki"
             echo
-            echo "- Poprawiono strony wcześniejszych i następnych odjazdów: pokazują najbliższe cztery kursy od granicy bieżącej listy, z uwzględnieniem opóźnień live."
+            echo "- Naprawiono strony wcześniejszych i następnych odjazdów: wyszukiwanie zachowuje pełny horyzont dla przesiadek i wybiera najbliższe kursy."
+            echo "- Poprawiono prezentację minionych odjazdów i czasu przejazdu oraz przeniesiono skróty Dom/Praca pod pola trasy."
             echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"

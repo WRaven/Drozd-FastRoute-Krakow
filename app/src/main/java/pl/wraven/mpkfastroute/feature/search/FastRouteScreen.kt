@@ -123,6 +123,7 @@ import pl.wraven.mpkfastroute.core.csa.JourneyTimeMode
 import pl.wraven.mpkfastroute.core.csa.JourneyTimePlan
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
 import pl.wraven.mpkfastroute.core.database.StopEntity
+import pl.wraven.mpkfastroute.core.gtfs.GtfsServiceClock
 import pl.wraven.mpkfastroute.core.live.DepartureEstimate
 import pl.wraven.mpkfastroute.core.live.LiveDeparturesResult
 import pl.wraven.mpkfastroute.core.location.GeoPlace
@@ -1029,50 +1030,13 @@ private fun SearchContent(
     ) {
         if (!isKeyboardVisible) {
             Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .bringIntoViewRequester(originCardBringIntoViewRequester),
+                modifier = Modifier.fillMaxWidth(),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        "Szybkie akcje",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    DestinationQuickActionChip(
-                        label = "🏠 " + if (state.hasHomeDestination) {
-                            state.destinationShortcutNames.home
-                        } else {
-                            "Ustaw: ${state.destinationShortcutNames.home}"
-                        },
-                        enabled = !state.isSearching && !state.isImporting,
-                        longClickLabel = "Zapisz wybrany cel jako dom",
-                        onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
-                        onLongClick = onSetHome
-                    )
-                    DestinationQuickActionChip(
-                        label = "🏢 " + if (state.hasWorkDestination) {
-                            state.destinationShortcutNames.work
-                        } else {
-                            "Ustaw: ${state.destinationShortcutNames.work}"
-                        },
-                        enabled = !state.isSearching && !state.isImporting,
-                        longClickLabel = "Zapisz wybrany cel jako pracę",
-                        onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
-                        onLongClick = onSetWork
-                    )
-                }
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1193,7 +1157,9 @@ private fun SearchContent(
             Text("Znajdź połączenie", style = MaterialTheme.typography.titleLarge)
         }
         Card(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .bringIntoViewRequester(originCardBringIntoViewRequester),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
         ) {
             Column(
@@ -1380,6 +1346,46 @@ private fun SearchContent(
                             }
                         )
                     }
+                }
+            }
+        }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("Skróty do celu", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    DestinationQuickActionChip(
+                        label = "🏠 " + if (state.hasHomeDestination) {
+                            state.destinationShortcutNames.home
+                        } else {
+                            "Ustaw: ${state.destinationShortcutNames.home}"
+                        },
+                        enabled = !state.isSearching && !state.isImporting,
+                        longClickLabel = "Zapisz wybrany cel jako dom",
+                        onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
+                        onLongClick = onSetHome
+                    )
+                    DestinationQuickActionChip(
+                        label = "🏢 " + if (state.hasWorkDestination) {
+                            state.destinationShortcutNames.work
+                        } else {
+                            "Ustaw: ${state.destinationShortcutNames.work}"
+                        },
+                        enabled = !state.isSearching && !state.isImporting,
+                        longClickLabel = "Zapisz wybrany cel jako pracę",
+                        onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
+                        onLongClick = onSetWork
+                    )
                 }
             }
         }
@@ -1751,6 +1757,28 @@ private fun JourneyResult(
                     ?.let { " → $it" }.orEmpty()
         }
         .joinToString(" · ")
+    val now = LocalDateTime.now()
+    val serviceDate = GtfsServiceClock.from(now).serviceDate
+    val scheduledTransitDeparture = firstConnection?.let {
+        journey.firstTransitDepartureDateTime(serviceDate)
+    }
+    val estimatedTransitDeparture = liveDepartureEstimate?.estimatedDeparture
+        ?: scheduledTransitDeparture
+    val hasDeparted = estimatedTransitDeparture?.isBefore(now) == true
+    val departureTimeLabel = if (hasDeparted && liveDepartureEstimate != null) {
+        liveDepartureEstimate.estimatedDeparture.format(DateTimeFormatter.ofPattern("HH:mm"))
+    } else {
+        firstConnection?.let {
+            formatJourneyTime(it.departureTime, journey.departureTime)
+        } ?: formatJourneyTime(journey.departureTime, journey.departureTime)
+    }
+    val journeyHeading = if (hasDeparted) {
+        "$routeNumber. Odjechał o $departureTimeLabel"
+    } else {
+        "$routeNumber. Wyjście ${
+            formatJourneyTime(journey.departureTime, journey.departureTime)
+        } · odjazd $departureTimeLabel"
+    }
 
     Card(
         modifier = Modifier
@@ -1767,17 +1795,25 @@ private fun JourneyResult(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                "$routeNumber. Wyjście ${
-                    formatJourneyTime(journey.departureTime, journey.departureTime)
-                } · odjazd ${
-                    firstConnection?.let {
-                        formatJourneyTime(it.departureTime, journey.departureTime)
-                    } ?: formatJourneyTime(journey.departureTime, journey.departureTime)
-                }",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    journeyHeading,
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    formatDuration(journey.totalDurationSeconds),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             liveDepartureEstimate?.let { estimate ->
                 val delaySeconds = Duration.between(
                     estimate.scheduledDeparture,
