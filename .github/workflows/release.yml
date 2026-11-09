@@ -224,8 +224,8 @@ jobs:
           {
             echo "## Poprawki"
             echo
-            echo "- Naprawiono strony wcześniejszych i następnych odjazdów: wyszukiwanie zachowuje pełny horyzont dla przesiadek i wybiera najbliższe kursy."
-            echo "- Poprawiono prezentację minionych odjazdów i czasu przejazdu oraz przeniesiono skróty Dom/Praca pod pola trasy."
+            echo "- Ustawiono strony odjazdów na 5 wcześniejszych i 10 następnych, zachowując pełny horyzont wyszukiwania dla przesiadek."
+            echo "- Przeniesiono edycję harmonogramów i włączanie powiadomień do Ustawień; usunięto skrót Własny z górnego panelu, pozostawiając szybkie trasy Dom/Praca."
             echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"

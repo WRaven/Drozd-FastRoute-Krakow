@@ -52,15 +52,25 @@ class JourneyDepartureSelectorTest {
     }
 
     @Test
-    fun limitsAJourneyPageToFourDistinctDepartures() {
-        val selected = selectDistinctJourneyDepartures(
-            candidates = (1..6).map { index ->
-                journey("trip-$index", departure = index * 100, arrival = index * 100 + 500)
-            },
-            maxResults = ROUTE_SEARCH_PAGE_SIZE
-        )
+    fun earlierAndLaterPagesShowFiveAndTenDistinctDepartures() {
+        val candidates = (1..12).map { index ->
+            journey("trip-$index", departure = index * 100, arrival = index * 100 + 500)
+        }
 
-        assertEquals(4, selected.size)
+        assertEquals(
+            ROUTE_SEARCH_EARLIER_PAGE_SIZE,
+            selectDistinctJourneyDepartures(
+                candidates = candidates,
+                maxResults = routeSearchPageSize(RouteSearchDirection.EARLIER)
+            ).size
+        )
+        assertEquals(
+            ROUTE_SEARCH_LATER_PAGE_SIZE,
+            selectDistinctJourneyDepartures(
+                candidates = candidates,
+                maxResults = routeSearchPageSize(RouteSearchDirection.LATER)
+            ).size
+        )
     }
 
     @Test
@@ -73,13 +83,13 @@ class JourneyDepartureSelectorTest {
                 journey("trip-4", departure = 700, arrival = 1_000).copy(departureTime = 100),
                 journey("trip-5", departure = 900, arrival = 1_100).copy(departureTime = 100)
             ),
-            maxResults = ROUTE_SEARCH_PAGE_SIZE,
+            maxResults = routeSearchPageSize(RouteSearchDirection.EARLIER),
             latestFirst = true,
             orderByTransitDeparture = true
         )
 
         assertEquals(
-            listOf("trip-5", "trip-4", "trip-3", "trip-2"),
+            listOf("trip-5", "trip-4", "trip-3", "trip-2", "trip-1"),
             selected.map { it.firstTransitConnection()?.tripId }
         )
     }
@@ -104,7 +114,7 @@ class JourneyDepartureSelectorTest {
         val onTime = journey("trip-on-time", departure = 200, arrival = 800)
         val selected = selectDistinctJourneyDepartures(
             candidates = listOf(delayed, onTime),
-            maxResults = ROUTE_SEARCH_PAGE_SIZE,
+            maxResults = routeSearchPageSize(RouteSearchDirection.LATER),
             latestFirst = true,
             orderByTransitDeparture = true,
             departureDateTimeOverrides = mapOf(

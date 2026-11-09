@@ -468,10 +468,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onSearchLater = viewModel::searchLaterJourneys,
                 onGoHome = { runWithLocationPermission(viewModel::routeHome) },
                 onGoToWork = { runWithLocationPermission(viewModel::routeToWork) },
-                onEditWorkSchedule = { requestScheduleEdit(SavedDestination.WORK) },
                 onSetHome = { requestScheduleSetup(SavedDestination.HOME) },
                 onSetWork = { requestScheduleSetup(SavedDestination.WORK) },
-                onCustomRoute = viewModel::routeCustom,
                 onToggleRadio = {
                     if (state.isRadioPlaying) {
                         viewModel.stopRadio()
@@ -503,8 +501,6 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     viewModel.clearLiveMapUserLocation()
                     runWithLocationPermission(viewModel::locateUserOnLiveMap)
                 },
-                remindersEnabled = commuteRemindersEnabled,
-                onEnableCommuteReminders = ::requestCommuteReminderPermissions,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(contentPadding)
@@ -572,6 +568,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                     ?.let { StopNameGrouper.mainName(it.stopName) },
             homeSchedule = state.homeSchedule,
             workSchedule = state.workSchedule,
+            commuteRemindersEnabled = commuteRemindersEnabled,
+            onEnableCommuteReminders = ::requestCommuteReminderPermissions,
             diagnosticEntries = state.diagnosticEntries,
             updateCheckMessage = state.updateCheckMessage,
             updateCheckResult = state.updateCheckResult,
@@ -958,10 +956,8 @@ private fun SearchContent(
     onSearchLater: () -> Unit,
     onGoHome: () -> Unit,
     onGoToWork: () -> Unit,
-    onEditWorkSchedule: () -> Unit,
     onSetHome: () -> Unit,
     onSetWork: () -> Unit,
-    onCustomRoute: () -> Unit,
     onToggleRadio: () -> Unit,
     onChooseRadio: () -> Unit,
     onManageRadio: () -> Unit,
@@ -973,8 +969,6 @@ private fun SearchContent(
     onRefreshServiceNews: () -> Unit,
     onOpenWeather: () -> Unit,
     onOpenLiveMap: () -> Unit,
-    remindersEnabled: Boolean,
-    onEnableCommuteReminders: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
@@ -1037,6 +1031,41 @@ private fun SearchContent(
                     modifier = Modifier.padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            "Szybkie akcje",
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        DestinationQuickActionChip(
+                            label = "🏠 " + if (state.hasHomeDestination) {
+                                state.destinationShortcutNames.home
+                            } else {
+                                "Ustaw: ${state.destinationShortcutNames.home}"
+                            },
+                            enabled = !state.isSearching && !state.isImporting,
+                            longClickLabel = "Zapisz wybrany cel jako dom",
+                            onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
+                            onLongClick = onSetHome
+                        )
+                        DestinationQuickActionChip(
+                            label = "🏢 " + if (state.hasWorkDestination) {
+                                state.destinationShortcutNames.work
+                            } else {
+                                "Ustaw: ${state.destinationShortcutNames.work}"
+                            },
+                            enabled = !state.isSearching && !state.isImporting,
+                            longClickLabel = "Zapisz wybrany cel jako pracę",
+                            onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
+                            onLongClick = onSetWork
+                        )
+                    }
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -1045,22 +1074,6 @@ private fun SearchContent(
                         onClick = onOpenLiveMap,
                         enabled = !state.isImporting,
                         label = { Text("🗺 Live") }
-                    )
-                    if (state.hasWorkDestination) {
-                        AssistChip(
-                            onClick = onEditWorkSchedule,
-                            enabled = !state.isImporting,
-                            label = {
-                                Text("🕒 Harmonogram: ${state.destinationShortcutNames.work}")
-                            }
-                        )
-                    }
-                    AssistChip(
-                        onClick = onCustomRoute,
-                        enabled = !state.isSearching && !state.isImporting,
-                        label = {
-                            Text(if (state.customRoute == null) "Własny · zapisz trasę" else "Własny")
-                        }
                     )
                     AssistChip(
                         onClick = onOpenServiceAlerts,
@@ -1072,18 +1085,6 @@ private fun SearchContent(
                         enabled = !state.isImporting,
                         label = { Text("X: MPK Kraków") }
                     )
-                    if (state.homeSchedule != null || state.workSchedule != null) {
-                        AssistChip(
-                            onClick = onEnableCommuteReminders,
-                            enabled = !state.isImporting,
-                            label = {
-                                Text(
-                                    if (remindersEnabled) "🔔 Powiadomienia aktywne"
-                                    else "🔔 Włącz powiadomienia"
-                                )
-                            }
-                        )
-                    }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1350,46 +1351,6 @@ private fun SearchContent(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text("Skróty do celu", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    DestinationQuickActionChip(
-                        label = "🏠 " + if (state.hasHomeDestination) {
-                            state.destinationShortcutNames.home
-                        } else {
-                            "Ustaw: ${state.destinationShortcutNames.home}"
-                        },
-                        enabled = !state.isSearching && !state.isImporting,
-                        longClickLabel = "Zapisz wybrany cel jako dom",
-                        onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
-                        onLongClick = onSetHome
-                    )
-                    DestinationQuickActionChip(
-                        label = "🏢 " + if (state.hasWorkDestination) {
-                            state.destinationShortcutNames.work
-                        } else {
-                            "Ustaw: ${state.destinationShortcutNames.work}"
-                        },
-                        enabled = !state.isSearching && !state.isImporting,
-                        longClickLabel = "Zapisz wybrany cel jako pracę",
-                        onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
-                        onLongClick = onSetWork
-                    )
-                }
-            }
-        }
-
         if (!isKeyboardVisible) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -1470,14 +1431,14 @@ private fun SearchContent(
                     enabled = !state.isImporting,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("← 4 wcześniejsze")
+                    Text("← 5 wcześniejszych")
                 }
                 TextButton(
                     onClick = onSearchLater,
                     enabled = !state.isImporting,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text("4 następne →")
+                    Text("10 następnych →")
                 }
             }
         }
@@ -2170,6 +2131,8 @@ private fun SettingsDialog(
     hasWorkDestination: Boolean,
     homeSchedule: DestinationSchedule?,
     workSchedule: DestinationSchedule?,
+    commuteRemindersEnabled: Boolean,
+    onEnableCommuteReminders: () -> Unit,
     diagnosticEntries: List<String>,
     updateCheckMessage: String?,
     updateCheckResult: pl.wraven.mpkfastroute.core.update.UpdateCheckResult?,
@@ -2350,6 +2313,27 @@ private fun SettingsDialog(
                         enabled = hasWorkDestination
                     ) {
                         Text("Zmień")
+                    }
+                }
+                if (homeSchedule != null || workSchedule != null) {
+                    HorizontalDivider()
+                    Text(
+                        "Powiadomienia o dojeździe",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Text(
+                        "Przypomnienie pojawia się 15 minut przed planowanym wyjazdem.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(
+                        onClick = onEnableCommuteReminders,
+                        enabled = !isImporting
+                    ) {
+                        Text(
+                            if (commuteRemindersEnabled) "Powiadomienia aktywne"
+                            else "Włącz powiadomienia"
+                        )
                     }
                 }
                 Button(onClick = onRefresh, enabled = !isImporting) {

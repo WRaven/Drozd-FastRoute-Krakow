@@ -1139,6 +1139,7 @@ class SearchViewModel @Inject constructor(
                     if (pageDirection == null) {
                         break
                     }
+                    val pageSize = routeSearchPageSize(pageDirection)
                     val eligibleCandidates = candidateEntries.filter { (_, departureDateTime) ->
                         isDepartureWithinPage(
                             departureDateTime = departureDateTime,
@@ -1148,7 +1149,7 @@ class SearchViewModel @Inject constructor(
                     }
                     val pageJourneyCount = selectDistinctJourneyDepartures(
                         candidates = eligibleCandidates.map { it.first },
-                        maxResults = ROUTE_SEARCH_PAGE_SIZE,
+                        maxResults = pageSize,
                         latestFirst = pageDirection == RouteSearchDirection.EARLIER,
                         orderByTransitDeparture = true
                     ).size
@@ -1163,7 +1164,7 @@ class SearchViewModel @Inject constructor(
                             endDateTime = searchedWindow.endDateTime
                         )
                     }
-                    if (pageJourneyCount >= ROUTE_SEARCH_PAGE_SIZE) {
+                    if (pageJourneyCount >= pageSize) {
                         break
                     }
                     searchedWindow = adjacentRouteSearchWindow(
@@ -1196,7 +1197,7 @@ class SearchViewModel @Inject constructor(
                 val candidates = eligibleCandidates.map { it.first }
                 val journeyOptions = selectDistinctJourneyDepartures(
                     candidates = candidates,
-                    maxResults = pageDirection?.let { ROUTE_SEARCH_PAGE_SIZE }
+                    maxResults = pageDirection?.let(::routeSearchPageSize)
                         ?: MAX_DISPLAYED_ROUTE_DEPARTURES,
                     latestFirst = when (pageDirection) {
                         RouteSearchDirection.EARLIER -> true

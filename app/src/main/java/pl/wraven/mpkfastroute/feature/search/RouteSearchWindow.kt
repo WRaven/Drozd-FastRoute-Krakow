@@ -5,7 +5,8 @@ import java.time.LocalDateTime
 
 internal const val ROUTE_SEARCH_WINDOW_SECONDS = 2 * 60 * 60
 internal const val ROUTE_SEARCH_PAGE_WINDOW_SECONDS = 15 * 60
-internal const val ROUTE_SEARCH_PAGE_SIZE = 4
+internal const val ROUTE_SEARCH_EARLIER_PAGE_SIZE = 5
+internal const val ROUTE_SEARCH_LATER_PAGE_SIZE = 10
 internal const val MAX_ROUTE_SEARCH_PAGE_DURATION_SECONDS = 12 * ROUTE_SEARCH_WINDOW_SECONDS
 internal const val MAX_ROUTE_SEARCH_WINDOWS_PER_PAGE =
     MAX_ROUTE_SEARCH_PAGE_DURATION_SECONDS / ROUTE_SEARCH_PAGE_WINDOW_SECONDS
@@ -18,6 +19,11 @@ internal data class RouteSearchWindow(
 internal enum class RouteSearchDirection {
     EARLIER,
     LATER
+}
+
+internal fun routeSearchPageSize(direction: RouteSearchDirection): Int = when (direction) {
+    RouteSearchDirection.EARLIER -> ROUTE_SEARCH_EARLIER_PAGE_SIZE
+    RouteSearchDirection.LATER -> ROUTE_SEARCH_LATER_PAGE_SIZE
 }
 
 internal fun isDepartureWithinPage(
