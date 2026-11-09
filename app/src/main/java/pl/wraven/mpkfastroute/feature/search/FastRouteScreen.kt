@@ -459,6 +459,8 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onSelectDestination = viewModel::selectDestination,
                 onSelectAddress = viewModel::selectDestinationAddressAndSearch,
                 onSearch = viewModel::searchRoute,
+                onSearchEarlier = viewModel::searchEarlierJourneys,
+                onSearchLater = viewModel::searchLaterJourneys,
                 onGoHome = { runWithLocationPermission(viewModel::routeHome) },
                 onGoToWork = { runWithLocationPermission(viewModel::routeToWork) },
                 onEditWorkSchedule = { requestScheduleEdit(SavedDestination.WORK) },
@@ -947,6 +949,8 @@ private fun SearchContent(
     onSelectDestination: (StopGroup) -> Unit,
     onSelectAddress: (GeoPlace) -> Unit,
     onSearch: () -> Unit,
+    onSearchEarlier: () -> Unit,
+    onSearchLater: () -> Unit,
     onGoHome: () -> Unit,
     onGoToWork: () -> Unit,
     onEditWorkSchedule: () -> Unit,
@@ -1425,6 +1429,49 @@ private fun SearchContent(
                 "Znalezione odjazdy (${state.journeyOptions.size})",
                 style = MaterialTheme.typography.headlineSmall
             )
+        }
+        val routeSearchAnchor = state.routeSearchAnchor
+        if (
+            routeSearchAnchor != null &&
+            !state.isSearching &&
+            (
+                state.journeyOptions.isNotEmpty() ||
+                    state.journey != null ||
+                    state.routeSearchMessage != null
+                )
+        ) {
+            val searchWindow = routeSearchWindow(
+                routeSearchAnchor,
+                state.routeTimePlan?.mode
+            )
+            val timeFormatter = DateTimeFormatter.ofPattern("dd.MM HH:mm")
+            Text(
+                "Zakres: ${searchWindow.startDateTime.format(timeFormatter)} – " +
+                    searchWindow.endDateTime.format(timeFormatter),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            if (!searchWindow.endDateTime.isAfter(LocalDateTime.now())) {
+                Text(
+                    "Odjazdy z rozkładu, nie dane na żywo.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(
+                    onClick = onSearchEarlier,
+                    enabled = !state.isImporting,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("← Wcześniejsze")
+                }
+                TextButton(
+                    onClick = onSearchLater,
+                    enabled = !state.isImporting,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Następne →")
+                }
+            }
         }
         state.arrivalTarget?.let { target ->
             Text(
