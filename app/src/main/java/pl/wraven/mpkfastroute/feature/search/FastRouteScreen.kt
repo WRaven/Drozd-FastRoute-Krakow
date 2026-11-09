@@ -18,6 +18,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.MarqueeDefaults
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
@@ -891,6 +892,47 @@ private fun OnboardingContent(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun DestinationQuickActionChip(
+    label: String,
+    enabled: Boolean,
+    longClickLabel: String,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .heightIn(min = 32.dp)
+            .combinedClickable(
+                enabled = enabled,
+                role = Role.Button,
+                onClick = onClick,
+                onLongClickLabel = longClickLabel,
+                onLongClick = onLongClick
+            ),
+        shape = MaterialTheme.shapes.small,
+        color = androidx.compose.ui.graphics.Color.Transparent,
+        contentColor = if (enabled) {
+            colors.onSurface
+        } else {
+            colors.onSurface.copy(alpha = 0.38f)
+        },
+        border = BorderStroke(
+            1.dp,
+            if (enabled) colors.outline else colors.outline.copy(alpha = 0.12f)
+        )
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelLarge,
+            maxLines = 1
+        )
+    }
+}
+
 @Composable
 private fun SearchContent(
     state: SearchUiState,
@@ -995,32 +1037,28 @@ private fun SearchContent(
                             enabled = !state.isImporting,
                             label = { Text("🗺 Live") }
                     )
-                        AssistChip(
-                        onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
-                        enabled = !state.isSearching && !state.isImporting,
-                        label = {
-                            Text(
-                                "🏠 " + if (state.hasHomeDestination) {
-                                    state.destinationShortcutNames.home
-                                } else {
-                                    "Ustaw: ${state.destinationShortcutNames.home}"
-                                }
-                            )
-                        }
-                    )
-                    AssistChip(
-                        onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
-                        enabled = !state.isSearching && !state.isImporting,
-                        label = {
-                            Text(
-                                "🏢 " + if (state.hasWorkDestination) {
-                                    state.destinationShortcutNames.work
-                                } else {
-                                    "Ustaw: ${state.destinationShortcutNames.work}"
-                                }
-                            )
-                        }
-                    )
+                        DestinationQuickActionChip(
+                            label = "🏠 " + if (state.hasHomeDestination) {
+                                state.destinationShortcutNames.home
+                            } else {
+                                "Ustaw: ${state.destinationShortcutNames.home}"
+                            },
+                            enabled = !state.isSearching && !state.isImporting,
+                            longClickLabel = "Zapisz wybrany cel jako dom",
+                            onClick = if (state.hasHomeDestination) onGoHome else onSetHome,
+                            onLongClick = onSetHome
+                        )
+                        DestinationQuickActionChip(
+                            label = "🏢 " + if (state.hasWorkDestination) {
+                                state.destinationShortcutNames.work
+                            } else {
+                                "Ustaw: ${state.destinationShortcutNames.work}"
+                            },
+                            enabled = !state.isSearching && !state.isImporting,
+                            longClickLabel = "Zapisz wybrany cel jako pracę",
+                            onClick = if (state.hasWorkDestination) onGoToWork else onSetWork,
+                            onLongClick = onSetWork
+                        )
                     if (state.hasWorkDestination) {
                         AssistChip(
                             onClick = onEditWorkSchedule,
