@@ -122,6 +122,11 @@ android {
                 signingConfig = signingConfigs.getByName("stableTest")
             }
         }
+        create("localTest") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = ".local"
+            versionNameSuffix = "-local"
+        }
         release {
             isDebuggable = false
             if (hasReleaseSigning) {
@@ -148,8 +153,12 @@ android {
 }
 
 androidComponents {
-    beforeVariants(selector().withBuildType("release")) {
-        it.hostTests.getValue(com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE).enable = true
+    listOf("release", "localTest").forEach { buildType ->
+        beforeVariants(selector().withBuildType(buildType)) {
+            it.hostTests.getValue(
+                com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE
+            ).enable = true
+        }
     }
 }
 

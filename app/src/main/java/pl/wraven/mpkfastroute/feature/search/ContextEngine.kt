@@ -194,15 +194,7 @@ class ContextEngine @Inject constructor(
             maxResults = 1,
             arrivalDeadline = arrivalTarget
         ).firstOrNull() ?: return QuickActionResult.NoJourneyFound
-        val firstTransit = candidateJourney.steps
-            .filterIsInstance<JourneyStep.Transit>()
-            .firstOrNull()
-        val journey = candidateJourney.copy(
-            departureTime = firstTransit?.connection?.departureTime
-                ?: candidateJourney.departureTime
-        )
-
-        val transitSteps = journey.steps.filterIsInstance<JourneyStep.Transit>()
+        val transitSteps = candidateJourney.steps.filterIsInstance<JourneyStep.Transit>()
         val origin = transitSteps.firstOrNull()
             ?.connection
             ?.departureStopId
@@ -219,13 +211,13 @@ class ContextEngine @Inject constructor(
             destination = destination,
             originStopOptions = originStopOptions,
             destinationStopOptions = destinationStopOptions,
-            journey = journey,
+            journey = candidateJourney,
             originPlace = originPlace,
             destinationPlace = destinationPlace,
             arrivalTarget = arrivalTarget,
             departureTarget = GtfsServiceClock.from(searchStart).serviceDate
                 .atStartOfDay()
-                .plusSeconds(journey.departureTime.toLong())
+                .plusSeconds(candidateJourney.departureTime.toLong())
         )
     }
 

@@ -215,6 +215,26 @@ class CsaEngineTest {
     }
 
     @Test
+    fun keepsOriginWalkingTimeInThePlannedDepartureTime() {
+        val journey = engine.findJourneys(
+            connections = listOf(connection("A", "B", 3_600, 4_200, "trip-1")),
+            footpaths = emptyList(),
+            originAccesses = listOf(StopAccess("A", 750.0, 600)),
+            destinationAccesses = listOf(StopAccess("B", 0.0, 0)),
+            startTime = 3_000,
+            maxResults = 1
+        ).single()
+
+        assertEquals(3_000, journey.departureTime)
+        assertEquals(
+            3_600,
+            (journey.steps.single() as JourneyStep.Transit).connection.departureTime
+        )
+        assertEquals(750.0, journey.originAccess.walkingDistanceMeters, 0.0)
+        assertEquals(600, journey.originAccess.walkingDurationSeconds)
+    }
+
+    @Test
     fun scheduledArrivalSelectsLatestJourneyBeforeDeadline() {
         val journeys = engine.findJourneys(
             connections = listOf(

@@ -98,7 +98,7 @@ stałą tożsamość pakietu; do normalnego korzystania wybierz stabilny APK.
 | Komunikaty ZTP | Czytaj przewijany pasek ZTP/aktywnych utrudnień albo kliknij go, aby otworzyć komunikat lub szczegóły. Prędkość wynosi 36 dp/s, o 20% więcej niż wcześniej. Dostępne są również **Komunikaty MPK** oraz skrót do profilu MPK Kraków w X. |
 | Pogoda | Wybierz **Pogoda**, aby zobaczyć aktualne warunki i prognozę na najbliższe 24 godziny dla swojej okolicy. Widok pokazuje temperaturę, opady, wiatr i temperaturę gruntu. Ciśnienie usunięto; opady, grunt i wiatr są łączone w jednym wierszu szczegółów. |
 | Radio | Użyj **Uruchom radio** / **Zatrzymaj radio**, wybierz stację lub zarządzaj strumieniami przyciskiem z kołem zębatym. Podczas odtwarzania działają systemowe kontrolki multimediów. |
-| Przypomnienia o dojeździe | Zapisz harmonogram domu/pracy i wybierz **Włącz powiadomienia**. Nadaj wymagane uprawnienia do powiadomień i lokalizacji w tle. Przypomnienie jest planowane 15 minut przed obliczonym wyjazdem. |
+| Przypomnienia o dojeździe | Zapisz harmonogram domu/pracy i wybierz **Włącz powiadomienia**. Nadaj wymagane uprawnienia do powiadomień i lokalizacji w tle. Przypomnienie pojawia się 15 minut przed wyjściem, z uwzględnieniem dojścia do przystanku, i odświeża najwyżej co 15 minut. Odrzucenie powiadomienia zatrzymuje jego dalsze aktualizacje dla tego dojazdu. |
 | Rozkład i diagnostyka | W Ustawieniach dostępne są **Odśwież rozkład GTFS** i ograniczony dziennik diagnostyczny z kopiowaniem/czyszczeniem. Automatyczna aktualizacja rozkładu sprawdza dane przy starcie i codziennie. |
 | Udostępnianie | Ustawienia zawierają kod QR, link do wydań na GitHub, kontakt oraz opcjonalne informacje o wsparciu DT u Oli w Legionowie. |
 
@@ -337,6 +337,18 @@ Jeśli SDK jest w innym miejscu, ustaw rzeczywisty `ANDROID_HOME`.
 Lokalny APK debug powstaje w `app\build\outputs\apk\debug\app-debug.apk`.
 Domyślny lokalny klucz podpisu różni się od klucza testowego CI; nie używaj
 takiego APK do aktualizacji zainstalowanej aplikacji podpisanej w CI.
+
+Do testowania na telefonie obok zainstalowanej aplikacji użyj wariantu
+`localTest` z osobnym pakietem `pl.wraven.mpkfastroute.debug.local`:
+
+```powershell
+.\gradlew.bat :app:assembleLocalTest
+$adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
+& $adb install -r .\app\build\outputs\apk\localTest\app-localTest.apk
+```
+
+Wariant `localTest` ma osobne dane aplikacji. Harmonogram i uprawnienia trzeba
+ustawić ponownie; instalacja nie aktualizuje ani nie usuwa zwykłej aplikacji.
 
 Testy ostatnich zmian prezentacji:
 

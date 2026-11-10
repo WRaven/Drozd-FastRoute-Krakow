@@ -2,6 +2,7 @@ package pl.wraven.mpkfastroute.feature.search
 
 import android.content.Context
 import android.app.NotificationManager
+import androidx.work.BackoffPolicy
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -17,18 +18,22 @@ object CommuteReminderScheduler {
     const val ARRIVAL_TARGET_KEY = "arrivalTarget"
     const val DEPARTURE_TARGET_KEY = "departureTarget"
     const val OCCURRENCE_KEY = "occurrence"
+    const val DISMISSED_OCCURRENCES_PREFERENCES = "dismissed_commute_occurrences"
     const val WORK_TAG = "commute-reminders"
     const val CHANNEL_ID = "commute_reminders"
-    const val UPDATE_INTERVAL_MINUTES = 5L
+    const val UPDATE_INTERVAL_MINUTES = 15L
+    const val ERROR_RETRY_BACKOFF_MINUTES = 15L
     const val HOME_NOTIFICATION_ID = 2_000
     const val WORK_NOTIFICATION_ID = 2_001
 
-    private const val COORDINATOR_WORK_NAME = "commute-reminder-coordinator"
+    private const val LEGACY_COORDINATOR_WORK_NAME = "commute-reminder-coordinator"
+    private const val COORDINATOR_WORK_NAME = "commute-reminder-coordinator-30m"
     private const val IMMEDIATE_WORK_NAME = "commute-reminder-check-now"
 
     fun synchronize(context: Context, enabled: Boolean) {
         val workManager = WorkManager.getInstance(context)
         if (!enabled) {
+            workManager.cancelUniqueWork(LEGACY_COORDINATOR_WORK_NAME)
             workManager.cancelUniqueWork(COORDINATOR_WORK_NAME)
             workManager.cancelAllWorkByTag(WORK_TAG)
             context.getSystemService(NotificationManager::class.java)
@@ -39,23 +44,34 @@ object CommuteReminderScheduler {
             return
         }
 
+        workManager.cancelUniqueWork(LEGACY_COORDINATOR_WORK_NAME)
         val periodicRequest =
             PeriodicWorkRequestBuilder<CommuteReminderCoordinatorWorker>(
                 COORDINATOR_INTERVAL_MINUTES,
                 TimeUnit.MINUTES
             )
                 .addTag(WORK_TAG)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    ERROR_RETRY_BACKOFF_MINUTES,
+                    TimeUnit.MINUTES
+                )
                 .build()
         workManager.enqueueUniquePeriodicWork(
             COORDINATOR_WORK_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
+            ExistingPeriodicWorkPolicy.KEEP,
             periodicRequest
         )
         workManager.enqueueUniqueWork(
             IMMEDIATE_WORK_NAME,
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             OneTimeWorkRequestBuilder<CommuteReminderCoordinatorWorker>()
                 .addTag(WORK_TAG)
+                .setBackoffCriteria(
+                    BackoffPolicy.EXPONENTIAL,
+                    ERROR_RETRY_BACKOFF_MINUTES,
+                    TimeUnit.MINUTES
+                )
                 .build()
         )
     }
@@ -82,6 +98,11 @@ object CommuteReminderScheduler {
             )
             .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
             .addTag(WORK_TAG)
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                ERROR_RETRY_BACKOFF_MINUTES,
+                TimeUnit.MINUTES
+            )
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             uniqueName,
@@ -100,6 +121,11 @@ object CommuteReminderScheduler {
             .setInputData(inputData)
             .setInitialDelay(delayMinutes.coerceAtLeast(1L), TimeUnit.MINUTES)
             .addTag(WORK_TAG)
+            .setBackoffCriteria(
+                BackoffPolicy.EXPONENTIAL,
+                ERROR_RETRY_BACKOFF_MINUTES,
+                TimeUnit.MINUTES
+            )
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             uniqueName,
@@ -113,6 +139,15 @@ object CommuteReminderScheduler {
         arrivalTarget: LocalDateTime
     ): String = "commute-${destination.name.lowercase()}-$arrivalTarget"
 
-    private const val COORDINATOR_INTERVAL_MINUTES = 15L
+    fun isDismissed(
+        context: Context,
+        destination: SavedDestination,
+        arrivalTarget: LocalDateTime
+    ): Boolean = context.getSharedPreferences(
+        DISMISSED_OCCURRENCES_PREFERENCES,
+        Context.MODE_PRIVATE
+    ).getString("dismissed_${destination.name}", null) == arrivalTarget.toString()
+
+    private const val COORDINATOR_INTERVAL_MINUTES = 30L
     const val NOTIFICATION_LEAD_MINUTES = 15L
 }

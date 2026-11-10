@@ -56,6 +56,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <receiver
+            android:name=".feature.search.CommuteReminderDismissedReceiver"
+            android:exported="false" />
         <service
             android:name=".core.audio.RadioService"
             android:exported="true"

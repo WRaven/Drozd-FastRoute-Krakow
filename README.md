@@ -98,7 +98,7 @@ the permanent package identity; use the stable APK for normal use.
 | ZTP notices | Read the scrolling ZTP/active-disruption ticker or tap it to open the corresponding notice/details. It scrolls at 36 dp/s, 20% faster than the previous default. **Komunikaty MPK** and the MPK Kraków X quick action provide additional information. |
 | Weather | Tap **Pogoda** for current conditions and the next 24 hours near your location. The view includes temperature, precipitation, wind and soil temperature. Pressure is omitted; precipitation, soil temperature and wind share a details row. |
 | Radio | Use **Uruchom radio** / **Zatrzymaj radio**, choose a station, or use the gear button to manage streams. Android media controls remain available while playing. |
-| Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder is scheduled 15 minutes before the calculated departure. |
+| Commute reminders | Save a home/work schedule and tap **Włącz powiadomienia**. Grant notification and background-location permissions when requested. A reminder appears 15 minutes before leaving home, accounting for the walk to the stop, and refreshes at most every 15 minutes. Dismissing it stops further updates for that commute. |
 | Timetable and diagnostics | Settings provides **Odśwież rozkład GTFS** and a bounded search diagnostic log with copy/clear actions. The automatic updater also checks the timetable at startup and daily. |
 | Sharing | Settings contains a QR code, a link to GitHub Releases, contact details, and optional information about supporting DT u Oli w Legionowie. |
 
@@ -360,6 +360,18 @@ $env:ANDROID_HOME = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
 Set `ANDROID_HOME` to your actual SDK location if it differs. The local debug APK
 is written to `app\build\outputs\apk\debug\app-debug.apk`. Its default local signing
 key is not the CI test key; do not use it to update an existing CI-signed test app.
+
+To test on a phone alongside the installed app, use the `localTest` build type,
+which has its own `pl.wraven.mpkfastroute.debug.local` package:
+
+```powershell
+.\gradlew.bat :app:assembleLocalTest
+$adb = Join-Path $env:LOCALAPPDATA 'Android\Sdk\platform-tools\adb.exe'
+& $adb install -r .\app\build\outputs\apk\localTest\app-localTest.apk
+```
+
+The `localTest` app has separate app data; configure its commute schedule and
+permissions again. Installing it does not update or remove the regular app.
 
 Focused tests for the recent presentation changes:
 

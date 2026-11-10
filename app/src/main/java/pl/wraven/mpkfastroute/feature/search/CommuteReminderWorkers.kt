@@ -130,6 +130,9 @@ class CommuteStatusWorker @AssistedInject constructor(
             ?: return Result.failure()
         val notificationId = notificationId(destination)
 
+        if (CommuteReminderScheduler.isDismissed(applicationContext, destination, arrivalTarget)) {
+            return Result.success()
+        }
         if (LocalDateTime.now() >= arrivalTarget) {
             cancelNotification(notificationId)
             return Result.success()
@@ -171,11 +174,17 @@ class CommuteStatusWorker @AssistedInject constructor(
             }
             if (!now.isBefore(plannedDeparture.minusMinutes(15))) {
                 val posted = postNotification(
+                    destination = destination,
+                    arrivalTarget = arrivalTarget,
+                    workName = workName,
                     notificationId = notificationId,
                     title = destination.notificationTitle(),
                     body = "Nie udało się potwierdzić trasy ani pobrać jej odjazdów live."
                 )
                 if (posted) markNotified(destination, arrivalTarget)
+            }
+            if (CommuteReminderScheduler.isDismissed(applicationContext, destination, arrivalTarget)) {
+                return Result.success()
             }
             CommuteReminderScheduler.scheduleNextUpdate(
                 applicationContext,
@@ -219,6 +228,9 @@ class CommuteStatusWorker @AssistedInject constructor(
 
         val body = buildNotificationBody(journeyResult, departureTarget)
         val posted = postNotification(
+            destination = destination,
+            arrivalTarget = arrivalTarget,
+            workName = workName,
             notificationId = notificationId,
             title = "${destination.notificationTitle()} · " +
                 "odjazd ${departureTarget.format(TIME_FORMAT)}",
@@ -226,6 +238,9 @@ class CommuteStatusWorker @AssistedInject constructor(
         )
         if (!posted) return Result.failure()
         markNotified(destination, arrivalTarget)
+        if (CommuteReminderScheduler.isDismissed(applicationContext, destination, arrivalTarget)) {
+            return Result.success()
+        }
 
         val minutesToDeparture = roundedUpMinutes(Duration.between(now, departureTarget))
         if (minutesToDeparture > 0) {
@@ -373,8 +388,18 @@ class CommuteStatusWorker @AssistedInject constructor(
         return "$departureTime $liveLabel$delay"
     }
 
-    private fun postNotification(notificationId: Int, title: String, body: String): Boolean {
+    private fun postNotification(
+        destination: SavedDestination,
+        arrivalTarget: LocalDateTime,
+        workName: String,
+        notificationId: Int,
+        title: String,
+        body: String
+    ): Boolean {
         if (!hasNotificationPermission(applicationContext)) return false
+        if (CommuteReminderScheduler.isDismissed(applicationContext, destination, arrivalTarget)) {
+            return false
+        }
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(
@@ -399,6 +424,20 @@ class CommuteStatusWorker @AssistedInject constructor(
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val dismissIntent = Intent(
+            applicationContext,
+            CommuteReminderDismissedReceiver::class.java
+        ).apply {
+            putExtra(CommuteReminderScheduler.DESTINATION_KEY, destination.name)
+            putExtra(CommuteReminderScheduler.ARRIVAL_TARGET_KEY, arrivalTarget.toString())
+            putExtra(CommuteReminderScheduler.OCCURRENCE_KEY, workName)
+        }
+        val deletePendingIntent = PendingIntent.getBroadcast(
+            applicationContext,
+            notificationId,
+            dismissIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         val notification = Notification.Builder(
             applicationContext,
             CommuteReminderScheduler.CHANNEL_ID
@@ -408,9 +447,9 @@ class CommuteStatusWorker @AssistedInject constructor(
             .setContentText(body.lineSequence().firstOrNull().orEmpty())
             .setStyle(Notification.BigTextStyle().bigText(body))
             .setContentIntent(pendingIntent)
+            .setDeleteIntent(deletePendingIntent)
             .setCategory(Notification.CATEGORY_REMINDER)
             .setOnlyAlertOnce(true)
-            .setOngoing(true)
             .build()
         manager.notify(notificationId, notification)
         return true
