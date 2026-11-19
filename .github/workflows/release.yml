@@ -224,8 +224,10 @@ jobs:
           {
             echo "## Poprawki"
             echo
-            echo "- Ustawiono strony odjazdów na 5 wcześniejszych i 10 następnych, zachowując pełny horyzont wyszukiwania dla przesiadek."
-            echo "- Przeniesiono edycję harmonogramów i włączanie powiadomień do Ustawień; usunięto skrót Własny z górnego panelu, pozostawiając szybkie trasy Dom/Praca."
+            echo "- Poprawiono czas wyjścia w harmonogramie dojazdu: uwzględnia dojście od lokalizacji początkowej do przystanku."
+            echo "- Odrzucenie powiadomienia o dojeździe zatrzymuje dalsze aktualizacje tego dojazdu."
+            echo "- Ograniczono odświeżanie statusu do 15 minut, a koordynację harmonogramów do 30 minut; dodano narastające opóźnienie ponowień po błędach."
+            echo "- Zachowano wygląd aplikacji i zgodność aktualizacji z dotychczasową instalacją."
             echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"
