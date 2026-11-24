@@ -72,7 +72,8 @@ class TtssLiveMapper {
 
         val availablePassages = passages.withIndex()
             .filter { (_, passage) ->
-                passage.status.equals(PREDICTED_STATUS, ignoreCase = true) &&
+                (passage.status.equals(PREDICTED_STATUS, ignoreCase = true) ||
+                    passage.status.equals(STOPPING_STATUS, ignoreCase = true)) &&
                     passage.actualRelativeTime != null &&
                     passage.plannedRelativeTime != null &&
                     !passage.routeShortName.isNullOrBlank()
@@ -82,10 +83,15 @@ class TtssLiveMapper {
         var matchedCount = 0
 
         val estimates = staticDepartures.map { departure ->
-            val expectedRelativeTime = Math.floorMod(
+            val rawExpectedRelativeTime = Math.floorMod(
                 departure.departureTime - nowTimeSeconds,
                 SECONDS_PER_DAY
             )
+            val expectedRelativeTime = if (rawExpectedRelativeTime > HALF_DAY_SECONDS) {
+                rawExpectedRelativeTime - SECONDS_PER_DAY
+            } else {
+                rawExpectedRelativeTime
+            }
             val bestMatch = availablePassages.asSequence()
                 .filter { it.index !in usedPassageIndexes }
                 .filter { (_, passage) ->
@@ -110,13 +116,16 @@ class TtssLiveMapper {
             } else {
                 val passage = bestMatch.value
                 val delaySeconds = passage.actualRelativeTime!! - passage.plannedRelativeTime!!
+                val estimatedDepartureTime = (departure.departureTime.toLong() + delaySeconds)
+                    .coerceIn(0L, Int.MAX_VALUE.toLong())
+                    .toInt()
                 usedPassageIndexes += bestMatch.index
                 matchedCount += 1
                 DepartureEstimate(
                     routeShortName = departure.routeShortName,
                     direction = departure.direction,
                     scheduledDepartureTime = departure.departureTime,
-                    estimatedDepartureTime = Math.addExact(departure.departureTime, delaySeconds),
+                    estimatedDepartureTime = estimatedDepartureTime,
                     delaySeconds = delaySeconds,
                     isLive = true
                 )
@@ -156,11 +165,14 @@ class TtssLiveMapper {
         isLive = false
     )
 
-    private fun String.normalize(): String = lowercase().filter(Char::isLetterOrDigit)
+    private fun String.normalize(): String =
+        lowercase(java.util.Locale.ROOT).filter(Char::isLetterOrDigit)
 
     private companion object {
         const val PREDICTED_STATUS = "PREDICTED"
+        const val STOPPING_STATUS = "STOPPING"
         const val SECONDS_PER_DAY = 24 * 60 * 60
+        const val HALF_DAY_SECONDS = SECONDS_PER_DAY / 2
         const val MAX_MATCH_DIFFERENCE_SECONDS = 10 * 60
     }
 }

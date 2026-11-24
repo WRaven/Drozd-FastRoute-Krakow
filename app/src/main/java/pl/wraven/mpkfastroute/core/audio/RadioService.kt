@@ -4,13 +4,15 @@ import android.app.PendingIntent
 import android.content.Intent
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
-import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
+import java.net.URI
+import java.net.URISyntaxException
 import pl.wraven.mpkfastroute.MainActivity
 import pl.wraven.mpkfastroute.R
 
@@ -22,7 +24,13 @@ class RadioService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         player = ExoPlayer.Builder(this).build()
-        player.setAudioAttributes(AudioAttributes.DEFAULT, true)
+        player.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                .build(),
+            true
+        )
         player.setHandleAudioBecomingNoisy(true)
         setMediaNotificationProvider(
             DefaultMediaNotificationProvider(this).apply {
@@ -81,7 +89,7 @@ class RadioService : MediaSessionService() {
             )
         }
         val selectedIndex = intent.getIntExtra(EXTRA_STATION_INDEX, DEFAULT_STATION_INDEX)
-        if (selectedIndex !in stations.indices) {
+        if (selectedIndex !in stations.indices || stations.any { !isAllowedStreamUrl(it.streamUrl) }) {
             stopSelf()
             return
         }
@@ -101,6 +109,15 @@ class RadioService : MediaSessionService() {
         player.setMediaItems(mediaItems, selectedIndex, 0L)
         player.prepare()
         player.play()
+    }
+
+    private fun isAllowedStreamUrl(value: String): Boolean = try {
+        val uri = URI(value)
+        (uri.scheme.equals("https", ignoreCase = true) ||
+            uri.scheme.equals("http", ignoreCase = true)) &&
+            !uri.host.isNullOrBlank()
+    } catch (_: URISyntaxException) {
+        false
     }
 
     companion object {

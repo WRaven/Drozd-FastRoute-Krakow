@@ -177,7 +177,11 @@ interface StopTimeDao {
     @Query(
         """
         SELECT route.routeShortName AS routeShortName,
-               trip.tripHeadsign AS direction,
+               COALESCE(NULLIF(trip.tripHeadsign, ''),
+                   (SELECT stop.stopName FROM stop_times AS lastTime
+                    JOIN stops AS stop ON stop.stopId = lastTime.stopId
+                    WHERE lastTime.tripId = trip.tripId
+                    ORDER BY lastTime.stopSequence DESC LIMIT 1)) AS direction,
                stopTime.departureTime AS departureTime,
                trip.serviceId AS serviceId
         FROM stop_times AS stopTime
@@ -185,6 +189,9 @@ interface StopTimeDao {
         JOIN routes AS route ON route.routeId = trip.routeId
         WHERE stopTime.stopId = :stopId
           AND stopTime.departureTime BETWEEN :startTime AND :endTime
+          AND EXISTS (SELECT 1 FROM stop_times AS nextTime
+                      WHERE nextTime.tripId = trip.tripId
+                        AND nextTime.stopSequence > stopTime.stopSequence)
         ORDER BY stopTime.departureTime, route.routeShortName, trip.tripId
         """
     )
@@ -205,6 +212,21 @@ interface StopTimeDao {
     suspend fun deleteAll()
 }
 
+data class GtfsFastConnectionRow(
+    val departureStopId: String,
+    val arrivalStopId: String,
+    val departureTime: Int,
+    val arrivalTime: Int,
+    val tripId: String,
+    val routeShortName: String,
+    val serviceId: String
+)
+
+data class TripDirectionRow(
+    val tripId: String,
+    val direction: String?
+)
+
 @Dao
 interface ConnectionDao {
     @Query(
@@ -224,13 +246,67 @@ interface ConnectionDao {
         FROM connections AS connection
         LEFT JOIN trips AS trip ON trip.tripId = connection.tripId
         WHERE connection.departureTime BETWEEN :startTime AND :endTime
-        ORDER BY connection.departureTime
+        ORDER BY connection.departureTime, connection.arrivalTime, connection.id
         """
     )
     suspend fun getConnectionsBetween(
         startTime: Int,
         endTime: Int
     ): List<GtfsConnectionRow>
+
+    @Query(
+        """
+        SELECT departureStopId,
+               arrivalStopId,
+               departureTime,
+               arrivalTime,
+               tripId,
+               routeShortName,
+               serviceId
+        FROM connections
+        WHERE departureTime BETWEEN :startTime AND :endTime
+          AND serviceId IN (:serviceIds)
+        ORDER BY departureTime, arrivalTime, id
+        """
+    )
+    suspend fun getFastConnectionsBetweenForServices(
+        startTime: Int,
+        endTime: Int,
+        serviceIds: List<String>
+    ): List<GtfsFastConnectionRow>
+
+    @Query(
+        """
+        SELECT departureStopId,
+               arrivalStopId,
+               departureTime,
+               arrivalTime,
+               tripId,
+               routeShortName,
+               serviceId
+        FROM connections
+        WHERE departureTime BETWEEN :startTime AND :endTime
+        ORDER BY departureTime, arrivalTime, id
+        """
+    )
+    suspend fun getFastConnectionsBetween(
+        startTime: Int,
+        endTime: Int
+    ): List<GtfsFastConnectionRow>
+
+    @Query(
+        """
+        SELECT trip.tripId AS tripId,
+               COALESCE(NULLIF(trip.tripHeadsign, ''),
+                   (SELECT stop.stopName FROM stop_times AS lastTime
+                    JOIN stops AS stop ON stop.stopId = lastTime.stopId
+                    WHERE lastTime.tripId = trip.tripId
+                    ORDER BY lastTime.stopSequence DESC LIMIT 1)) AS direction
+        FROM trips AS trip
+        WHERE trip.tripId IN (:tripIds)
+        """
+    )
+    suspend fun getTripDirectionsByTripIds(tripIds: List<String>): List<TripDirectionRow>
 
     @Query("SELECT COUNT(*) FROM connections")
     suspend fun count(): Int

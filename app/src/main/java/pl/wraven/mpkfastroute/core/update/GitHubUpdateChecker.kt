@@ -13,10 +13,10 @@ import javax.inject.Inject
 import javax.inject.Named
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import pl.wraven.mpkfastroute.BuildConfig
 
@@ -61,37 +61,39 @@ class GitHubUpdateChecker @Inject constructor(
         ensureSuccessfulResponse(response.status.value)
 
         val releases = try {
-            json.parseToJsonElement(response.bodyAsText()).jsonArray
+            json.parseToJsonElement(response.bodyAsText()) as? JsonArray
+                ?: throw IOException("GitHub returned an invalid releases response.")
         } catch (exception: SerializationException) {
             throw IOException("GitHub returned an invalid releases response.", exception)
         }
         val releaseCandidates = releases.mapNotNull { element ->
-            val candidate = element.jsonObject
+            val candidate = element as? JsonObject ?: return@mapNotNull null
             if (
                 !releaseMatchesChannel(
-                    prerelease = candidate["prerelease"]?.jsonPrimitive?.boolean,
-                    draft = candidate["draft"]?.jsonPrimitive?.boolean,
+                    prerelease = candidate["prerelease"]?.jsonPrimitive?.booleanOrNull,
+                    draft = candidate["draft"]?.jsonPrimitive?.booleanOrNull,
                     isTestBuild = BuildConfig.DEBUG
                 )
             ) {
                 return@mapNotNull null
             }
-            val tagName = candidate["tag_name"]?.jsonPrimitive?.content
-                ?: throw IOException("GitHub release response has no tag name.")
-            val releaseUrl = candidate["html_url"]?.jsonPrimitive?.content
-                ?: throw IOException("GitHub release response has no release URL.")
-            val assets = candidate["assets"]?.jsonArray
+            val tagName = candidate["tag_name"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+            val releaseUrl = candidate["html_url"]?.jsonPrimitive?.contentOrNull
+                ?.takeIf(String::isNotBlank)
+                ?: return@mapNotNull null
+            val assets = (candidate["assets"] as? JsonArray)
                 ?.mapNotNull { asset ->
-                    val assetObject = asset.jsonObject
-                    val assetName = assetObject["name"]?.jsonPrimitive?.content
+                    val assetObject = asset as? JsonObject ?: return@mapNotNull null
+                    val assetName = assetObject["name"]?.jsonPrimitive?.contentOrNull
                         ?: return@mapNotNull null
-                    val digest = assetObject["digest"]?.jsonPrimitive?.contentOrNull
                     ReleaseAsset(
                         name = assetName,
                         downloadUrl = assetObject["browser_download_url"]
                             ?.jsonPrimitive
                             ?.contentOrNull,
-                        sha256 = parseSha256Digest(digest)
+                        rawDigest = assetObject["digest"]?.jsonPrimitive?.contentOrNull
                     )
                 }
                 .orEmpty()
@@ -99,11 +101,21 @@ class GitHubUpdateChecker @Inject constructor(
                 assets.map { it.name to it.downloadUrl }
             ) ?: return@mapNotNull null
             val apkAsset = assets.first { it.downloadUrl == downloadUrl }
+            val version = try {
+                versionForRelease(tagName, assets.map(ReleaseAsset::name))
+            } catch (_: IllegalArgumentException) {
+                return@mapNotNull null
+            }
+            val sha256 = try {
+                parseSha256Digest(apkAsset.rawDigest)
+            } catch (_: IOException) {
+                return@mapNotNull null
+            }
             ReleaseCandidate(
-                version = versionForRelease(tagName, assets.map(ReleaseAsset::name)),
+                version = version,
                 releaseUrl = releaseUrl,
                 downloadUrl = downloadUrl,
-                sha256 = apkAsset.sha256,
+                sha256 = sha256,
                 releaseNotes = summarizeReleaseNotes(
                     candidate["body"]?.jsonPrimitive?.contentOrNull
                 )
@@ -205,11 +217,15 @@ class GitHubUpdateChecker @Inject constructor(
         internal fun isTrustedDownloadUrl(downloadUrl: String): Boolean =
             try {
                 val uri = URI(downloadUrl)
+                val rawPath = uri.rawPath.orEmpty()
+                val normalizedPath = uri.normalize().path.orEmpty()
                 uri.scheme.equals("https", ignoreCase = true) &&
                     uri.host?.equals("github.com", ignoreCase = true) == true &&
                     (uri.port == -1 || uri.port == 443) &&
                     uri.userInfo == null &&
-                    TRUSTED_RELEASE_PATHS.any { uri.path?.startsWith(it) == true }
+                    !rawPath.contains("..") &&
+                    !rawPath.contains("%2e", ignoreCase = true) &&
+                    TRUSTED_RELEASE_PATHS.any { normalizedPath.startsWith(it) }
             } catch (_: URISyntaxException) {
                 false
             }
@@ -294,7 +310,7 @@ class GitHubUpdateChecker @Inject constructor(
         private data class ReleaseAsset(
             val name: String,
             val downloadUrl: String?,
-            val sha256: String?
+            val rawDigest: String?
         )
     }
 }

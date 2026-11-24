@@ -75,7 +75,7 @@ class OpenMeteoClient @Inject constructor(
             longitudeCell = (longitude * CACHE_COORDINATE_PRECISION).roundToInt()
         )
         cachedForecast?.takeIf {
-            it.key == cacheKey && nowMillis - it.fetchedAtMillis < CACHE_DURATION_MILLIS
+            it.key == cacheKey && nowMillis - it.fetchedAtMillis in 0 until CACHE_DURATION_MILLIS
         }?.let { return it.forecast }
 
         val response = httpClient.get(ENDPOINT) {
@@ -272,7 +272,12 @@ fun weatherConditionForTime(
 }
 
 internal fun moonPhaseSymbol(time: LocalDateTime, timezone: String): String {
-    val instant = time.atZone(ZoneId.of(timezone)).toInstant()
+    val zoneId = try {
+        ZoneId.of(timezone)
+    } catch (_: java.time.DateTimeException) {
+        java.time.ZoneOffset.UTC
+    }
+    val instant = time.atZone(zoneId).toInstant()
     val cyclePosition = (
         (instant.epochSecond - NEW_MOON_EPOCH_SECONDS).toDouble() /
             SYNODIC_MONTH_SECONDS

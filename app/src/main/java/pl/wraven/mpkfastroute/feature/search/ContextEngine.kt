@@ -125,11 +125,11 @@ class ContextEngine @Inject constructor(
             currentLocation.longitude
         )
         val (originGroups, destinationGroups) = withContext(Dispatchers.Default) {
-            val originGroup = findNearestStopGroup(stops, currentLocation)
+            val originOptions = nearbyStopGroups(stops, originPlace)
             val destinationOptions = legacyTarget?.let {
                 listOf(findStopGroup(stops, it))
             } ?: nearbyStopGroups(stops, targetPlace)
-            listOf(originGroup) to destinationOptions
+            originOptions to destinationOptions
         }
         val originStopOptions = originGroups.flatMap(StopGroup::stops)
         val destinationStopOptions = destinationGroups.flatMap(StopGroup::stops)
@@ -180,12 +180,19 @@ class ContextEngine @Inject constructor(
         arrivalTarget: LocalDateTime?
     ): QuickActionResult {
         val now = LocalDateTime.now()
+        if (arrivalTarget != null && !arrivalTarget.isAfter(now)) {
+            return QuickActionResult.NoJourneyFound
+        }
         val earliestScheduledStart =
             arrivalTarget?.minusSeconds(MAX_SEARCH_WINDOW_SECONDS.toLong())
         val searchStart = earliestScheduledStart?.takeIf { it.isAfter(now) } ?: now
         val searchWindowSeconds = arrivalTarget?.let {
             Duration.between(searchStart, it).seconds.toInt()
+                .coerceAtMost(MAX_SEARCH_WINDOW_SECONDS)
         } ?: DEFAULT_SEARCH_WINDOW_SECONDS
+        if (searchWindowSeconds <= 0) {
+            return QuickActionResult.NoJourneyFound
+        }
         val candidateJourney = routePlanner.findJourneys(
             originAccesses = originAccesses,
             destinationAccesses = destinationAccesses,

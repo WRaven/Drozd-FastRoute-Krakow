@@ -75,5 +75,5 @@ fun minutesUntil(target: Instant, now: Instant): Long =
 fun isLiveTripUpdateFresh(update: LiveTripUpdate, now: Instant): Boolean {
     val timestamp = update.sourceTimestamp
         ?: update.fetchedAt.atZone(ZoneId.systemDefault()).toInstant()
-    return Duration.between(timestamp, now).seconds in 0..90
+    return Duration.between(timestamp, now).seconds in -15..90
 }

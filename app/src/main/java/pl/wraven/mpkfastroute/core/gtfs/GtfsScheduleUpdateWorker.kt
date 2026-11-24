@@ -123,7 +123,7 @@ object GtfsScheduleUpdateScheduler {
             .build()
         workManager.enqueueUniqueWork(
             STARTUP_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
+            if (forceDownload) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP,
             request
         )
     }

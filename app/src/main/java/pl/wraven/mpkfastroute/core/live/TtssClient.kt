@@ -23,7 +23,7 @@ class TtssClient @Inject constructor(
         stop: StopEntity,
         staticDepartures: List<StaticDeparture>,
         ttssStopIdsByName: Map<String, String> = emptyMap(),
-        nowTimeSeconds: Int = LocalTime.now().toSecondOfDay()
+        nowTimeSeconds: Int = LocalTime.now(KRAKOW_ZONE).toSecondOfDay()
     ): LiveDeparturesResult {
         if (staticDepartures.isEmpty()) {
             return LiveDeparturesResult(emptyList(), null)

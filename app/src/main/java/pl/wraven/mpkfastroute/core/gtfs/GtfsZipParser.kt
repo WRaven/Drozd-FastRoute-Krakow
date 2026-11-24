@@ -16,10 +16,11 @@ import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import java.time.format.DateTimeFormatter
 import java.util.zip.ZipFile
-import java.util.zip.ZipInputStream
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -51,6 +52,7 @@ private const val SHAPES_START_PERCENT = 40
 private const val SHAPES_END_PERCENT = 42
 private const val STOP_TIMES_START_PERCENT = SHAPES_END_PERCENT
 private const val STOP_TIMES_END_PERCENT = 82
+private const val TEMP_ARCHIVE_PREFIX = "gtfs-krakow-"
 
 internal fun gtfsArchiveValidatorsMatch(
     storedETag: String?,
@@ -185,13 +187,18 @@ class GtfsZipParser @Inject constructor(
                     for (batch in calendarDates.chunked(BATCH_SIZE)) {
                         calendarDao.insertAllExceptions(batch)
                     }
+                    val shapeIds = trips.mapNotNullTo(HashSet<String>()) { it.shapeId }
+                    stops.clear()
+                    routes.clear()
+                    trips.clear()
+                    calendars.clear()
+                    calendarDates.clear()
                     onProgress(
                         GtfsScheduleProgress(
                             SHAPES_START_PERCENT,
                             "Importuję geometrię tras..."
                         )
                     )
-                    val shapeIds = trips.mapNotNullTo(HashSet<String>()) { it.shapeId }
                     readShapePoints(
                         archive = archive,
                         shapeIds = shapeIds,
@@ -255,7 +262,8 @@ class GtfsZipParser @Inject constructor(
         if (onlyIfUpdated && isRemoteArchiveUnchanged()) {
             return null
         }
-        val archive = File.createTempFile("gtfs-krakow-", ".zip", context.cacheDir)
+        cleanupStaleTempArchives()
+        val archive = File.createTempFile(TEMP_ARCHIVE_PREFIX, ".zip", context.cacheDir)
         var downloadCompleted = false
         try {
             val connection = URL(GTFS_KRAKOW_URL).openConnection() as HttpURLConnection
@@ -279,6 +287,7 @@ class GtfsZipParser @Inject constructor(
             var eTag: String? = null
             var lastModified = 0L
             var downloadedBytes = 0L
+            var expectedContentLength = -1L
             try {
                 val responseCode = connection.responseCode
                 if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
@@ -291,13 +300,16 @@ class GtfsZipParser @Inject constructor(
                 eTag = connection.getHeaderField("ETag")
                 lastModified = connection.getHeaderFieldDate("Last-Modified", 0L)
                 val contentLength = connection.contentLengthLong
+                expectedContentLength = contentLength
                 var nextDownloadPercent = 5
                 var nextProgressBytes = DOWNLOAD_PROGRESS_INTERVAL_BYTES
+                val coroutineContext = currentCoroutineContext()
                 onProgress(GtfsScheduleProgress(0, "Pobieranie rozkładu GTFS z ZTP..."))
                 connection.inputStream.buffered().use { input ->
                     archive.outputStream().buffered().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         while (true) {
+                            coroutineContext.ensureActive()
                             val bytesRead = input.read(buffer)
                             if (bytesRead < 0) break
                             output.write(buffer, 0, bytesRead)
@@ -336,8 +348,10 @@ class GtfsZipParser @Inject constructor(
                         }
                     }
                 }
-                if (downloadedBytes == 0L) {
-                    throw IOException("GTFS download returned an empty archive.")
+                if (downloadedBytes == 0L ||
+                    (contentLength > 0L && downloadedBytes != contentLength)
+                ) {
+                    throw IOException("GTFS download returned an empty or truncated archive.")
                 }
                 onProgress(
                     GtfsScheduleProgress(
@@ -350,7 +364,8 @@ class GtfsZipParser @Inject constructor(
             }
 
             downloadCompleted = true
-            return DownloadedArchive(archive, eTag, lastModified, downloadedBytes)
+            val storedLength = if (expectedContentLength > 0L) expectedContentLength else downloadedBytes
+            return DownloadedArchive(archive, eTag, lastModified, storedLength)
         } finally {
             if (!downloadCompleted) {
                 archive.delete()
@@ -358,11 +373,25 @@ class GtfsZipParser @Inject constructor(
         }
     }
 
+    private fun cleanupStaleTempArchives() {
+        context.cacheDir.listFiles { file ->
+            file.isFile &&
+                file.name.startsWith(TEMP_ARCHIVE_PREFIX) &&
+                file.name.endsWith(".zip")
+        }?.forEach { staleFile -> staleFile.delete() }
+    }
+
     private fun isRemoteArchiveUnchanged(): Boolean {
         val preferences = context.getSharedPreferences(
             GTFS_UPDATE_PREFERENCES,
             Context.MODE_PRIVATE
         )
+        val storedETag = preferences.getString(GTFS_ETAG_KEY, null)
+        val storedLastModified = preferences.getLong(GTFS_LAST_MODIFIED_KEY, 0L)
+        val storedContentLength = preferences.getLong(GTFS_CONTENT_LENGTH_KEY, 0L)
+        if (storedETag == null && (storedLastModified <= 0L || storedContentLength <= 0L)) {
+            return false
+        }
         val connection = URL(GTFS_KRAKOW_URL).openConnection() as HttpURLConnection
         connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
         connection.readTimeout = READ_TIMEOUT_MILLIS
@@ -373,11 +402,11 @@ class GtfsZipParser @Inject constructor(
                 false
             } else {
                 gtfsArchiveValidatorsMatch(
-                    storedETag = preferences.getString(GTFS_ETAG_KEY, null),
+                    storedETag = storedETag,
                     remoteETag = connection.getHeaderField("ETag"),
-                    storedLastModified = preferences.getLong(GTFS_LAST_MODIFIED_KEY, 0L),
+                    storedLastModified = storedLastModified,
                     remoteLastModified = connection.getHeaderFieldDate("Last-Modified", 0L),
-                    storedContentLength = preferences.getLong(GTFS_CONTENT_LENGTH_KEY, 0L),
+                    storedContentLength = storedContentLength,
                     remoteContentLength = connection.contentLengthLong
                 )
             }
@@ -390,7 +419,7 @@ class GtfsZipParser @Inject constructor(
         context.getSharedPreferences(GTFS_UPDATE_PREFERENCES, Context.MODE_PRIVATE)
             .edit()
             .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
-            .apply()
+            .commit()
     }
 
     private fun saveDownloadMetadata(downloadedArchive: DownloadedArchive) {
@@ -401,7 +430,7 @@ class GtfsZipParser @Inject constructor(
             .putLong(GTFS_CONTENT_LENGTH_KEY, downloadedArchive.contentLength)
             .putLong(GTFS_LAST_CHECKED_AT_KEY, System.currentTimeMillis())
             .putBoolean(GTFS_SHAPES_IMPORTED_KEY, true)
-            .apply()
+            .commit()
     }
 
     private data class DownloadedArchive(
@@ -419,87 +448,107 @@ class GtfsZipParser @Inject constructor(
         calendars: MutableList<ServiceCalendarEntity>,
         calendarDates: MutableList<CalendarDateEntity>
     ) {
-        ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
+        val coroutineContext = currentCoroutineContext()
+        ZipFile(archive).use { zip ->
+            val entries = zip.entries()
+            while (entries.hasMoreElements()) {
+                coroutineContext.ensureActive()
+                val entry = entries.nextElement()
+                if (entry.isDirectory) continue
                 when (entry.name.substringAfterLast('/')) {
-                    "stops.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
-                        stops += StopEntity(
-                            stopId = values.required(columns, "stop_id", entry.name, rowNumber),
-                            stopCode = values.optional(columns, "stop_code"),
-                            stopName = values.required(columns, "stop_name", entry.name, rowNumber),
-                            stopLat = values.required(columns, "stop_lat", entry.name, rowNumber)
-                                .toDoubleOrInvalid(entry.name, "stop_lat", rowNumber),
-                            stopLon = values.required(columns, "stop_lon", entry.name, rowNumber)
+                    "stops.txt" -> zip.getInputStream(entry).use { input ->
+                        readCsv(input, entry.name) { columns, values, rowNumber ->
+                            val stopLat = values.required(columns, "stop_lat", entry.name, rowNumber)
+                                .toDoubleOrInvalid(entry.name, "stop_lat", rowNumber)
+                            val stopLon = values.required(columns, "stop_lon", entry.name, rowNumber)
                                 .toDoubleOrInvalid(entry.name, "stop_lon", rowNumber)
-                        )
-                    }
-
-                    "routes.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
-                        routes += RouteEntity(
-                            routeId = values.required(columns, "route_id", entry.name, rowNumber),
-                            routeShortName = values.optional(columns, "route_short_name").orEmpty(),
-                            routeLongName = values.optional(columns, "route_long_name").orEmpty(),
-                            routeType = values.required(columns, "route_type", entry.name, rowNumber)
-                                .toIntOrInvalid(entry.name, "route_type", rowNumber)
-                        )
-                    }
-
-                    "trips.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
-                        trips += TripEntity(
-                            tripId = values.required(columns, "trip_id", entry.name, rowNumber),
-                            routeId = values.required(columns, "route_id", entry.name, rowNumber),
-                            serviceId = values.required(columns, "service_id", entry.name, rowNumber),
-                            tripHeadsign = values.optional(columns, "trip_headsign"),
-                            shapeId = values.optional(columns, "shape_id")
-                        )
-                    }
-
-                    "calendar.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
-                        calendars += ServiceCalendarEntity(
-                            serviceId = values.required(columns, "service_id", entry.name, rowNumber),
-                            monday = values.required(columns, "monday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "monday", rowNumber),
-                            tuesday = values.required(columns, "tuesday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "tuesday", rowNumber),
-                            wednesday = values.required(columns, "wednesday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "wednesday", rowNumber),
-                            thursday = values.required(columns, "thursday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "thursday", rowNumber),
-                            friday = values.required(columns, "friday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "friday", rowNumber),
-                            saturday = values.required(columns, "saturday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "saturday", rowNumber),
-                            sunday = values.required(columns, "sunday", entry.name, rowNumber)
-                                .toGtfsFlag(entry.name, "sunday", rowNumber),
-                            startDate = values.required(columns, "start_date", entry.name, rowNumber)
-                                .validateGtfsDate(entry.name, "start_date", rowNumber),
-                            endDate = values.required(columns, "end_date", entry.name, rowNumber)
-                                .validateGtfsDate(entry.name, "end_date", rowNumber)
-                        )
-                    }
-
-                    "calendar_dates.txt" -> readCsv(zip, entry.name) { columns, values, rowNumber ->
-                        val exceptionType = values.required(
-                            columns,
-                            "exception_type",
-                            entry.name,
-                            rowNumber
-                        ).toIntOrInvalid(entry.name, "exception_type", rowNumber)
-                        if (exceptionType !in 1..2) {
-                            throw IOException(
-                                "${entry.name} row $rowNumber has an invalid 'exception_type' value."
+                            if (stopLat !in -90.0..90.0 || stopLon !in -180.0..180.0) {
+                                throw IOException(
+                                    "${entry.name} row $rowNumber has invalid stop coordinates."
+                                )
+                            }
+                            stops += StopEntity(
+                                stopId = values.required(columns, "stop_id", entry.name, rowNumber),
+                                stopCode = values.optional(columns, "stop_code"),
+                                stopName = values.required(columns, "stop_name", entry.name, rowNumber),
+                                stopLat = stopLat,
+                                stopLon = stopLon
                             )
                         }
-                        calendarDates += CalendarDateEntity(
-                            serviceId = values.required(columns, "service_id", entry.name, rowNumber),
-                            date = values.required(columns, "date", entry.name, rowNumber)
-                                .validateGtfsDate(entry.name, "date", rowNumber),
-                            exceptionType = exceptionType
-                        )
+                    }
+
+                    "routes.txt" -> zip.getInputStream(entry).use { input ->
+                        readCsv(input, entry.name) { columns, values, rowNumber ->
+                            routes += RouteEntity(
+                                routeId = values.required(columns, "route_id", entry.name, rowNumber),
+                                routeShortName = values.optional(columns, "route_short_name").orEmpty(),
+                                routeLongName = values.optional(columns, "route_long_name").orEmpty(),
+                                routeType = values.required(columns, "route_type", entry.name, rowNumber)
+                                    .toIntOrInvalid(entry.name, "route_type", rowNumber)
+                            )
+                        }
+                    }
+
+                    "trips.txt" -> zip.getInputStream(entry).use { input ->
+                        readCsv(input, entry.name) { columns, values, rowNumber ->
+                            trips += TripEntity(
+                                tripId = values.required(columns, "trip_id", entry.name, rowNumber),
+                                routeId = values.required(columns, "route_id", entry.name, rowNumber),
+                                serviceId = values.required(columns, "service_id", entry.name, rowNumber),
+                                tripHeadsign = values.optional(columns, "trip_headsign"),
+                                shapeId = values.optional(columns, "shape_id")
+                            )
+                        }
+                    }
+
+                    "calendar.txt" -> zip.getInputStream(entry).use { input ->
+                        readCsv(input, entry.name) { columns, values, rowNumber ->
+                            calendars += ServiceCalendarEntity(
+                                serviceId = values.required(columns, "service_id", entry.name, rowNumber),
+                                monday = values.required(columns, "monday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "monday", rowNumber),
+                                tuesday = values.required(columns, "tuesday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "tuesday", rowNumber),
+                                wednesday = values.required(columns, "wednesday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "wednesday", rowNumber),
+                                thursday = values.required(columns, "thursday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "thursday", rowNumber),
+                                friday = values.required(columns, "friday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "friday", rowNumber),
+                                saturday = values.required(columns, "saturday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "saturday", rowNumber),
+                                sunday = values.required(columns, "sunday", entry.name, rowNumber)
+                                    .toGtfsFlag(entry.name, "sunday", rowNumber),
+                                startDate = values.required(columns, "start_date", entry.name, rowNumber)
+                                    .validateGtfsDate(entry.name, "start_date", rowNumber),
+                                endDate = values.required(columns, "end_date", entry.name, rowNumber)
+                                    .validateGtfsDate(entry.name, "end_date", rowNumber)
+                            )
+                        }
+                    }
+
+                    "calendar_dates.txt" -> zip.getInputStream(entry).use { input ->
+                        readCsv(input, entry.name) { columns, values, rowNumber ->
+                            val exceptionType = values.required(
+                                columns,
+                                "exception_type",
+                                entry.name,
+                                rowNumber
+                            ).toIntOrInvalid(entry.name, "exception_type", rowNumber)
+                            if (exceptionType !in 1..2) {
+                                throw IOException(
+                                    "${entry.name} row $rowNumber has an invalid 'exception_type' value."
+                                )
+                            }
+                            calendarDates += CalendarDateEntity(
+                                serviceId = values.required(columns, "service_id", entry.name, rowNumber),
+                                date = values.required(columns, "date", entry.name, rowNumber)
+                                    .validateGtfsDate(entry.name, "date", rowNumber),
+                                exceptionType = exceptionType
+                            )
+                        }
                     }
                 }
-                zip.closeEntry()
             }
         }
     }
@@ -515,13 +564,16 @@ class GtfsZipParser @Inject constructor(
         var foundStopTimes = false
         var recordCount = 0
         val batch = ArrayList<StopTimeEntity>(BATCH_SIZE)
+        val coroutineContext = currentCoroutineContext()
 
-        ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
-                if (entry.name.substringAfterLast('/') == "stop_times.txt") {
-                    foundStopTimes = true
-                    val countingInput = CountingInputStream(zip)
+        ZipFile(archive).use { zip ->
+            val entry = zip.entries().asSequence().firstOrNull {
+                !it.isDirectory && it.name.substringAfterLast('/') == "stop_times.txt"
+            }
+            if (entry != null) {
+                foundStopTimes = true
+                zip.getInputStream(entry).use { rawInput ->
+                    val countingInput = CountingInputStream(rawInput)
                     readCsv(countingInput, entry.name) { columns, values, rowNumber ->
                         val tripId = values.required(columns, "trip_id", entry.name, rowNumber)
                         val stopId = values.required(columns, "stop_id", entry.name, rowNumber)
@@ -556,7 +608,8 @@ class GtfsZipParser @Inject constructor(
                         )
                         recordCount++
                         if (batch.size == BATCH_SIZE) {
-                            insertBatch(batch.toList())
+                            coroutineContext.ensureActive()
+                            insertBatch(batch)
                             batch.clear()
                             if (recordCount % PROGRESS_BATCH_SIZE == 0) {
                                 onBatchProgress(
@@ -572,7 +625,6 @@ class GtfsZipParser @Inject constructor(
                         }
                     }
                 }
-                zip.closeEntry()
             }
         }
 
@@ -596,14 +648,17 @@ class GtfsZipParser @Inject constructor(
         var foundShapes = false
         var recordCount = 0
         val batch = ArrayList<ShapePointEntity>(BATCH_SIZE)
+        val coroutineContext = currentCoroutineContext()
 
         if (shapeIds.isNotEmpty()) {
-            ZipInputStream(archive.inputStream().buffered(), StandardCharsets.UTF_8).use { zip ->
-                while (true) {
-                    val entry = zip.nextEntry ?: break
-                    if (entry.name.substringAfterLast('/') == "shapes.txt") {
-                        foundShapes = true
-                        val countingInput = CountingInputStream(zip)
+            ZipFile(archive).use { zip ->
+                val entry = zip.entries().asSequence().firstOrNull {
+                    !it.isDirectory && it.name.substringAfterLast('/') == "shapes.txt"
+                }
+                if (entry != null) {
+                    foundShapes = true
+                    zip.getInputStream(entry).use { rawInput ->
+                        val countingInput = CountingInputStream(rawInput)
                         readCsv(countingInput, entry.name) { columns, values, rowNumber ->
                             val shapeId = values.required(columns, "shape_id", entry.name, rowNumber)
                             if (shapeId in shapeIds) {
@@ -640,7 +695,8 @@ class GtfsZipParser @Inject constructor(
                                 )
                                 recordCount++
                                 if (batch.size == BATCH_SIZE) {
-                                    insertBatch(batch.toList())
+                                    coroutineContext.ensureActive()
+                                    insertBatch(batch)
                                     batch.clear()
                                     if (recordCount % PROGRESS_BATCH_SIZE == 0) {
                                         onBatchProgress(
@@ -656,7 +712,6 @@ class GtfsZipParser @Inject constructor(
                                 }
                             }
                         }
-                        zip.closeEntry()
                     }
                 }
             }

@@ -314,6 +314,89 @@ class CsaEngineTest {
         assertEquals(2, progress.last().reachedStops)
     }
 
+    @Test
+    fun checksArrivalDeadlineAgainstActualWallClockArrivalEvenWithTransferPenalty() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("A", "B", 1_000, 1_300, "trip-1"),
+                connection("B", "C", 1_480, 1_750, "trip-2")
+            ),
+            footpaths = emptyList(),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("C", 0.0, 0)),
+            startTime = 1_000,
+            maxResults = 1,
+            arrivalDeadline = 1_800
+        )
+
+        assertEquals(1, journeys.size)
+        assertEquals(1_750, journeys.single().arrivalTime)
+        assertEquals(180, journeys.single().transferPenaltySeconds)
+        assertEquals(1_930, journeys.single().estimatedArrivalTime)
+    }
+
+    @Test
+    fun retainsLeastWalkingAlternativeWithLatestDepartureInArriveByMode() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("fast-origin", "fast-dest", 500, 800, "fast-late"),
+                connection("near-origin", "near-dest", 200, 600, "walk-early"),
+                connection("near-origin", "near-dest", 450, 880, "walk-late")
+            ),
+            footpaths = emptyList(),
+            originAccesses = listOf(
+                StopAccess("fast-origin", 400.0, 320),
+                StopAccess("near-origin", 0.0, 0)
+            ),
+            destinationAccesses = listOf(
+                StopAccess("fast-dest", 0.0, 0),
+                StopAccess("near-dest", 0.0, 0)
+            ),
+            startTime = 0,
+            maxResults = 2,
+            arrivalDeadline = 900
+        )
+
+        assertEquals(2, journeys.size)
+        assertEquals(
+            "walk-late",
+            (journeys.first().steps.single() as JourneyStep.Transit).connection.tripId
+        )
+    }
+
+    @Test
+    fun doesNotAllowWalkedLabelToDominateTransitLabelBlockingNextFootpath() {
+        val journeys = engine.findJourneys(
+            connections = listOf(
+                connection("A", "B", 100, 200, "trip-1"),
+                connection("A", "C", 100, 250, "trip-2"),
+                connection("D", "E", 600, 700, "trip-3")
+            ),
+            footpaths = listOf(
+                Footpath("B", "C", 10, 12.0),
+                Footpath("C", "D", 100, 120.0)
+            ),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("E", 0.0, 0)),
+            startTime = 100,
+            maxResults = 1
+        )
+
+        assertEquals(1, journeys.size)
+        assertEquals(700, journeys.single().arrivalTime)
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun rejectsNonFiniteFootpathDistance() {
+        engine.findJourneys(
+            connections = emptyList(),
+            footpaths = listOf(Footpath("A", "B", 60, Double.NaN)),
+            originAccesses = listOf(StopAccess("A", 0.0, 0)),
+            destinationAccesses = listOf(StopAccess("B", 0.0, 0)),
+            startTime = 0
+        )
+    }
+
     private fun connection(
         from: String,
         to: String,

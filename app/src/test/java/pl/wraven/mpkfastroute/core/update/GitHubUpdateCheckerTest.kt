@@ -205,7 +205,9 @@ class GitHubUpdateCheckerTest {
             "https://github.com.example.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
             "http://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
             "https://user@github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
-            "https://github.com:444/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk"
+            "https://github.com:444/WRaven/Drozd-FastRoute-Krakow/releases/download/test/app.apk",
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/../../../other/evil/releases/download/v1/app.apk",
+            "https://github.com/WRaven/Drozd-FastRoute-Krakow/releases/download/%2e%2e/%2e%2e/other/evil/app.apk"
         ).forEach { url ->
             assertTrue(url, !GitHubUpdateChecker.isTrustedDownloadUrl(url))
         }

@@ -4,6 +4,8 @@ import android.app.DatePickerDialog
 import android.app.TimePickerDialog
 import android.Manifest
 import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -31,6 +33,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -68,8 +71,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -80,7 +85,6 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -90,7 +94,6 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -99,6 +102,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.createBitmap
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -138,6 +142,10 @@ import com.google.zxing.qrcode.QRCodeWriter
 import pl.wraven.mpkfastroute.R
 
 private const val OLA_SUPPORT_INFO_URL = "https://fsmm.pl/partner/aleksandra-lachnowicz/"
+private val TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+private val DATE_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy")
+private val DATE_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+private val SHORT_DATE_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("dd.MM HH:mm")
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -167,10 +175,9 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
     var startupLocationPrefetched by rememberSaveable { mutableStateOf(false) }
     var backgroundLocationHelpVisible by remember { mutableStateOf(false) }
     var reminderPermissionsRequested by rememberSaveable { mutableStateOf(false) }
-    var permissionStateRevision by remember { mutableStateOf(0) }
+    var permissionStateRevision by remember { mutableIntStateOf(0) }
     val canInstallAppUpdates = remember(permissionStateRevision) {
-        Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
-            context.packageManager.canRequestPackageInstalls()
+        context.packageManager.canRequestPackageInstalls()
     }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(
@@ -319,7 +326,15 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         }
     }
 
-    LaunchedEffect(hasSavedCommuteSchedule) {
+    LaunchedEffect(
+        hasSavedCommuteSchedule,
+        state.homeSchedule,
+        state.workSchedule,
+        state.homePlace,
+        state.workPlace,
+        state.homeStopId,
+        state.workStopId
+    ) {
         CommuteReminderScheduler.synchronize(context, commuteRemindersEnabled)
         if (
             hasSavedCommuteSchedule &&
@@ -445,6 +460,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
         if (state.isScheduleEmpty) {
             OnboardingContent(
                 progressMessage = state.progressMessage,
+                progressPercent = state.databaseUpdateProgressPercent,
                 isImporting = state.isImporting,
                 onRefresh = viewModel::refreshSchedule,
                 modifier = Modifier
@@ -457,6 +473,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 onUseCurrentLocation = {
                     runWithLocationPermission(viewModel::useCurrentLocation)
                 },
+                onSwapOriginAndDestination = viewModel::swapOriginAndDestination,
                 onOriginQueryChange = viewModel::setOriginQuery,
                 onSelectOrigin = viewModel::selectOrigin,
                 onSelectOriginAddress = viewModel::selectOriginAddress,
@@ -504,6 +521,7 @@ fun FastRouteScreen(viewModel: SearchViewModel = hiltViewModel()) {
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(contentPadding)
+                    .consumeWindowInsets(contentPadding)
             )
         }
     }
@@ -872,6 +890,7 @@ private fun DatabaseUpdateIndicator(progressPercent: Int, onClick: () -> Unit) {
 @Composable
 private fun OnboardingContent(
     progressMessage: String,
+    progressPercent: Int?,
     isImporting: Boolean,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
@@ -887,6 +906,19 @@ private fun OnboardingContent(
             fontWeight = FontWeight.SemiBold
         )
         Spacer(Modifier.height(16.dp))
+        if (progressPercent != null) {
+            LinearProgressIndicator(
+                progress = { progressPercent.coerceIn(0, 100) / 100f },
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "$progressPercent%",
+                style = MaterialTheme.typography.labelLarge
+            )
+        } else if (isImporting) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
         if (progressMessage.isNotBlank()) {
             Spacer(Modifier.height(12.dp))
             Text(progressMessage)
@@ -945,6 +977,7 @@ private fun DestinationQuickActionChip(
 private fun SearchContent(
     state: SearchUiState,
     onUseCurrentLocation: () -> Unit,
+    onSwapOriginAndDestination: () -> Unit,
     onOriginQueryChange: (String) -> Unit,
     onSelectOrigin: (StopGroup) -> Unit,
     onSelectOriginAddress: (GeoPlace) -> Unit,
@@ -972,6 +1005,7 @@ private fun SearchContent(
     modifier: Modifier = Modifier
 ) {
     val stopGroups = remember(state.stops) { StopNameGrouper.group(state.stops) }
+    val stopsById = remember(state.stops) { state.stops.associateBy(StopEntity::stopId) }
     val isKeyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     var isOriginFieldFocused by remember { mutableStateOf(false) }
     var isDestinationFieldFocused by remember { mutableStateOf(false) }
@@ -1093,7 +1127,6 @@ private fun SearchContent(
                 ) {
                     Button(
                         onClick = onToggleRadio,
-                        enabled = !state.isSearching,
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
                     ) {
                         Text(
@@ -1188,6 +1221,18 @@ private fun SearchContent(
                     onValueChange = onOriginQueryChange,
                     label = { Text("Adres lub przystanek") },
                     singleLine = true,
+                    trailingIcon = if (state.originQuery.isNotEmpty()) {
+                        {
+                            TextButton(
+                                onClick = { onOriginQueryChange("") },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("✕")
+                            }
+                        }
+                    } else {
+                        null
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { isOriginFieldFocused = it.isFocused }
@@ -1271,12 +1316,45 @@ private fun SearchContent(
                 modifier = Modifier.padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Cel", style = MaterialTheme.typography.titleSmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Cel",
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        onClick = onSwapOriginAndDestination,
+                        enabled = !state.isSearching && !state.isImporting &&
+                            (
+                                state.originQuery.isNotBlank() ||
+                                    state.destinationQuery.isNotBlank() ||
+                                    state.originPlace != null ||
+                                    state.destinationPlace != null
+                                )
+                    ) {
+                        Text("⇅ Zamień")
+                    }
+                }
                 OutlinedTextField(
                     value = state.destinationQuery,
                     onValueChange = onDestinationQueryChange,
                     label = { Text("Adres lub przystanek") },
                     singleLine = true,
+                    trailingIcon = if (state.destinationQuery.isNotEmpty()) {
+                        {
+                            TextButton(
+                                onClick = { onDestinationQueryChange("") },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                            ) {
+                                Text("✕")
+                            }
+                        }
+                    } else {
+                        null
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .onFocusChanged { isDestinationFieldFocused = it.isFocused }
@@ -1371,11 +1449,7 @@ private fun SearchContent(
                                 JourneyTimeMode.DEPART_AFTER -> "Odjazd po"
                                 JourneyTimeMode.ARRIVE_BY -> "Przyjazd najpóźniej"
                             }
-                            "$modeLabel · ${
-                                plan.dateTime.format(
-                                    DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
-                                )
-                            }"
+                            "$modeLabel · ${plan.dateTime.format(DATE_TIME_FORMATTER)}"
                         } ?: "🕒 Zaplanuj odjazd lub przyjazd"
                     )
                 }
@@ -1413,10 +1487,9 @@ private fun SearchContent(
                     state.routeSearchMessage != null
                 )
         ) {
-            val timeFormatter = DateTimeFormatter.ofPattern("dd.MM HH:mm")
             Text(
-                "Zakres: ${routeSearchWindowStart.format(timeFormatter)} – " +
-                    routeSearchWindowEnd.format(timeFormatter),
+                "Zakres: ${routeSearchWindowStart.format(SHORT_DATE_TIME_FORMATTER)} – " +
+                    routeSearchWindowEnd.format(SHORT_DATE_TIME_FORMATTER),
                 style = MaterialTheme.typography.bodyMedium
             )
             if (!routeSearchWindowEnd.isAfter(LocalDateTime.now())) {
@@ -1444,7 +1517,7 @@ private fun SearchContent(
         }
         state.arrivalTarget?.let { target ->
             Text(
-                "Plan dojazdu najpóźniej: ${target.format(DateTimeFormatter.ofPattern("dd.MM HH:mm"))}",
+                "Plan dojazdu najpóźniej: ${target.format(SHORT_DATE_TIME_FORMATTER)}",
                 style = MaterialTheme.typography.bodyMedium,
                 fontWeight = FontWeight.Medium
             )
@@ -1453,14 +1526,11 @@ private fun SearchContent(
             val departureKey = journey.firstTransitConnection()?.tripId ?: "departure-$index"
             JourneyResult(
                 journey = journey,
+                scheduledDepartureDateTime = state.journeyScheduledDepartures[departureKey],
                 liveDepartureEstimate = state.liveJourneyDepartureEstimates[departureKey],
-                stops = state.stops,
-                origin = state.stops.firstOrNull {
-                    it.stopId == journey.originAccess.stopId
-                } ?: state.originStop,
-                destination = state.stops.firstOrNull {
-                    it.stopId == journey.destinationAccess.stopId
-                } ?: state.destinationStop,
+                stopsById = stopsById,
+                origin = stopsById[journey.originAccess.stopId] ?: state.originStop,
+                destination = stopsById[journey.destinationAccess.stopId] ?: state.destinationStop,
                 routeNumber = index + 1,
                 isExpanded = departureKey == expandedDepartureTripId,
                 onClick = {
@@ -1476,9 +1546,10 @@ private fun SearchContent(
                     journey.firstTransitConnection()?.tripId ?: "departure-fallback"
                 JourneyResult(
                     journey = journey,
+                    scheduledDepartureDateTime = state.journeyScheduledDepartures[departureKey],
                     liveDepartureEstimate =
                         state.liveJourneyDepartureEstimates[departureKey],
-                    stops = state.stops,
+                    stopsById = stopsById,
                     origin = state.originStop,
                     destination = state.destinationStop,
                     routeNumber = 1,
@@ -1697,8 +1768,9 @@ private fun StopGroupPicker(
 @Composable
 private fun JourneyResult(
     journey: CsaJourney,
+    scheduledDepartureDateTime: LocalDateTime?,
     liveDepartureEstimate: LiveJourneyDepartureEstimate?,
-    stops: List<StopEntity>,
+    stopsById: Map<String, StopEntity>,
     origin: StopEntity?,
     destination: StopEntity?,
     routeNumber: Int,
@@ -1706,7 +1778,8 @@ private fun JourneyResult(
     onClick: () -> Unit,
     onSaveAsCustom: () -> Unit
 ) {
-    val transitConnections = collapseTransitSteps(journey.steps)
+    val collapsedSteps = remember(journey.steps) { collapseTransitSteps(journey.steps) }
+    val transitConnections = collapsedSteps
         .filterIsInstance<JourneyStep.Transit>()
         .map(JourneyStep.Transit::connection)
     val firstConnection = transitConnections.firstOrNull()
@@ -1719,15 +1792,14 @@ private fun JourneyResult(
         }
         .joinToString(" · ")
     val now = LocalDateTime.now()
-    val serviceDate = GtfsServiceClock.from(now).serviceDate
-    val scheduledTransitDeparture = firstConnection?.let {
-        journey.firstTransitDepartureDateTime(serviceDate)
+    val scheduledTransitDeparture = scheduledDepartureDateTime ?: firstConnection?.let {
+        journey.firstTransitDepartureDateTime(GtfsServiceClock.from(now).serviceDate)
     }
     val estimatedTransitDeparture = liveDepartureEstimate?.estimatedDeparture
         ?: scheduledTransitDeparture
     val hasDeparted = estimatedTransitDeparture?.isBefore(now) == true
-    val departureTimeLabel = if (hasDeparted && liveDepartureEstimate != null) {
-        liveDepartureEstimate.estimatedDeparture.format(DateTimeFormatter.ofPattern("HH:mm"))
+    val departureTimeLabel = if (liveDepartureEstimate != null) {
+        liveDepartureEstimate.estimatedDeparture.format(TIME_FORMATTER)
     } else {
         firstConnection?.let {
             formatJourneyTime(it.departureTime, journey.departureTime)
@@ -1785,11 +1857,7 @@ private fun JourneyResult(
                     Text(
                         buildAnnotatedString {
                             append(
-                                "Rozkład: ${
-                                    estimate.scheduledDeparture.format(
-                                        DateTimeFormatter.ofPattern("HH:mm")
-                                    )
-                                } "
+                                "Rozkład: ${estimate.scheduledDeparture.format(TIME_FORMATTER)} "
                             )
                             withStyle(
                                 SpanStyle(
@@ -1807,7 +1875,7 @@ private fun JourneyResult(
             }
             if (firstConnection != null) {
                 Text(
-                    "${stopName(stops, firstConnection.departureStopId)} · $routeLabels",
+                    "${stopName(stopsById, firstConnection.departureStopId)} · $routeLabels",
                     style = MaterialTheme.typography.bodyLarge
                 )
             }
@@ -1883,7 +1951,7 @@ private fun JourneyResult(
                 }
                 HorizontalDivider()
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    collapseTransitSteps(journey.steps).forEach { step ->
+                    collapsedSteps.forEach { step ->
                     when (step) {
                         is JourneyStep.Transit -> {
                             val connection = step.connection
@@ -1924,13 +1992,13 @@ private fun JourneyResult(
                                             )
                                         }
                                         Text(
-                                            "${stopName(stops, connection.departureStopId)} · " +
+                                            "${stopName(stopsById, connection.departureStopId)} · " +
                                                 formatJourneyTime(connection.departureTime, journey.departureTime),
                                             style = MaterialTheme.typography.bodyLarge,
                                             fontWeight = FontWeight.Medium
                                         )
                                         Text(
-                                            "${stopName(stops, connection.arrivalStopId)} · " +
+                                            "${stopName(stopsById, connection.arrivalStopId)} · " +
                                                 formatJourneyTime(connection.arrivalTime, journey.departureTime),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1972,8 +2040,8 @@ private fun JourneyResult(
                                         verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
                                         Text(
-                                            "${stopName(stops, footpath.fromStopId)} → " +
-                                                stopName(stops, footpath.toStopId),
+                                            "${stopName(stopsById, footpath.fromStopId)} → " +
+                                                stopName(stopsById, footpath.toStopId),
                                             style = MaterialTheme.typography.bodyMedium,
                                             fontWeight = FontWeight.Medium
                                         )
@@ -2166,7 +2234,7 @@ private fun SettingsDialog(
     var homeShortcutName by rememberSaveable(shortcutNames.home) { mutableStateOf(shortcutNames.home) }
     var workShortcutName by rememberSaveable(shortcutNames.work) { mutableStateOf(shortcutNames.work) }
     var supportInfoExpanded by rememberSaveable { mutableStateOf(false) }
-    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
     val settingsScrollState = rememberScrollState()
     val diagnosticsScrollState = rememberScrollState()
     LaunchedEffect(diagnosticEntries.lastOrNull()) {
@@ -2428,9 +2496,13 @@ private fun SettingsDialog(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(
                         onClick = {
-                            clipboardManager.setText(
-                                AnnotatedString(diagnosticEntries.joinToString("\n"))
-                            )
+                            context.getSystemService(ClipboardManager::class.java)
+                                ?.setPrimaryClip(
+                                    ClipData.newPlainText(
+                                        "FastRoute diagnostics",
+                                        diagnosticEntries.joinToString("\n")
+                                    )
+                                )
                             onDiagnosticsCopied()
                         },
                         enabled = diagnosticEntries.isNotEmpty()
@@ -2493,16 +2565,18 @@ private fun ReleaseQrCode(modifier: Modifier = Modifier) {
             360,
             360
         )
-        Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888).apply {
-            for (x in 0 until matrix.width) {
-                for (y in 0 until matrix.height) {
-                    setPixel(
-                        x,
-                        y,
-                        if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
-                    )
-                }
+        val width = matrix.width
+        val height = matrix.height
+        val pixels = IntArray(width * height)
+        for (y in 0 until height) {
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                pixels[rowOffset + x] =
+                    if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
             }
+        }
+        createBitmap(width, height, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, width, 0, 0, width, height)
         }.asImageBitmap()
     }
     Image(
@@ -2550,7 +2624,7 @@ private fun UpdateAvailableDialog(
     onDismiss: () -> Unit
 ) {
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isDownloading) onDismiss() },
         title = { Text("Dostępna aktualizacja") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2609,7 +2683,7 @@ private fun UpdateAvailableDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onSkip) {
+            TextButton(onClick = onSkip, enabled = !isDownloading) {
                 Text("Pomiń")
             }
         }
@@ -2660,10 +2734,10 @@ private fun JourneyTimePlanDialog(
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = { datePickerVisible = true }) {
-                        Text("Data: ${dateTime.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))}")
+                        Text("Data: ${dateTime.format(DATE_FORMATTER)}")
                     }
                     TextButton(onClick = { timePickerVisible = true }) {
-                        Text("Godzina: ${dateTime.format(DateTimeFormatter.ofPattern("HH:mm"))}")
+                        Text("Godzina: ${dateTime.format(TIME_FORMATTER)}")
                     }
                 }
                 Text(
@@ -2726,8 +2800,13 @@ private fun JourneyTimePlanDialog(
                 setOnDismissListener { datePickerVisible = false }
             }
         }
-        LaunchedEffect(picker) {
+        DisposableEffect(picker) {
             picker.show()
+            onDispose {
+                if (picker.isShowing) {
+                    picker.dismiss()
+                }
+            }
         }
     }
 
@@ -2750,8 +2829,13 @@ private fun JourneyTimePlanDialog(
                 setOnDismissListener { timePickerVisible = false }
             }
         }
-        LaunchedEffect(picker) {
+        DisposableEffect(picker) {
             picker.show()
+            onDispose {
+                if (picker.isShowing) {
+                    picker.dismiss()
+                }
+            }
         }
     }
 }
@@ -2775,14 +2859,14 @@ private fun DestinationScheduleDialog(
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("O której godzinie chcesz być na miejscu?")
                 TextButton(onClick = { timePickerVisible = true }) {
-                    Text("Godzina: ${arrivalTime.format(DateTimeFormatter.ofPattern("HH:mm"))}")
+                    Text("Godzina: ${arrivalTime.format(TIME_FORMATTER)}")
                 }
                 Text("Dni tygodnia")
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    DayOfWeek.values().forEach { day ->
+                    DayOfWeek.entries.forEach { day ->
                         FilterChip(
                             selected = day in weekdays,
                             onClick = {
@@ -2834,8 +2918,13 @@ private fun DestinationScheduleDialog(
                 setOnDismissListener { timePickerVisible = false }
             }
         }
-        LaunchedEffect(picker) {
+        DisposableEffect(picker) {
             picker.show()
+            onDispose {
+                if (picker.isShowing) {
+                    picker.dismiss()
+                }
+            }
         }
     }
 }
@@ -3070,7 +3159,7 @@ private fun requestBackgroundLocationPermission(
 
 private fun scheduleSummary(schedule: DestinationSchedule?): String =
     schedule?.let {
-        "${it.arrivalTime.format(DateTimeFormatter.ofPattern("HH:mm"))} · " +
+        "${it.arrivalTime.format(TIME_FORMATTER)} · " +
             it.weekdays.sortedBy(DayOfWeek::getValue).joinToString(", ", transform = ::shortWeekday)
     } ?: "Harmonogram nieustawiony"
 
@@ -3084,10 +3173,8 @@ private fun shortWeekday(day: DayOfWeek): String = when (day) {
     DayOfWeek.SUNDAY -> "Ndz"
 }
 
-private fun stopName(stops: List<StopEntity>, stopId: String): String =
-    stops.firstOrNull { it.stopId == stopId }?.let { stop ->
-        StopNameGrouper.displayName(stop)
-    } ?: "Nieznany przystanek"
+private fun stopName(stopsById: Map<String, StopEntity>, stopId: String): String =
+    stopsById[stopId]?.let(StopNameGrouper::displayName) ?: "Nieznany przystanek"
 
 private fun distanceToStopGroup(place: GeoPlace, group: StopGroup): Double =
     group.stops.minOfOrNull { stop ->

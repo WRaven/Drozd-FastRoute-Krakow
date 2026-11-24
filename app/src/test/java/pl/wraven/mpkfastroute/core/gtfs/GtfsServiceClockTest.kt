@@ -56,4 +56,19 @@ class GtfsServiceClockTest {
         assertEquals(27 * 60 * 60 + 30 * 60, windows[0].arrivalDeadlineSeconds)
         assertEquals(3 * 60 * 60 + 30 * 60, windows[1].arrivalDeadlineSeconds)
     }
+
+    @Test
+    fun capsWindowAtArrivalDeadlineBeforeServiceDayCutoff() {
+        val windows = GtfsServiceClock.window(
+            startDateTime = LocalDateTime.of(2024, 1, 2, 1, 30),
+            durationSeconds = 2 * 60 * 60,
+            arrivalDeadline = LocalDateTime.of(2024, 1, 2, 2, 30)
+        )
+
+        assertEquals(1, windows.size)
+        assertEquals(LocalDate.of(2024, 1, 1), windows[0].serviceDate)
+        assertEquals(25 * 60 * 60 + 30 * 60, windows[0].startTimeSeconds)
+        assertEquals(60 * 60, windows[0].durationSeconds)
+        assertEquals(26 * 60 * 60 + 30 * 60, windows[0].arrivalDeadlineSeconds)
+    }
 }

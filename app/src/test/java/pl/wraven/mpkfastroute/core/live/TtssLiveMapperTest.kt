@@ -74,6 +74,33 @@ class TtssLiveMapperTest {
         assertTrue(result.fallbackReason != null)
     }
 
+    @Test
+    fun matchesDelayedStoppingVehicleWhoseScheduledTimeHasAlreadyPassed() {
+        val result = mapper.mapDepartures(
+            staticDepartures = listOf(
+                StaticDeparture(
+                    routeShortName = "52",
+                    direction = "Czerwone Maki P+R",
+                    departureTime = 36_000
+                )
+            ),
+            passages = listOf(
+                TtssDeparture(
+                    routeShortName = "52",
+                    direction = "Czerwone Maki P+R",
+                    status = "STOPPING",
+                    actualRelativeTime = 60,
+                    plannedRelativeTime = -120
+                )
+            ),
+            nowTimeSeconds = 36_120
+        )
+
+        assertEquals(36_180, result.departures.single().estimatedDepartureTime)
+        assertEquals(180, result.departures.single().delaySeconds)
+        assertTrue(result.departures.single().isLive)
+    }
+
     private fun stop(stopCode: String?, stopName: String) = StopEntity(
         stopId = "gtfs-id",
         stopCode = stopCode,

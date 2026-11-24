@@ -15,6 +15,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
 import java.time.DateTimeException
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.util.IdentityHashMap
@@ -22,6 +23,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -131,6 +135,7 @@ data class SearchUiState(
     val routeTimePlan: JourneyTimePlan? = null,
     val routeSearchWindowStart: LocalDateTime? = null,
     val routeSearchWindowEnd: LocalDateTime? = null,
+    val journeyScheduledDepartures: Map<String, LocalDateTime> = emptyMap(),
     val liveJourneyDepartureEstimates: Map<String, LiveJourneyDepartureEstimate> = emptyMap(),
     val liveDepartures: LiveDeparturesResult? = null,
     val liveVehicleSnapshot: LiveVehicleSnapshot? = null,
@@ -217,6 +222,7 @@ class SearchViewModel @Inject constructor(
     private var destinationAddressSearchJob: Job? = null
     private var weatherJob: Job? = null
     private var liveVehicleJob: Job? = null
+    private var liveMapLocateJob: Job? = null
     private var liveMapStopTimetableJob: Job? = null
     private var liveMapStopRequestId = 0L
     private var selectedVehicleTripJob: Job? = null
@@ -224,11 +230,13 @@ class SearchViewModel @Inject constructor(
     private var selectedVehicleTripRequestId = 0L
     private var serviceNewsJob: Job? = null
     private var liveServiceAlertsJob: Job? = null
+    private var updateCheckJob: Job? = null
+    private var updateCheckRequestId = 0L
     private var currentLocationPrefetchJob: Job? = null
     private var currentLocationResolutionJob: Job? = null
     private var prefetchedCurrentLocation: PrefetchedCurrentLocation? = null
-    private var lastServiceNewsAttemptAtMillis = 0L
-    private var lastLiveServiceAlertsAttemptAtMillis = 0L
+    private var lastServiceNewsSuccessAtMillis = 0L
+    private var lastLiveServiceAlertsSuccessAtMillis = 0L
 
     private data class PrefetchedCurrentLocation(
         val location: Location,
@@ -245,6 +253,44 @@ class SearchViewModel @Inject constructor(
         refreshLiveServiceAlerts()
     }
 
+    fun swapOriginAndDestination() {
+        cancelCurrentLocationResolution()
+        originAddressSearchJob?.cancel()
+        destinationAddressSearchJob?.cancel()
+        mutableUiState.update { state ->
+            state.copy(
+                originQuery = state.destinationQuery,
+                destinationQuery = state.originQuery,
+                originPlace = state.destinationPlace,
+                destinationPlace = state.originPlace,
+                originStop = state.destinationStop,
+                destinationStop = state.originStop,
+                originStopOptions = state.destinationStopOptions,
+                destinationStopOptions = state.originStopOptions,
+                nearbyOriginGroups = state.nearbyDestinationGroups,
+                nearbyDestinationGroups = state.nearbyOriginGroups,
+                originStopManuallySelected = state.destinationStopManuallySelected,
+                destinationStopManuallySelected = state.originStopManuallySelected,
+                originAddressCandidates = emptyList(),
+                addressCandidates = emptyList(),
+                originAddressSearchError = null,
+                destinationAddressSearchError = null,
+                isSearchingOriginAddresses = false,
+                isSearchingDestinationAddresses = false,
+                journey = null,
+                journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
+                arrivalTarget = null,
+                routeSearchWindowStart = null,
+                routeSearchWindowEnd = null,
+                liveDepartures = null,
+                routeSearchMessage = null,
+                statusMessage = null
+            )
+        }
+    }
+
     fun setDestinationQuery(query: String) {
         mutableUiState.update {
             it.copy(
@@ -258,6 +304,8 @@ class SearchViewModel @Inject constructor(
                 nearbyDestinationGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
                 arrivalTarget = null,
                 routeSearchWindowStart = null,
                 routeSearchWindowEnd = null,
@@ -284,6 +332,8 @@ class SearchViewModel @Inject constructor(
                 nearbyOriginGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
                 arrivalTarget = null,
                 routeSearchWindowStart = null,
                 routeSearchWindowEnd = null,
@@ -335,6 +385,8 @@ class SearchViewModel @Inject constructor(
                 nearbyOriginGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
                 arrivalTarget = null,
                 routeSearchWindowStart = null,
                 routeSearchWindowEnd = null,
@@ -384,6 +436,8 @@ class SearchViewModel @Inject constructor(
                         nearbyOriginGroups = nearbyGroups,
                         journey = null,
                         journeyOptions = emptyList(),
+                        journeyScheduledDepartures = emptyMap(),
+                        liveJourneyDepartureEstimates = emptyMap(),
                         routeSearchWindowStart = null,
                         routeSearchWindowEnd = null,
                         routeSearchMessage = null,
@@ -461,7 +515,8 @@ class SearchViewModel @Inject constructor(
     }
 
     fun locateUserOnLiveMap() {
-        viewModelScope.launch {
+        liveMapLocateJob?.cancel()
+        liveMapLocateJob = viewModelScope.launch {
             mutableUiState.update {
                 it.copy(liveMapUserLocation = null, liveMapLocationError = null)
             }
@@ -483,6 +538,8 @@ class SearchViewModel @Inject constructor(
                         liveMapLocationError = null
                     )
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: LocationPermissionRequiredException) {
                 mutableUiState.update {
                     it.copy(liveMapLocationError = "Zezwól na dostęp do lokalizacji.")
@@ -789,10 +846,9 @@ class SearchViewModel @Inject constructor(
     fun refreshServiceNews(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (mutableUiState.value.isLoadingServiceNews) return
-        if (!force && now - lastServiceNewsAttemptAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS) {
+        if (!force && now - lastServiceNewsSuccessAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS) {
             return
         }
-        lastServiceNewsAttemptAtMillis = now
         serviceNewsJob?.cancel()
         serviceNewsJob = viewModelScope.launch {
             mutableUiState.update {
@@ -800,6 +856,7 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val items = ztpServiceNewsClient.getLatestItems()
+                lastServiceNewsSuccessAtMillis = System.currentTimeMillis()
                 mutableUiState.update {
                     it.copy(serviceNews = items, serviceNewsError = null)
                 }
@@ -822,11 +879,10 @@ class SearchViewModel @Inject constructor(
         if (mutableUiState.value.isLoadingLiveServiceAlerts) return
         if (
             !force &&
-            now - lastLiveServiceAlertsAttemptAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS
+            now - lastLiveServiceAlertsSuccessAtMillis < SERVICE_NEWS_REFRESH_INTERVAL_MS
         ) {
             return
         }
-        lastLiveServiceAlertsAttemptAtMillis = now
         liveServiceAlertsJob?.cancel()
         liveServiceAlertsJob = viewModelScope.launch {
             mutableUiState.update {
@@ -834,6 +890,9 @@ class SearchViewModel @Inject constructor(
             }
             try {
                 val result = serviceAlertsClient.getAllAlerts()
+                if (result.isComplete) {
+                    lastLiveServiceAlertsSuccessAtMillis = System.currentTimeMillis()
+                }
                 mutableUiState.update {
                     it.copy(
                         activeServiceAlerts = result.alerts,
@@ -901,6 +960,8 @@ class SearchViewModel @Inject constructor(
                     originStopOptions = emptyList(),
                     journey = null,
                     journeyOptions = emptyList(),
+                    journeyScheduledDepartures = emptyMap(),
+                    liveJourneyDepartureEstimates = emptyMap(),
                     routeSearchMessage = null,
                     originStopManuallySelected = false,
                     arrivalTarget = null,
@@ -937,6 +998,8 @@ class SearchViewModel @Inject constructor(
                 nearbyDestinationGroups = emptyList(),
                 journey = null,
                 journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
                 arrivalTarget = null,
                 routeSearchWindowStart = null,
                 routeSearchWindowEnd = null,
@@ -977,6 +1040,8 @@ class SearchViewModel @Inject constructor(
                     destinationStopOptions = emptyList(),
                     journey = null,
                     journeyOptions = emptyList(),
+                    journeyScheduledDepartures = emptyMap(),
+                    liveJourneyDepartureEstimates = emptyMap(),
                     routeSearchMessage = null,
                     destinationStopManuallySelected = false,
                     arrivalTarget = null,
@@ -1063,38 +1128,7 @@ class SearchViewModel @Inject constructor(
             return
         }
 
-        val originAccesses = buildStopAccesses(
-            place = originPlace,
-            selectedStops = state.originStopOptions.ifEmpty {
-                listOfNotNull(state.originStop)
-            },
-            nearbyGroups = state.nearbyOriginGroups,
-            allStops = state.stops,
-            manuallySelected = state.originStopManuallySelected
-        )
-        val destinationAccesses = buildStopAccesses(
-            place = destinationPlace,
-            selectedStops = state.destinationStopOptions.ifEmpty {
-                listOfNotNull(state.destinationStop)
-            },
-            nearbyGroups = state.nearbyDestinationGroups,
-            allStops = state.stops,
-            manuallySelected = state.destinationStopManuallySelected
-        )
-        if (originAccesses.isEmpty()) {
-            showMessage("Nie znaleziono przystanków w promieniu 1,5 km od początku trasy.")
-            return
-        }
-        if (destinationAccesses.isEmpty()) {
-            showMessage("Nie znaleziono przystanków w promieniu 1,5 km od celu.")
-            return
-        }
-
         viewModelScope.launch {
-            diagnostics.record(
-                "Przygotowano wyszukiwanie dla ${originAccesses.size} początkowych i " +
-                    "${destinationAccesses.size} końcowych przystanków."
-            )
             mutableUiState.update {
                 it.copy(
                     isSearching = true,
@@ -1102,6 +1136,7 @@ class SearchViewModel @Inject constructor(
                     statusMessage = null,
                     journey = null,
                     journeyOptions = emptyList(),
+                    journeyScheduledDepartures = emptyMap(),
                     liveJourneyDepartureEstimates = emptyMap(),
                     arrivalTarget = null,
                     routeSearchWindowStart = window.startDateTime,
@@ -1110,6 +1145,38 @@ class SearchViewModel @Inject constructor(
                 )
             }
             try {
+                val (originAccesses, destinationAccesses) = withContext(Dispatchers.Default) {
+                    buildStopAccesses(
+                        place = originPlace,
+                        selectedStops = state.originStopOptions.ifEmpty {
+                            listOfNotNull(state.originStop)
+                        },
+                        nearbyGroups = state.nearbyOriginGroups,
+                        allStops = state.stops,
+                        manuallySelected = state.originStopManuallySelected
+                    ) to buildStopAccesses(
+                        place = destinationPlace,
+                        selectedStops = state.destinationStopOptions.ifEmpty {
+                            listOfNotNull(state.destinationStop)
+                        },
+                        nearbyGroups = state.nearbyDestinationGroups,
+                        allStops = state.stops,
+                        manuallySelected = state.destinationStopManuallySelected
+                    )
+                }
+                if (originAccesses.isEmpty()) {
+                    showMessage("Nie znaleziono przystanków w promieniu 1,5 km od początku trasy.")
+                    return@launch
+                }
+                if (destinationAccesses.isEmpty()) {
+                    showMessage("Nie znaleziono przystanków w promieniu 1,5 km od celu.")
+                    return@launch
+                }
+                diagnostics.record(
+                    "Przygotowano wyszukiwanie dla ${originAccesses.size} początkowych i " +
+                        "${destinationAccesses.size} końcowych przystanków."
+                )
+
                 val now = LocalDateTime.now()
                 val candidateEntries = mutableListOf<Pair<CsaJourney, LocalDateTime>>()
                 var searchedWindow = window
@@ -1120,18 +1187,36 @@ class SearchViewModel @Inject constructor(
                     MAX_ROUTE_SEARCH_WINDOWS_PER_PAGE
                 }
                 for (windowIndex in 0 until searchWindowCount) {
-                    val windowCandidates = routePlanner.findJourneys(
-                        originAccesses = originAccesses,
-                        destinationAccesses = destinationAccesses,
-                        startDateTime = searchedWindow.startDateTime,
-                        searchWindowSeconds = ROUTE_SEARCH_WINDOW_SECONDS,
-                        maxResults = MAX_CSA_JOURNEY_CANDIDATES,
-                        arrivalDeadline = routeTimePlan
-                            ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
-                            ?.let { searchedWindow.endDateTime }
-                    )
+                    val clampArriveByStart = pageDirection == null &&
+                        !allowPastPlan &&
+                        routeTimePlan?.mode == JourneyTimeMode.ARRIVE_BY
+                    val effectiveStart = if (clampArriveByStart && now.isAfter(searchedWindow.startDateTime)) {
+                        now
+                    } else {
+                        searchedWindow.startDateTime
+                    }
+                    val effectiveWindowSeconds = if (clampArriveByStart) {
+                        Duration.between(effectiveStart, searchedWindow.endDateTime).seconds.toInt()
+                            .coerceAtMost(ROUTE_SEARCH_WINDOW_SECONDS)
+                    } else {
+                        ROUTE_SEARCH_WINDOW_SECONDS
+                    }
+                    val windowCandidates = if (effectiveWindowSeconds > 0) {
+                        routePlanner.findJourneys(
+                            originAccesses = originAccesses,
+                            destinationAccesses = destinationAccesses,
+                            startDateTime = effectiveStart,
+                            searchWindowSeconds = effectiveWindowSeconds,
+                            maxResults = MAX_CSA_JOURNEY_CANDIDATES,
+                            arrivalDeadline = routeTimePlan
+                                ?.takeIf { it.mode == JourneyTimeMode.ARRIVE_BY }
+                                ?.let { searchedWindow.endDateTime }
+                        )
+                    } else {
+                        emptyList()
+                    }
                     val serviceDate = GtfsServiceClock
-                        .from(searchedWindow.startDateTime)
+                        .from(effectiveStart)
                         .serviceDate
                     candidateEntries += windowCandidates.map { journey ->
                         journey to journey.firstTransitDepartureDateTime(serviceDate)
@@ -1212,6 +1297,14 @@ class SearchViewModel @Inject constructor(
                     departureDateTimeOverrides[journey]
                         ?: eligibleCandidates.firstOrNull { it.first === journey }?.second
                 }
+                val journeyScheduledDepartures = journeyOptions.mapIndexedNotNull { index, journey ->
+                    val departureKey = journey.firstTransitConnection()?.tripId ?: "departure-$index"
+                    val scheduledDeparture = eligibleCandidates
+                        .firstOrNull { it.first === journey }
+                        ?.second
+                        ?: return@mapIndexedNotNull null
+                    departureKey to scheduledDeparture
+                }.toMap()
                 val liveJourneyDepartureEstimates = journeyOptions.mapNotNull { journey ->
                     val tripId = journey.firstTransitConnection()?.tripId ?: return@mapNotNull null
                     val scheduledDeparture = eligibleCandidates
@@ -1280,6 +1373,7 @@ class SearchViewModel @Inject constructor(
                         destinationStop = selectedDestination,
                         journey = firstJourney,
                         journeyOptions = journeyOptions,
+                        journeyScheduledDepartures = journeyScheduledDepartures,
                         liveJourneyDepartureEstimates = liveJourneyDepartureEstimates,
                         routeSearchWindowStart = earlierBoundary,
                         routeSearchWindowEnd = laterBoundary,
@@ -1320,6 +1414,8 @@ class SearchViewModel @Inject constructor(
                                     current.copy(liveDepartures = liveDepartures)
                                 }
                             }
+                        } catch (exception: CancellationException) {
+                            throw exception
                         } catch (exception: SQLiteException) {
                             diagnostics.record("Błąd bazy podczas pobierania odjazdów TTSS.")
                             mutableUiState.update { current ->
@@ -1352,6 +1448,8 @@ class SearchViewModel @Inject constructor(
                         }
                     }
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: IllegalArgumentException) {
                 diagnostics.record("Nieprawidłowe dane trasy: ${exception.message.orEmpty()}")
                 val message = "Nie można wyszukać trasy: ${exception.message.orEmpty()}"
@@ -1409,22 +1507,31 @@ class SearchViewModel @Inject constructor(
         }.toMap()
         val liveUpdates = mutableMapOf<String, LiveTripUpdate>()
         var feedUnavailable = false
-        TransitVehicleMode.entries.forEach { mode ->
-            val modeTripIds = modesByTripId
-                .filterValues { it == mode }
-                .keys
-            if (modeTripIds.isEmpty()) {
-                return@forEach
-            }
-            try {
-                liveUpdates += ztpTripUpdatesRepository.getTripUpdates(mode, modeTripIds)
-            } catch (exception: IOException) {
-                feedUnavailable = true
-                diagnostics.record(
-                    "Nie udało się pobrać opóźnień live dla ${mode.pluralLabel}: " +
-                        exception.message.orEmpty()
-                )
-            }
+        val modeResults = coroutineScope {
+            TransitVehicleMode.entries.mapNotNull { mode ->
+                val modeTripIds = modesByTripId
+                    .filterValues { it == mode }
+                    .keys
+                if (modeTripIds.isEmpty()) {
+                    null
+                } else {
+                    async {
+                        try {
+                            ztpTripUpdatesRepository.getTripUpdates(mode, modeTripIds, serviceDate) to false
+                        } catch (exception: IOException) {
+                            diagnostics.record(
+                                "Nie udało się pobrać opóźnień live dla ${mode.pluralLabel}: " +
+                                    exception.message.orEmpty()
+                            )
+                            emptyMap<String, LiveTripUpdate>() to true
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+        modeResults.forEach { (updates, unavailable) ->
+            liveUpdates += updates
+            if (unavailable) feedUnavailable = true
         }
 
         val nowInstant = Instant.now()
@@ -1475,6 +1582,8 @@ class SearchViewModel @Inject constructor(
                 routeTimePlan = plan,
                 journey = null,
                 journeyOptions = emptyList(),
+                journeyScheduledDepartures = emptyMap(),
+                liveJourneyDepartureEstimates = emptyMap(),
                 arrivalTarget = null,
                 routeSearchWindowStart = null,
                 routeSearchWindowEnd = null,
@@ -1527,6 +1636,8 @@ class SearchViewModel @Inject constructor(
                         destinationStopManuallySelected = false,
                         journey = null,
                         journeyOptions = emptyList(),
+                        journeyScheduledDepartures = emptyMap(),
+                        liveJourneyDepartureEstimates = emptyMap(),
                         arrivalTarget = null,
                         routeSearchWindowStart = null,
                         routeSearchWindowEnd = null,
@@ -1536,6 +1647,8 @@ class SearchViewModel @Inject constructor(
                     )
                 }
                 searchRoute()
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: IllegalStateException) {
                 showMessage(exception.message.orEmpty())
             } catch (exception: SQLiteException) {
@@ -1568,6 +1681,8 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 radioManager.playLastSelectedStation()
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: IOException) {
                 showMessage("Nie można odczytać ustawień radia: ${exception.message.orEmpty()}")
             } catch (exception: IllegalStateException) {
@@ -1584,6 +1699,8 @@ class SearchViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 radioManager.playStation(stationId)
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: IOException) {
                 showMessage("Nie można zapisać ustawień radia: ${exception.message.orEmpty()}")
             } catch (exception: IllegalStateException) {
@@ -1722,7 +1839,9 @@ class SearchViewModel @Inject constructor(
     }
 
     private fun checkForUpdates(showStatus: Boolean) {
-        viewModelScope.launch {
+        val requestId = ++updateCheckRequestId
+        updateCheckJob?.cancel()
+        updateCheckJob = viewModelScope.launch {
             mutableUiState.update {
                 it.copy(
                     isCheckingUpdates = true,
@@ -1733,6 +1852,7 @@ class SearchViewModel @Inject constructor(
             try {
                 val result = updateChecker.checkForUpdates()
                 val skippedVersion = appPreferences.skippedUpdateVersion.first()
+                if (requestId != updateCheckRequestId) return@launch
                 mutableUiState.update { state ->
                     val message = if (showStatus) {
                         if (result.updateAvailable) {
@@ -1751,57 +1871,69 @@ class SearchViewModel @Inject constructor(
                         }
                     )
                 }
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (_: NoReleaseAvailableException) {
-                mutableUiState.update { state ->
-                    state.copy(
-                        updateCheckMessage = if (showStatus) {
-                            "Nie opublikowano jeszcze wydania dla tej wersji aplikacji na GitHub. " +
-                                "Sprawdź ponownie później."
-                        } else {
-                            state.updateCheckMessage
-                        },
-                        updateCheckResult = null,
-                        updatePrompt = null
-                    )
+                if (requestId == updateCheckRequestId) {
+                    mutableUiState.update { state ->
+                        state.copy(
+                            updateCheckMessage = if (showStatus) {
+                                "Nie opublikowano jeszcze wydania dla tej wersji aplikacji na GitHub. " +
+                                    "Sprawdź ponownie później."
+                            } else {
+                                state.updateCheckMessage
+                            },
+                            updateCheckResult = null,
+                            updatePrompt = null
+                        )
+                    }
                 }
             } catch (exception: IOException) {
-                mutableUiState.update { state ->
-                    state.copy(
-                        updateCheckMessage = if (showStatus) {
-                            "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
-                        } else {
-                            state.updateCheckMessage
-                        },
-                        updateCheckResult = null,
-                        updatePrompt = null
-                    )
+                if (requestId == updateCheckRequestId) {
+                    mutableUiState.update { state ->
+                        state.copy(
+                            updateCheckMessage = if (showStatus) {
+                                "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
+                            } else {
+                                state.updateCheckMessage
+                            },
+                            updateCheckResult = null,
+                            updatePrompt = null
+                        )
+                    }
                 }
             } catch (exception: IllegalArgumentException) {
-                mutableUiState.update { state ->
-                    state.copy(
-                        updateCheckMessage = if (showStatus) {
-                            "Nie udało się porównać wersji: ${exception.message.orEmpty()}"
-                        } else {
-                            state.updateCheckMessage
-                        },
-                        updateCheckResult = null,
-                        updatePrompt = null
-                    )
+                if (requestId == updateCheckRequestId) {
+                    mutableUiState.update { state ->
+                        state.copy(
+                            updateCheckMessage = if (showStatus) {
+                                "Nie udało się porównać wersji: ${exception.message.orEmpty()}"
+                            } else {
+                                state.updateCheckMessage
+                            },
+                            updateCheckResult = null,
+                            updatePrompt = null
+                        )
+                    }
                 }
             } catch (exception: IllegalStateException) {
-                mutableUiState.update { state ->
-                    state.copy(
-                        updateCheckMessage = if (showStatus) {
-                            "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
-                        } else {
-                            state.updateCheckMessage
-                        },
-                        updateCheckResult = null,
-                        updatePrompt = null
-                    )
+                if (requestId == updateCheckRequestId) {
+                    mutableUiState.update { state ->
+                        state.copy(
+                            updateCheckMessage = if (showStatus) {
+                                "Nie udało się sprawdzić aktualizacji: ${exception.message.orEmpty()}"
+                            } else {
+                                state.updateCheckMessage
+                            },
+                            updateCheckResult = null,
+                            updatePrompt = null
+                        )
+                    }
                 }
             } finally {
-                mutableUiState.update { it.copy(isCheckingUpdates = false) }
+                if (requestId == updateCheckRequestId) {
+                    mutableUiState.update { it.copy(isCheckingUpdates = false) }
+                }
             }
         }
     }
@@ -2092,7 +2224,11 @@ class SearchViewModel @Inject constructor(
                 }
             } catch (exception: IOException) {
                 mutableUiState.update {
-                    if (isOrigin) {
+                    val latestQuery = if (isOrigin) it.originQuery else it.destinationQuery
+                    val latestPlace = if (isOrigin) it.originPlace else it.destinationPlace
+                    if (latestQuery != query || latestPlace != null) {
+                        it
+                    } else if (isOrigin) {
                         it.copy(
                             originAddressSearchError =
                                 "Nie udało się podpowiedzieć adresu: ${exception.message.orEmpty()}",
@@ -2108,7 +2244,11 @@ class SearchViewModel @Inject constructor(
                 }
             } catch (exception: IllegalArgumentException) {
                 mutableUiState.update {
-                    if (isOrigin) {
+                    val latestQuery = if (isOrigin) it.originQuery else it.destinationQuery
+                    val latestPlace = if (isOrigin) it.originPlace else it.destinationPlace
+                    if (latestQuery != query || latestPlace != null) {
+                        it
+                    } else if (isOrigin) {
                         it.copy(
                             originAddressSearchError =
                                 "Nieprawidłowy adres: ${exception.message.orEmpty()}",
@@ -2176,6 +2316,8 @@ class SearchViewModel @Inject constructor(
                     statusMessage = null,
                     journey = null,
                     journeyOptions = emptyList(),
+                    journeyScheduledDepartures = emptyMap(),
+                    liveJourneyDepartureEstimates = emptyMap(),
                     arrivalTarget = null,
                     routeTimePlan = null,
                     routeSearchWindowStart = null,
@@ -2188,6 +2330,8 @@ class SearchViewModel @Inject constructor(
                     result = contextEngine.routeToSavedStop(destination),
                     savedDestination = destination
                 )
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (exception: LocationPermissionRequiredException) {
                 showMessage(exception.message.orEmpty())
             } catch (exception: LocationUnavailableException) {
@@ -2212,8 +2356,16 @@ class SearchViewModel @Inject constructor(
     ) {
         when (result) {
             is QuickActionResult.JourneyFound -> mutableUiState.update {
+                val departureKey = result.journey.firstTransitConnection()?.tripId
+                    ?: "departure-fallback"
+                val transitOffsetSeconds =
+                    (result.journey.firstTransitConnection()?.departureTime ?: result.journey.departureTime) -
+                        result.journey.departureTime
+                val scheduledDepartures = result.departureTarget?.let { departureTarget ->
+                    mapOf(departureKey to departureTarget.plusSeconds(transitOffsetSeconds.toLong()))
+                }.orEmpty()
                 it.copy(
-                    originQuery = "",
+                    originQuery = result.originPlace.label,
                     originStop = result.origin,
                     destinationStop = result.destination,
                     originStopOptions = result.originStopOptions,
@@ -2227,6 +2379,8 @@ class SearchViewModel @Inject constructor(
                     nearbyDestinationGroups = emptyList(),
                     journey = result.journey,
                     journeyOptions = emptyList(),
+                    journeyScheduledDepartures = scheduledDepartures,
+                    liveJourneyDepartureEstimates = emptyMap(),
                     arrivalTarget = result.arrivalTarget,
                     routeSearchWindowStart = null,
                     routeSearchWindowEnd = null,
@@ -2237,13 +2391,24 @@ class SearchViewModel @Inject constructor(
                 )
             }
 
-            is QuickActionResult.AlreadyAtDestination -> showMessage(
-                when (savedDestination) {
-                    SavedDestination.HOME -> "Jesteś już w domu!"
-                    SavedDestination.WORK -> "Jesteś już w pracy!"
-                    null -> "Jesteś już na miejscu: ${result.destinationName}."
-                }
-            )
+            is QuickActionResult.AlreadyAtDestination -> {
+                val shortcutNames = mutableUiState.value.destinationShortcutNames
+                showMessage(
+                    when (savedDestination) {
+                        SavedDestination.HOME -> if (shortcutNames.home.equals("Dom", ignoreCase = true)) {
+                            "Jesteś już w domu!"
+                        } else {
+                            "Jesteś już na miejscu: ${shortcutNames.home}!"
+                        }
+                        SavedDestination.WORK -> if (shortcutNames.work.equals("Praca", ignoreCase = true)) {
+                            "Jesteś już w pracy!"
+                        } else {
+                            "Jesteś już na miejscu: ${shortcutNames.work}!"
+                        }
+                        null -> "Jesteś już na miejscu: ${result.destinationName}."
+                    }
+                )
+            }
 
             QuickActionResult.NoJourneyFound ->
                 showMessage("Nie znaleziono połączenia w wybranym przedziale czasu.")

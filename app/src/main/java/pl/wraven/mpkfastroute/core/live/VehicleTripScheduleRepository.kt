@@ -129,7 +129,7 @@ internal suspend fun parseVehicleTripSchedule(
     stops.sortBy(ScheduledVehicleStop::stopSequence)
     if (stops.isEmpty() || routeName == null) throw IOException("Niekompletny rozkład kursu Live $tripId.")
     if (stops.map { it.stopSequence }.distinct().size != stops.size ||
-        stops.any { it.stopSequence <= 0 || it.arrivalTime > it.departureTime }
+        stops.any { it.stopSequence < 0 || it.arrivalTime > it.departureTime }
     ) throw IOException("Nieprawidłowa kolejność lub czasy przystanków kursu Live $tripId.")
     val shapes = mutableListOf<ShapePointEntity>()
     if (shapeId != null) {
@@ -154,8 +154,16 @@ internal suspend fun parseVehicleTripSchedule(
             val flags = listOf("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
                 .map { field(it).toIntOrNull()?.takeIf { flag -> flag in 0..1 }
                     ?: throw IOException("Nieprawidłowy kalendarz kursu Live.") }
+            val startDate = field("start_date")
+            val endDate = field("end_date")
+            try {
+                LocalDate.parse(startDate, DateTimeFormatter.BASIC_ISO_DATE)
+                LocalDate.parse(endDate, DateTimeFormatter.BASIC_ISO_DATE)
+            } catch (exception: DateTimeException) {
+                throw IOException("Nieprawidłowa data kalendarza kursu Live.", exception)
+            }
             calendars += ServiceCalendarEntity(field("service_id"), flags[0], flags[1], flags[2],
-                flags[3], flags[4], flags[5], flags[6], field("start_date"), field("end_date"))
+                flags[3], flags[4], flags[5], flags[6], startDate, endDate)
         }
     }
     val exceptions = mutableListOf<CalendarDateEntity>()
@@ -173,16 +181,21 @@ internal suspend fun parseVehicleTripSchedule(
             exceptions += CalendarDateEntity(field("service_id"), date, type)
         }
     }
+    val nowInstant = now.atZone(KRAKOW_ZONE).toInstant()
     val candidates = vehicle.serviceDate?.let(::listOf)
-        ?: listOf(now.toLocalDate().minusDays(1), now.toLocalDate())
+        ?: listOf(
+            now.toLocalDate().minusDays(1),
+            now.toLocalDate(),
+            now.toLocalDate().plusDays(1)
+        )
     val serviceDate = candidates
         .filter { serviceId in ServiceCalendarResolver.activeServiceIds(it, calendars, exceptions) }
         .minByOrNull { date ->
-            val start = date.atStartOfDay().plusSeconds(stops.first().departureTime.toLong())
-            val end = date.atStartOfDay().plusSeconds(stops.last().arrivalTime.toLong())
+            val start = gtfsInstant(date, stops.first().departureTime)
+            val end = gtfsInstant(date, stops.last().arrivalTime)
             when {
-                now.isBefore(start) -> Duration.between(now, start).seconds
-                now.isAfter(end) -> Duration.between(end, now).seconds
+                nowInstant.isBefore(start) -> Duration.between(nowInstant, start).seconds
+                nowInstant.isAfter(end) -> Duration.between(end, nowInstant).seconds
                 else -> 0L
             }
         } ?: throw LiveTripMissingException(tripId)

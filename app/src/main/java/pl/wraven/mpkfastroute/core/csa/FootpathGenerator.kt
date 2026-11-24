@@ -16,10 +16,10 @@ class FootpathGenerator @Inject constructor() {
             return emptyList()
         }
 
-        val averageLatitude = stops.sumOf(StopEntity::stopLat) / stops.size
+        val maxAbsLatitude = stops.maxOf { abs(it.stopLat) }.coerceAtMost(MAX_GRID_LATITUDE_DEGREES)
         val latitudeCellSize = MAX_DISTANCE_METERS / METERS_PER_LATITUDE_DEGREE
         val longitudeCellSize = latitudeCellSize /
-            abs(cos(Math.toRadians(averageLatitude))).coerceAtLeast(MIN_LONGITUDE_SCALE)
+            abs(cos(Math.toRadians(maxAbsLatitude))).coerceAtLeast(MIN_LONGITUDE_SCALE)
         val buckets = mutableMapOf<GridCell, MutableList<StopEntity>>()
         val result = mutableListOf<Footpath>()
 
@@ -32,6 +32,7 @@ class FootpathGenerator @Inject constructor() {
                         longitude = cell.longitude + longitudeOffset
                     )
                     for (neighbor in buckets[neighborCell].orEmpty()) {
+                        if (stop.stopId == neighbor.stopId) continue
                         val distance = Haversine.distanceMeters(stop, neighbor)
                         if (distance <= MAX_DISTANCE_METERS) {
                             val duration = walkingDurationSeconds(distance)
@@ -63,6 +64,7 @@ class FootpathGenerator @Inject constructor() {
         const val METERS_PER_LATITUDE_DEGREE = 110_000.0
         const val WALK_SPEED_METERS_PER_SECOND = 1.25
         const val MIN_LONGITUDE_SCALE = 0.01
+        private const val MAX_GRID_LATITUDE_DEGREES = 89.9
 
         fun walkingDurationSeconds(distanceMeters: Double): Int {
             require(distanceMeters.isFinite() && distanceMeters >= 0.0) {

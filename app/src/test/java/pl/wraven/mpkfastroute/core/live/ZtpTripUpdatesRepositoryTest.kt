@@ -140,4 +140,49 @@ class ZtpTripUpdatesRepositoryTest {
 
         assertNull(mapTripUpdate(feed, "unknown-trip"))
     }
+
+    @Test
+    fun filtersDuplicateTripIdByRequestedServiceDate() {
+        val feed = GtfsRealtime.FeedMessage.newBuilder()
+            .setHeader(GtfsRealtime.FeedHeader.newBuilder().setGtfsRealtimeVersion("2.0"))
+            .addEntity(
+                GtfsRealtime.FeedEntity.newBuilder().setId("prev-day").setTripUpdate(
+                    GtfsRealtime.TripUpdate.newBuilder()
+                        .setTrip(
+                            GtfsRealtime.TripDescriptor.newBuilder()
+                                .setTripId("night-trip")
+                                .setStartDate("20261106")
+                        )
+                        .addStopTimeUpdate(
+                            GtfsRealtime.TripUpdate.StopTimeUpdate.newBuilder()
+                                .setStopSequence(1)
+                                .setDeparture(
+                                    GtfsRealtime.TripUpdate.StopTimeEvent.newBuilder().setDelay(60)
+                                )
+                        )
+                )
+            )
+            .addEntity(
+                GtfsRealtime.FeedEntity.newBuilder().setId("curr-day").setTripUpdate(
+                    GtfsRealtime.TripUpdate.newBuilder()
+                        .setTrip(
+                            GtfsRealtime.TripDescriptor.newBuilder()
+                                .setTripId("night-trip")
+                                .setStartDate("20261107")
+                        )
+                        .addStopTimeUpdate(
+                            GtfsRealtime.TripUpdate.StopTimeUpdate.newBuilder()
+                                .setStopSequence(1)
+                                .setDeparture(
+                                    GtfsRealtime.TripUpdate.StopTimeEvent.newBuilder().setDelay(300)
+                                )
+                        )
+                )
+            )
+            .build()
+
+        val selected = mapTripUpdate(feed, "night-trip", java.time.LocalDate.of(2026, 11, 7))
+        assertEquals(java.time.LocalDate.of(2026, 11, 7), selected?.serviceDate)
+        assertEquals(300, selected?.stopTimeUpdates?.single()?.departureDelaySeconds)
+    }
 }

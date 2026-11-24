@@ -224,10 +224,10 @@ jobs:
           {
             echo "## Poprawki"
             echo
-            echo "- Poprawiono czas wyjścia w harmonogramie dojazdu: uwzględnia dojście od lokalizacji początkowej do przystanku."
-            echo "- Odrzucenie powiadomienia o dojeździe zatrzymuje dalsze aktualizacje tego dojazdu."
-            echo "- Ograniczono odświeżanie statusu do 15 minut, a koordynację harmonogramów do 30 minut; dodano narastające opóźnienie ponowień po błędach."
-            echo "- Zachowano wygląd aplikacji i zgodność aktualizacji z dotychczasową instalacją."
+            echo "- Naprawiono błędne oznaczanie przyszłych i nocnych kursów jako „Odjechał”, planowanie „Przyjazd najpóźniej” oraz dobór połączeń z przesiadkami i dojściem pieszym."
+            echo "- Usprawniono stabilność radia w tle (MediaController), mapy pojazdów na żywo, odjazdów TTSS/GTFS-RT oraz odporność na błędy sieci i uszkodzone ustawienia."
+            echo "- Przyspieszono wyszukiwanie tras i import GTFS; dodano przycisk zamiany początku z celem (⇅), czyszczenia pól (✕) oraz pasek postępu pierwszego pobierania."
+            echo "- Zachowano pełną zgodność aktualizacji w aplikacji z dotychczasową instalacją."
             echo
             echo "Android versionName: $VERSION_NAME"
             echo "Android versionCode: $VERSION_CODE"

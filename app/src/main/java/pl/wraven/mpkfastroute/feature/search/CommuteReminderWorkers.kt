@@ -24,6 +24,7 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.first
 import pl.wraven.mpkfastroute.MainActivity
 import pl.wraven.mpkfastroute.core.csa.JourneyStep
@@ -80,6 +81,8 @@ class CommuteReminderCoordinatorWorker @AssistedInject constructor(
 
             val result = try {
                 contextEngine.routeToSavedStop(destination, arrivalTarget)
+            } catch (exception: CancellationException) {
+                throw exception
             } catch (_: SecurityException) {
                 Log.w(TAG, "Commute reminders cannot access the current location.")
                 return Result.failure()
@@ -87,6 +90,15 @@ class CommuteReminderCoordinatorWorker @AssistedInject constructor(
                 return Result.retry()
             } catch (_: ApiException) {
                 return Result.retry()
+            } catch (exception: SQLiteException) {
+                Log.w(TAG, "Could not query stops for commute reminder; retrying.", exception)
+                return Result.retry()
+            } catch (exception: IOException) {
+                Log.w(TAG, "Could not read commute settings; retrying.", exception)
+                return Result.retry()
+            } catch (exception: IllegalStateException) {
+                Log.w(TAG, "Skipping commute reminder for $destination.", exception)
+                continue
             }
 
             if (result is QuickActionResult.JourneyFound) {
@@ -153,6 +165,8 @@ class CommuteStatusWorker @AssistedInject constructor(
 
         val result = try {
             contextEngine.routeToSavedStop(destination, arrivalTarget)
+        } catch (exception: CancellationException) {
+            throw exception
         } catch (_: SecurityException) {
             cancelNotification(notificationId)
             return Result.failure()
@@ -160,6 +174,16 @@ class CommuteStatusWorker @AssistedInject constructor(
             return Result.retry()
         } catch (_: ApiException) {
             return Result.retry()
+        } catch (exception: SQLiteException) {
+            Log.w(TAG, "Could not query stops for commute status; retrying.", exception)
+            return Result.retry()
+        } catch (exception: IOException) {
+            Log.w(TAG, "Could not read commute settings; retrying.", exception)
+            return Result.retry()
+        } catch (exception: IllegalStateException) {
+            Log.w(TAG, "Commute destination unavailable; cancelling reminder.", exception)
+            cancelNotification(notificationId)
+            return Result.failure()
         }
 
         val journeyResult = result as? QuickActionResult.JourneyFound
@@ -192,7 +216,7 @@ class CommuteStatusWorker @AssistedInject constructor(
                 inputData,
                 minOf(
                     CommuteReminderScheduler.UPDATE_INTERVAL_MINUTES,
-                    roundedUpMinutes(Duration.between(now, plannedDeparture))
+                    roundedUpMinutes(Duration.between(now, plannedDeparture)).coerceAtLeast(1L)
                 )
             )
             return Result.success()
@@ -200,6 +224,10 @@ class CommuteStatusWorker @AssistedInject constructor(
 
         val departureTarget = journeyResult.departureTarget ?: return Result.failure()
         val now = LocalDateTime.now()
+        if (!now.isBefore(departureTarget)) {
+            cancelNotification(notificationId)
+            return Result.success()
+        }
         val notificationTime = departureTarget.minusMinutes(
             CommuteReminderScheduler.NOTIFICATION_LEAD_MINUTES
         )
@@ -215,7 +243,7 @@ class CommuteStatusWorker @AssistedInject constructor(
             cancelNotification(notificationId)
             val delayMinutes = minOf(
                 CommuteReminderScheduler.UPDATE_INTERVAL_MINUTES,
-                roundedUpMinutes(Duration.between(now, notificationTime))
+                roundedUpMinutes(Duration.between(now, notificationTime)).coerceAtLeast(1L)
             )
             CommuteReminderScheduler.scheduleNextUpdate(
                 applicationContext,
@@ -242,7 +270,7 @@ class CommuteStatusWorker @AssistedInject constructor(
             return Result.success()
         }
 
-        val minutesToDeparture = roundedUpMinutes(Duration.between(now, departureTarget))
+        val minutesToDeparture = roundedUpMinutes(Duration.between(LocalDateTime.now(), departureTarget))
         if (minutesToDeparture > 0) {
             CommuteReminderScheduler.scheduleNextUpdate(
                 applicationContext,
@@ -289,9 +317,13 @@ class CommuteStatusWorker @AssistedInject constructor(
         val firstTransit = transitSteps.firstOrNull()
         val routeShortNames = transitSteps
             .mapTo(mutableSetOf()) { it.connection.routeShortName }
-        val routeIds = database.routeDao().getAll()
-            .filter { it.routeShortName in routeShortNames }
-            .mapTo(mutableSetOf()) { it.routeId }
+        val routeIds = try {
+            database.routeDao().getAll()
+                .filter { it.routeShortName in routeShortNames }
+                .mapTo(mutableSetOf()) { it.routeId }
+        } catch (_: SQLiteException) {
+            emptySet()
+        }
         val stopIds = transitSteps.flatMapTo(mutableSetOf()) {
             listOf(it.connection.departureStopId, it.connection.arrivalStopId)
         }
@@ -319,10 +351,14 @@ class CommuteStatusWorker @AssistedInject constructor(
         } else {
             val currentTime = LocalDateTime.now()
             val currentServiceTime = GtfsServiceClock.from(currentTime)
-            val direction = database.tripDao()
-                .getById(firstTransit.connection.tripId)
-                ?.tripHeadsign
-                .orEmpty()
+            val direction = try {
+                database.tripDao()
+                    .getById(firstTransit.connection.tripId)
+                    ?.tripHeadsign
+                    .orEmpty()
+            } catch (_: SQLiteException) {
+                ""
+            }
             val liveResult = try {
                 departuresRepository.getDepartures(
                     stopId = firstTransit.connection.departureStopId,
@@ -334,12 +370,14 @@ class CommuteStatusWorker @AssistedInject constructor(
                 null
             } catch (_: SQLiteException) {
                 null
+            } catch (_: IllegalStateException) {
+                null
             }
             val nextDepartures = liveResult?.departures
                 ?.filter { estimate ->
                     estimate.routeShortName == firstTransit.connection.routeShortName &&
                         (direction.isBlank() || normalize(estimate.direction) == normalize(direction)) &&
-                        estimate.scheduledDepartureTime >= currentServiceTime.timeSeconds
+                        estimate.estimatedDepartureTime >= currentServiceTime.timeSeconds
                 }
                 ?.sortedBy(DepartureEstimate::estimatedDepartureTime)
                 ?.take(MAX_DEPARTURES_IN_NOTIFICATION)
@@ -365,7 +403,7 @@ class CommuteStatusWorker @AssistedInject constructor(
             departureLines = departureLines,
             minutesUntilDeparture = roundedUpMinutes(
                 Duration.between(LocalDateTime.now(), departureTarget)
-            ),
+            ).coerceAtLeast(1L),
             disruptions = disruptions
         )
     }
@@ -380,8 +418,8 @@ class CommuteStatusWorker @AssistedInject constructor(
         val liveLabel = if (estimate.isLive) "live" else "rozkład"
         val delay = estimate.delaySeconds?.let { seconds ->
             when {
-                seconds > 0 -> " +${seconds / 60} min"
-                seconds < 0 -> " ${seconds / 60} min"
+                seconds >= SECONDS_PER_MINUTE -> " +${(seconds + 59) / 60} min"
+                seconds <= -SECONDS_PER_MINUTE -> " ${seconds / 60} min"
                 else -> " punktualnie"
             }
         }.orEmpty()
@@ -472,11 +510,12 @@ class CommuteStatusWorker @AssistedInject constructor(
     }
 
     private fun normalize(value: String): String =
-        value.lowercase().filter(Char::isLetterOrDigit)
+        value.lowercase(java.util.Locale.ROOT).filter(Char::isLetterOrDigit)
 
-    private fun roundedUpMinutes(duration: Duration): Long =
-        ((duration.seconds + SECONDS_PER_MINUTE - 1) / SECONDS_PER_MINUTE)
-            .coerceAtLeast(1)
+    private fun roundedUpMinutes(duration: Duration): Long {
+        if (duration.seconds <= 0L) return 0L
+        return (duration.seconds + SECONDS_PER_MINUTE - 1) / SECONDS_PER_MINUTE
+    }
 
     private suspend fun SavedDestination.notificationTitle(): String {
         val names = appPreferences.destinationShortcutNames.first()

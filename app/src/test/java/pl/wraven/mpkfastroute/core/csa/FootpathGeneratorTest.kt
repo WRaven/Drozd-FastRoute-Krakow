@@ -49,6 +49,21 @@ class FootpathGeneratorTest {
         assertEquals(45, path.durationSeconds)
     }
 
+    @Test
+    fun keepsNearbyFootpathsWhenOutlierLatitudeExistsAndSkipsSelfLoopsOnDuplicateIds() {
+        val paths = generator.generate(
+            listOf(
+                stop("A", latitude = 50.0, longitude = 19.0),
+                stop("A", latitude = 50.0001, longitude = 19.0),
+                stop("B", latitude = 50.0, longitude = 19.0055),
+                stop("OUTLIER", latitude = 0.0, longitude = 0.0)
+            )
+        )
+
+        assertTrue(paths.any { it.fromStopId == "A" && it.toStopId == "B" })
+        assertTrue(paths.none { it.fromStopId == it.toStopId })
+    }
+
     private fun stop(id: String, latitude: Double, longitude: Double) = StopEntity(
         stopId = id,
         stopCode = null,

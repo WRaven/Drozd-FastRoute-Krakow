@@ -1,6 +1,7 @@
 package pl.wraven.mpkfastroute.core.location
 
 import android.content.Context
+import android.location.Address
 import android.location.Geocoder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.IOException
@@ -23,9 +24,7 @@ class AddressGeocoder @Inject constructor(
                 .getFromLocation(place.latitude, place.longitude, 1)
                 .orEmpty()
                 .firstOrNull()
-                ?.getAddressLine(0)
-                ?.trim()
-                ?.takeIf(String::isNotBlank)
+                ?.formatDisplayLabel()
         }
     }
 
@@ -39,26 +38,49 @@ class AddressGeocoder @Inject constructor(
                 throw IOException("Usługa wyszukiwania adresów jest niedostępna na tym urządzeniu.")
             }
 
-            Geocoder(context, Locale.forLanguageTag("pl-PL"))
-                .getFromLocationName(normalizedQuery, MAX_RESULTS)
-                .orEmpty()
-                .mapNotNull { address ->
-                    if (!address.hasLatitude() || !address.hasLongitude()) {
-                        null
-                    } else {
-                        GeoPlace(
-                            label = address.getAddressLine(0)?.takeIf(String::isNotBlank)
-                                ?: normalizedQuery,
-                            latitude = address.latitude,
-                            longitude = address.longitude
-                        )
-                    }
+            val geocoder = Geocoder(context, Locale.forLanguageTag("pl-PL"))
+            val boundedResults = geocoder.getFromLocationName(
+                normalizedQuery,
+                MAX_RESULTS,
+                KRAKOW_MIN_LATITUDE,
+                KRAKOW_MIN_LONGITUDE,
+                KRAKOW_MAX_LATITUDE,
+                KRAKOW_MAX_LONGITUDE
+            ).orEmpty()
+            val results = boundedResults.ifEmpty {
+                geocoder.getFromLocationName(normalizedQuery, MAX_RESULTS).orEmpty()
+            }
+            results.mapNotNull { address ->
+                if (!address.hasLatitude() || !address.hasLongitude()) {
+                    null
+                } else {
+                    GeoPlace(
+                        label = address.formatDisplayLabel() ?: normalizedQuery,
+                        latitude = address.latitude,
+                        longitude = address.longitude
+                    )
                 }
-                .distinctBy { Triple(it.label, it.latitude, it.longitude) }
+            }.distinctBy { Triple(it.label, it.latitude, it.longitude) }
         }
+    }
+
+    private fun Address.formatDisplayLabel(): String? {
+        getAddressLine(0)?.trim()?.takeIf(String::isNotBlank)?.let { return it }
+        val street = listOfNotNull(
+            thoroughfare?.trim()?.takeIf(String::isNotBlank),
+            subThoroughfare?.trim()?.takeIf(String::isNotBlank)
+        ).joinToString(" ").takeIf(String::isNotBlank)
+        return listOfNotNull(
+            street,
+            locality?.trim()?.takeIf(String::isNotBlank)
+        ).joinToString(", ").takeIf(String::isNotBlank)
     }
 
     private companion object {
         const val MAX_RESULTS = 5
+        const val KRAKOW_MIN_LATITUDE = 49.80
+        const val KRAKOW_MIN_LONGITUDE = 19.55
+        const val KRAKOW_MAX_LATITUDE = 50.28
+        const val KRAKOW_MAX_LONGITUDE = 20.35
     }
 }

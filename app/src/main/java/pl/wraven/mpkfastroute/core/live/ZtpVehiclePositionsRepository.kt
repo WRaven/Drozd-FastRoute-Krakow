@@ -12,6 +12,9 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import javax.inject.Inject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import pl.wraven.mpkfastroute.core.database.AppDatabase
 
 enum class TransitVehicleMode(
@@ -57,23 +60,39 @@ class ZtpVehiclePositionsRepository @Inject constructor(
         val unavailableModes = linkedSetOf<TransitVehicleMode>()
         val failures = mutableListOf<IOException>()
 
-        TransitVehicleMode.entries.forEach { mode ->
-            try {
-                vehicles += fetchPositions(mode, routeShortNames)
-            } catch (exception: HttpRequestTimeoutException) {
-                unavailableModes += mode
-                failures += IOException(
-                    "Przekroczono czas oczekiwania na pozycje ${mode.pluralLabel} z ZTP.",
-                    exception
-                )
-            } catch (exception: IOException) {
-                unavailableModes += mode
-                failures += IOException(
-                    "Nie udało się pobrać pozycji ${mode.pluralLabel} z ZTP: " +
-                        exception.message.orEmpty(),
-                    exception
-                )
-            }
+        val modeResults = coroutineScope {
+            TransitVehicleMode.entries.map { mode ->
+                async {
+                    mode to try {
+                        Result.success(fetchPositions(mode, routeShortNames))
+                    } catch (exception: HttpRequestTimeoutException) {
+                        Result.failure(
+                            IOException(
+                                "Przekroczono czas oczekiwania na pozycje ${mode.pluralLabel} z ZTP.",
+                                exception
+                            )
+                        )
+                    } catch (exception: IOException) {
+                        Result.failure(
+                            IOException(
+                                "Nie udało się pobrać pozycji ${mode.pluralLabel} z ZTP: " +
+                                    exception.message.orEmpty(),
+                                exception
+                            )
+                        )
+                    }
+                }
+            }.awaitAll()
+        }
+
+        modeResults.forEach { (mode, result) ->
+            result.fold(
+                onSuccess = { vehicles += it },
+                onFailure = { failure ->
+                    unavailableModes += mode
+                    failures += (failure as? IOException ?: IOException(failure))
+                }
+            )
         }
 
         if (unavailableModes.size == TransitVehicleMode.entries.size) {
@@ -89,8 +108,9 @@ class ZtpVehiclePositionsRepository @Inject constructor(
         val routeShortNamesByTripId = if (tripIdsWithoutRouteName.isEmpty()) {
             emptyMap()
         } else {
-            database.tripDao()
-                .getRouteShortNamesByTripIds(tripIdsWithoutRouteName)
+            tripIdsWithoutRouteName
+                .chunked(SQL_IN_CLAUSE_BATCH_SIZE)
+                .flatMap { chunk -> database.tripDao().getRouteShortNamesByTripIds(chunk) }
                 .associate { it.tripId to it.routeShortName }
         }
 
@@ -143,6 +163,7 @@ class ZtpVehiclePositionsRepository @Inject constructor(
 
     companion object {
         const val VEHICLE_POSITIONS_URL = "https://gtfs.ztp.krakow.pl/VehiclePositions_"
+        private const val SQL_IN_CLAUSE_BATCH_SIZE = 500
     }
 }
 
@@ -194,12 +215,12 @@ internal fun mapVehiclePositions(
             serviceDate = trip?.startDate?.takeIf { trip.hasStartDate() && it.isNotBlank() }?.let {
                 try {
                     LocalDate.parse(it, DateTimeFormatter.BASIC_ISO_DATE)
-                } catch (exception: DateTimeParseException) {
-                    throw IOException("ZTP przekazał nieprawidłową datę kursu pojazdu.", exception)
+                } catch (_: DateTimeParseException) {
+                    null
                 }
             }
         )
-    }
+    }.distinctBy(LiveVehiclePosition::id)
 }
 
 internal fun resolveMissingVehicleRouteShortNames(

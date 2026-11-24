@@ -44,13 +44,14 @@ class ZtpServiceNewsClient @Inject constructor(
 
     companion object {
         const val FEED_URL = "https://ztp.krakow.pl/feed?post_type=komunikat"
-        private const val USER_AGENT = "Drozd-FastRoute/0.1.0 (Android)"
+        private val USER_AGENT = "Drozd-FastRoute/${pl.wraven.mpkfastroute.BuildConfig.VERSION_NAME} (Android)"
     }
 }
 
 internal object ZtpServiceNewsParser {
     fun parse(xml: String): List<ZtpServiceNewsItem> {
-        if (xml.contains("<!DOCTYPE", ignoreCase = true)) {
+        val sanitizedXml = xml.removePrefix("\uFEFF")
+        if (sanitizedXml.contains("<!DOCTYPE", ignoreCase = true)) {
             throw IOException("ZTP RSS document types are not supported.")
         }
         val builder = try {
@@ -64,7 +65,7 @@ internal object ZtpServiceNewsParser {
             throw SAXException("External RSS entities are disabled.")
         }
         val document = try {
-            builder.parse(InputSource(StringReader(xml)))
+            builder.parse(InputSource(StringReader(sanitizedXml)))
         } catch (exception: SAXException) {
             throw IOException("ZTP returned invalid RSS data.", exception)
         }

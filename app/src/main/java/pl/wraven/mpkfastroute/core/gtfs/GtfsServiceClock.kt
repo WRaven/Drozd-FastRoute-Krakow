@@ -44,7 +44,11 @@ object GtfsServiceClock {
             "Arrival deadline must not be before the search start."
         }
 
-        val windowEnd = startDateTime.plusSeconds(durationSeconds.toLong())
+        val rawWindowEnd = startDateTime.plusSeconds(durationSeconds.toLong())
+        val windowEnd = arrivalDeadline?.let { minOf(rawWindowEnd, it) } ?: rawWindowEnd
+        if (!startDateTime.isBefore(windowEnd)) {
+            return emptyList()
+        }
         val baseServiceDate = from(startDateTime).serviceDate
         val targetServiceTime = arrivalDeadline?.let(::from)
         val windows = mutableListOf<GtfsServiceTimeWindow>()

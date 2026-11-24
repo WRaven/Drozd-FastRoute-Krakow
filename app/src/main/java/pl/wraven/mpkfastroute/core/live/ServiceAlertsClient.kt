@@ -3,11 +3,13 @@ package pl.wraven.mpkfastroute.core.live
 import com.google.transit.realtime.GtfsRealtime
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
-import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.get
 import io.ktor.http.isSuccess
 import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 data class RouteServiceAlert(
     val id: String,
@@ -59,37 +61,50 @@ class ServiceAlertsClient @Inject constructor(
         nowEpochSeconds: Long,
         shouldInclude: (RouteServiceAlert) -> Boolean
     ): ServiceAlertsResult {
-        val matchingAlerts = mutableListOf<RouteServiceAlert>()
-        val unavailableFeeds = mutableListOf<String>()
-
-        for ((feedName, url) in FEED_URLS) {
-            try {
-                val response = httpClient.get(url)
-                if (!response.status.isSuccess()) {
-                    unavailableFeeds += feedName
-                    continue
-                }
-                val feed = GtfsRealtime.FeedMessage.parseFrom(response.body<ByteArray>())
-                feed.entityList.forEach { entity ->
-                    if (!entity.hasAlert()) return@forEach
-                    val alert = entity.alert
-                    if (!isActive(alert.activePeriodList, nowEpochSeconds)) return@forEach
-                    val routeServiceAlert = alert.toRouteServiceAlert(
-                        id = "$feedName:${entity.id}"
-                    )
-                    if (shouldInclude(routeServiceAlert)) {
-                        matchingAlerts += routeServiceAlert
+        val feedResults = coroutineScope {
+            FEED_URLS.map { (feedName, url) ->
+                async {
+                    try {
+                        val response = httpClient.get(url)
+                        if (!response.status.isSuccess()) {
+                            return@async feedName to null
+                        }
+                        val feed = GtfsRealtime.FeedMessage.parseFrom(response.body<ByteArray>())
+                        val alerts = buildList {
+                            feed.entityList.forEach { entity ->
+                                if (!entity.hasAlert()) return@forEach
+                                val alert = entity.alert
+                                if (!isActive(alert.activePeriodList, nowEpochSeconds)) return@forEach
+                                val routeServiceAlert = alert.toRouteServiceAlert(
+                                    id = "$feedName:${entity.id}"
+                                )
+                                if (shouldInclude(routeServiceAlert)) {
+                                    add(routeServiceAlert)
+                                }
+                            }
+                        }
+                        feedName to alerts
+                    } catch (_: IOException) {
+                        feedName to null
                     }
                 }
-            } catch (_: IOException) {
+            }.awaitAll()
+        }
+
+        val matchingAlerts = mutableListOf<RouteServiceAlert>()
+        val unavailableFeeds = mutableListOf<String>()
+        feedResults.forEach { (feedName, alerts) ->
+            if (alerts == null) {
                 unavailableFeeds += feedName
-            } catch (_: HttpRequestTimeoutException) {
-                unavailableFeeds += feedName
+            } else {
+                matchingAlerts += alerts
             }
         }
 
         return ServiceAlertsResult(
-            alerts = matchingAlerts.distinctBy(RouteServiceAlert::id),
+            alerts = matchingAlerts.distinctBy { alert ->
+                Triple(alert.title, alert.description, alert.routeIds to alert.stopIds)
+            },
             unavailableFeeds = unavailableFeeds
         )
     }
@@ -104,25 +119,34 @@ class ServiceAlertsClient @Inject constructor(
 
     private fun GtfsRealtime.Alert.toRouteServiceAlert(id: String): RouteServiceAlert {
         val informedEntities = informedEntityList
+        val routeIds = mutableSetOf<String>()
+        val stopIds = mutableSetOf<String>()
+        informedEntities.forEach { selector ->
+            if (selector.hasRouteId() && selector.routeId.isNotBlank()) {
+                routeIds += selector.routeId.trim()
+            }
+            if (selector.hasTrip() && selector.trip.hasRouteId() && selector.trip.routeId.isNotBlank()) {
+                routeIds += selector.trip.routeId.trim()
+            }
+            if (selector.hasStopId() && selector.stopId.isNotBlank()) {
+                stopIds += selector.stopId.trim()
+            }
+        }
         return RouteServiceAlert(
             id = id,
             title = headerText.bestTranslation().ifBlank { id },
             description = descriptionText.bestTranslation().takeIf(String::isNotBlank),
-            routeIds = informedEntities.mapNotNullTo(mutableSetOf()) { selector ->
-                selector.routeId.takeIf { selector.hasRouteId() }
-            },
-            stopIds = informedEntities.mapNotNullTo(mutableSetOf()) { selector ->
-                selector.stopId.takeIf { selector.hasStopId() }
-            }
+            routeIds = routeIds,
+            stopIds = stopIds
         )
     }
 
     private fun GtfsRealtime.TranslatedString.bestTranslation(): String =
-        translationList.firstOrNull {
+        (translationList.firstOrNull {
             it.language.startsWith(POLISH_LANGUAGE_CODE, ignoreCase = true) &&
                 it.text.isNotBlank()
-        }?.text
-            ?: translationList.firstOrNull { it.text.isNotBlank() }?.text
+        }?.text ?: translationList.firstOrNull { it.text.isNotBlank() }?.text)
+            ?.trim()
             .orEmpty()
 
     private companion object {

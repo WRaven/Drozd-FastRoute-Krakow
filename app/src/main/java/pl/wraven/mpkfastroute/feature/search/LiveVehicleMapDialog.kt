@@ -1,7 +1,6 @@
 package pl.wraven.mpkfastroute.feature.search
 
 import android.content.Context
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color as AndroidColor
 import android.graphics.Paint
@@ -47,18 +46,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.drawable.toDrawable
+import androidx.core.graphics.withRotation
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import java.io.File
 import java.time.Instant
+import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
@@ -70,9 +74,11 @@ import org.osmdroid.events.ZoomEvent
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.util.BoundingBox
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
+import org.osmdroid.views.overlay.infowindow.InfoWindow
 import pl.wraven.mpkfastroute.core.database.StopEntity
 import pl.wraven.mpkfastroute.core.live.LiveTripUpdate
 import pl.wraven.mpkfastroute.core.live.LiveVehiclePosition
@@ -84,6 +90,7 @@ import pl.wraven.mpkfastroute.core.live.StopTimetable
 import pl.wraven.mpkfastroute.core.live.TimetableDayType
 import pl.wraven.mpkfastroute.core.live.VehicleStopTiming
 import pl.wraven.mpkfastroute.core.live.minutesUntil
+import pl.wraven.mpkfastroute.core.live.timetableDayType
 import pl.wraven.mpkfastroute.core.live.timetableHours
 import pl.wraven.mpkfastroute.core.live.upcomingVehicleStopIndex
 import pl.wraven.mpkfastroute.core.live.vehicleStopTimings
@@ -240,6 +247,7 @@ internal fun LiveVehicleMapDialog(
                     onSelectVehicle = onSelectVehicle,
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(min = 180.dp)
                         .weight(1f)
                 )
 
@@ -292,6 +300,20 @@ internal fun LiveVehicleMapDialog(
     }
 }
 
+private class MapCameraTracker {
+    var centeredOnUserLocation: GeoPlace? = null
+    var fittedTripId: String? = null
+    var previousSelectedVehicleId: String? = null
+    var lastUnselectedStopSizePx: Int = -1
+}
+
+private data class VehicleIconKey(
+    val mode: TransitVehicleMode,
+    val label: String,
+    val quantizedBearing: Int?,
+    val selected: Boolean
+)
+
 @Composable
 private fun LiveVehicleMap(
     snapshot: LiveVehicleSnapshot?,
@@ -305,12 +327,36 @@ private fun LiveVehicleMap(
     modifier: Modifier
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current.density
     val mapView = remember(context) { createMapView(context) }
     val stopMarkers = remember(mapView) { mutableListOf<Pair<Marker, Boolean>>() }
-    var centeredOnUserLocation by remember(mapView) { mutableStateOf<GeoPlace?>(null) }
-    var fittedTripId by remember(mapView) { mutableStateOf<String?>(null) }
-    var previousSelectedVehicleId by remember(mapView) { mutableStateOf<String?>(null) }
+    val cameraTracker = remember(mapView) { MapCameraTracker() }
+    val vehicleIconCache = remember(mapView) { HashMap<VehicleIconKey, BitmapDrawable>() }
+    val stopIconCache = remember(mapView) { HashMap<Pair<Boolean, Int>, GradientDrawable>() }
+    val userLocationIcon = remember(mapView, density) { createUserLocationMarkerIcon(density) }
+    val latestOnSelectStop by rememberUpdatedState(onSelectStop)
+    val latestOnSelectVehicle by rememberUpdatedState(onSelectVehicle)
     val mapShape = RoundedCornerShape(16.dp)
+
+    fun getStopIcon(selected: Boolean, zoomLevel: Double): GradientDrawable {
+        val sizeDp = stopMarkerSizeDp(zoomLevel, selected)
+        val sizePixels = (sizeDp * density).roundToInt().coerceAtLeast(1)
+        return stopIconCache.getOrPut(selected to sizePixels) {
+            createStopMarkerIcon(density, selected, sizeDp, sizePixels)
+        }
+    }
+
+    fun getVehicleIcon(vehicle: LiveVehiclePosition, selected: Boolean): BitmapDrawable {
+        val label = vehicle.routeShortName?.takeIf(String::isNotBlank) ?: "?"
+        val quantizedBearing = vehicle.bearing?.let { ((it / 5f).roundToInt() * 5).mod(360) }
+        val key = VehicleIconKey(vehicle.mode, label, quantizedBearing, selected)
+        if (vehicleIconCache.size > MAX_VEHICLE_ICON_CACHE_SIZE) {
+            vehicleIconCache.clear()
+        }
+        return vehicleIconCache.getOrPut(key) {
+            createVehicleMarkerIcon(context, density, vehicle.mode, label, quantizedBearing?.toFloat(), selected)
+        }
+    }
 
     AndroidView(
         factory = { mapView },
@@ -318,13 +364,14 @@ private fun LiveVehicleMap(
             .clip(mapShape)
             .background(MaterialTheme.colorScheme.surfaceVariant, mapShape),
         update = { view ->
+            InfoWindow.closeAllInfoWindowsOn(view)
             view.overlays.clear()
             stopMarkers.clear()
             val vehicles = snapshot?.vehicles.orEmpty()
             val routePoints = selectedVehicleTrip?.let(::tripRoutePoints).orEmpty()
-            if (selectedVehicle?.id != previousSelectedVehicleId) {
-                previousSelectedVehicleId = selectedVehicle?.id
-                fittedTripId = null
+            if (selectedVehicle?.id != cameraTracker.previousSelectedVehicleId) {
+                cameraTracker.previousSelectedVehicleId = selectedVehicle?.id
+                cameraTracker.fittedTripId = null
                 if (selectedVehicle != null && selectedVehicleTrip == null) {
                     view.controller.setCenter(
                         GeoPoint(selectedVehicle.latitude, selectedVehicle.longitude)
@@ -333,44 +380,57 @@ private fun LiveVehicleMap(
                 }
             }
             if (selectedVehicleTrip == null) {
-                fittedTripId = null
-            } else if (fittedTripId != selectedVehicleTrip.tripId) {
+                cameraTracker.fittedTripId = null
+            } else if (cameraTracker.fittedTripId != selectedVehicleTrip.tripId) {
                 if (routePoints.size >= 2) {
-                    val padding = (ROUTE_MAP_PADDING_DP * context.resources.displayMetrics.density)
-                        .toInt()
-                    view.zoomToBoundingBox(
-                        BoundingBox.fromGeoPoints(routePoints),
-                        true,
-                        padding
-                    )
+                    val box = BoundingBox.fromGeoPoints(routePoints)
+                    if (box.latNorth > box.latSouth || box.lonEast != box.lonWest) {
+                        val padding = (ROUTE_MAP_PADDING_DP * density).toInt()
+                        if (view.isLaidOut && view.width > 0 && view.height > 0) {
+                            view.zoomToBoundingBox(box, true, padding)
+                        } else {
+                            view.post {
+                                if (view.width > 0 && view.height > 0) {
+                                    view.zoomToBoundingBox(box, true, padding)
+                                }
+                            }
+                        }
+                    } else {
+                        view.controller.setCenter(routePoints.first())
+                        view.controller.setZoom(SELECTED_VEHICLE_MAP_ZOOM)
+                    }
                 } else {
                     selectedVehicle?.let {
                         view.controller.setCenter(GeoPoint(it.latitude, it.longitude))
                         view.controller.setZoom(SELECTED_VEHICLE_MAP_ZOOM)
                     }
                 }
-                fittedTripId = selectedVehicleTrip.tripId
+                cameraTracker.fittedTripId = selectedVehicleTrip.tripId
             }
             if (selectedVehicle != null && routePoints.size >= 2) {
                 view.overlays.add(
                     Polyline(view).apply {
                         setPoints(routePoints)
-                        setColor(markerColor(selectedVehicle.mode))
-                        setWidth(ROUTE_LINE_WIDTH_DP * context.resources.displayMetrics.density)
+                        outlinePaint.color = markerColor(selectedVehicle.mode)
+                        outlinePaint.strokeWidth = ROUTE_LINE_WIDTH_DP * density
                     }
                 )
             }
+            val currentZoom = view.zoomLevelDouble
+            val unselectedStopIcon = getStopIcon(selected = false, zoomLevel = currentZoom)
+            val selectedStopIcon = getStopIcon(selected = true, zoomLevel = currentZoom)
+            cameraTracker.lastUnselectedStopSizePx = unselectedStopIcon.intrinsicWidth
             stops.forEach { stop ->
                 val isSelected = stop.stopId == selectedStop?.stopId
                 val marker = Marker(view).apply {
                     position = GeoPoint(stop.stopLat, stop.stopLon)
                     title = stop.stopName
                     snippet = "Dotknij, aby wybrać linię i rozkład godzinowy"
-                    icon = createStopMarkerIcon(context, isSelected, view.zoomLevelDouble)
+                    icon = if (isSelected) selectedStopIcon else unselectedStopIcon
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     setOnMarkerClickListener { clickedMarker, _ ->
                         clickedMarker.showInfoWindow()
-                        onSelectStop(stop)
+                        latestOnSelectStop(stop)
                         true
                     }
                 }
@@ -378,6 +438,7 @@ private fun LiveVehicleMap(
                 view.overlays.add(marker)
             }
             vehicles.forEach { vehicle ->
+                val isSelected = vehicle.id == selectedVehicle?.id
                 val marker = Marker(view).apply {
                     position = GeoPoint(vehicle.latitude, vehicle.longitude)
                     title = vehicle.routeShortName?.let { "${vehicle.mode.label} $it" }
@@ -386,12 +447,11 @@ private fun LiveVehicleMap(
                         vehicle.vehicleLabel?.let { "Pojazd $it" },
                         "Dotknij, aby zobaczyć trasę i rozkład"
                     ).joinToString(" · ")
-                    val isSelected = vehicle.id == selectedVehicle?.id
-                    icon = createVehicleMarkerIcon(context, vehicle, isSelected)
+                    icon = getVehicleIcon(vehicle, isSelected)
                     setAnchor(vehicleMarkerAnchorX(isSelected), Marker.ANCHOR_CENTER)
                     setOnMarkerClickListener { clickedMarker, _ ->
                         clickedMarker.showInfoWindow()
-                        onSelectVehicle(vehicle)
+                        latestOnSelectVehicle(vehicle)
                         true
                     }
                 }
@@ -402,19 +462,18 @@ private fun LiveVehicleMap(
                     Marker(view).apply {
                         position = GeoPoint(location.latitude, location.longitude)
                         title = location.label
-                        icon = createUserLocationMarkerIcon(context)
+                        icon = userLocationIcon
                         setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     }
                 )
             }
             if (userLocation == null) {
-                centeredOnUserLocation = null
-            } else if (userLocation != centeredOnUserLocation) {
+                cameraTracker.centeredOnUserLocation = null
+            } else if (userLocation != cameraTracker.centeredOnUserLocation) {
                 view.controller.setCenter(GeoPoint(userLocation.latitude, userLocation.longitude))
                 view.controller.setZoom(USER_LOCATION_MAP_ZOOM)
-                centeredOnUserLocation = userLocation
+                cameraTracker.centeredOnUserLocation = userLocation
             }
-            updateStopMarkerIcons(context, stopMarkers, view.zoomLevelDouble)
             view.invalidate()
         }
     )
@@ -425,8 +484,16 @@ private fun LiveVehicleMap(
             override fun onScroll(event: ScrollEvent): Boolean = false
 
             override fun onZoom(event: ZoomEvent): Boolean {
-                updateStopMarkerIcons(context, stopMarkers, event.zoomLevel)
-                mapView.invalidate()
+                val icon = getStopIcon(selected = false, zoomLevel = event.zoomLevel)
+                if (icon.intrinsicWidth != cameraTracker.lastUnselectedStopSizePx) {
+                    cameraTracker.lastUnselectedStopSizePx = icon.intrinsicWidth
+                    stopMarkers.forEach { (marker, selected) ->
+                        if (!selected) {
+                            marker.icon = icon
+                        }
+                    }
+                    mapView.invalidate()
+                }
                 return false
             }
         }
@@ -439,10 +506,11 @@ private fun LiveVehicleMap(
         }
         mapView.addMapListener(mapListener)
         lifecycleOwner.lifecycle.addObserver(observer)
-        mapView.onResume()
         onDispose {
             mapView.removeMapListener(mapListener)
             stopMarkers.clear()
+            vehicleIconCache.clear()
+            stopIconCache.clear()
             lifecycleOwner.lifecycle.removeObserver(observer)
             mapView.onPause()
             mapView.onDetach()
@@ -474,7 +542,9 @@ private fun SelectedStopTimetable(
     onClear: () -> Unit
 ) {
     var selectedLine by remember(stop.stopId) { mutableStateOf(timetable?.lines?.firstOrNull()) }
-    var dayType by remember(stop.stopId) { mutableStateOf(TimetableDayType.WORKDAY) }
+    var dayType by remember(stop.stopId) {
+        mutableStateOf(timetableDayType(LocalDateTime.now(KRAKOW_ZONE).toLocalDate()))
+    }
     val line = selectedLine?.takeIf { it in timetable?.lines.orEmpty() }
         ?: timetable?.lines?.firstOrNull()
     val day = timetable?.days?.get(dayType)
@@ -553,7 +623,7 @@ private fun SelectedStopTimetable(
                     }
                     day?.date?.let {
                         Text(
-                            "Wzorzec dla ${it.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))} · ROZKŁAD",
+                            "Wzorzec dla ${it.format(SERVICE_DATE_FORMATTER)} · ROZKŁAD",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -660,11 +730,14 @@ private fun SelectedVehicleTripPanel(
                 )
             }
             schedule?.let { trip ->
+                val lifecycleOwner = LocalLifecycleOwner.current
                 var now by remember(trip.tripId) { mutableStateOf(Instant.now()) }
-                LaunchedEffect(trip.tripId) {
-                    while (isActive) {
-                        now = Instant.now()
-                        delay(1_000L)
+                LaunchedEffect(trip.tripId, lifecycleOwner) {
+                    lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                        while (isActive) {
+                            now = Instant.now()
+                            delay(TRIP_CLOCK_REFRESH_INTERVAL_MILLIS)
+                        }
                     }
                 }
                 val currentUpdate = liveUpdate?.takeIf {
@@ -679,7 +752,7 @@ private fun SelectedVehicleTripPanel(
                     listState.scrollToItem(upcomingVehicleStopIndex(vehicle, trip))
                 }
                 Text("${trip.stops.size} przystanków · cały kurs · " +
-                    trip.serviceDate.format(DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                    trip.serviceDate.format(SERVICE_DATE_FORMATTER),
                     style = MaterialTheme.typography.labelSmall)
                 if (trip.shapePoints.size < 2) {
                     Text(
@@ -717,7 +790,7 @@ private fun SelectedVehicleTripPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                if (liveUpdate != null && liveUpdateError != null) {
+                if (currentUpdate != null && liveUpdateError != null) {
                     Text(
                         liveUpdateError,
                         style = MaterialTheme.typography.bodySmall,
@@ -751,7 +824,7 @@ private fun VehicleTripStopRow(
     val timeLabel = if (timing.predictedArrival == null) {
         formatGtfsTime(timing.scheduledStop.arrivalTime)
     } else {
-        target.atZone(KRAKOW_ZONE).format(DateTimeFormatter.ofPattern("HH:mm"))
+        target.atZone(KRAKOW_ZONE).format(STOP_TIME_FORMATTER)
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
@@ -811,7 +884,7 @@ private fun createMapView(context: Context): MapView {
     return MapView(context).apply {
         setTileSource(TileSourceFactory.MAPNIK)
         setMultiTouchControls(true)
-        setBuiltInZoomControls(true)
+        zoomController.setVisibility(CustomZoomButtonsController.Visibility.SHOW_AND_FADEOUT)
         controller.setZoom(DEFAULT_MAP_ZOOM)
         controller.setCenter(GeoPoint(KRAKOW_LATITUDE, KRAKOW_LONGITUDE))
     }
@@ -819,16 +892,18 @@ private fun createMapView(context: Context): MapView {
 
 private fun createVehicleMarkerIcon(
     context: Context,
-    vehicle: LiveVehiclePosition,
+    density: Float,
+    mode: TransitVehicleMode,
+    label: String,
+    bearing: Float?,
     selected: Boolean
 ): BitmapDrawable {
-    val density = context.resources.displayMetrics.density
     val markerSize = vehicleMarkerCircleSizeDp(selected) * density
     val arrowSize = VEHICLE_MARKER_ARROW_SIZE_DP * density
     val gap = VEHICLE_MARKER_ARROW_GAP_DP * density
     val width = (markerSize + arrowSize + gap).roundToInt().coerceAtLeast(1)
     val height = markerSize.roundToInt().coerceAtLeast(1)
-    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val bitmap = createBitmap(width, height)
     val canvas = Canvas(bitmap)
     val markerCenterX = markerSize / 2
     val centerY = height / 2f
@@ -840,7 +915,7 @@ private fun createVehicleMarkerIcon(
         centerY,
         markerRadius - markerStrokeWidth / 2,
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = markerColor(vehicle.mode)
+            color = markerColor(mode)
             style = Paint.Style.FILL
         }
     )
@@ -855,7 +930,6 @@ private fun createVehicleMarkerIcon(
         }
     )
 
-    val label = vehicle.routeShortName?.takeIf(String::isNotBlank) ?: "?"
     val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = AndroidColor.WHITE
         textAlign = Paint.Align.CENTER
@@ -892,7 +966,6 @@ private fun createVehicleMarkerIcon(
         }
     )
 
-    val bearing = vehicle.bearing
     if (bearing == null) {
         val unknownDirectionPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = DIRECTION_MARKER_STROKE_COLOR
@@ -914,19 +987,18 @@ private fun createVehicleMarkerIcon(
             lineTo(arrowCenterX - arrowRadius * 0.5f, centerY - arrowRadius * 0.05f)
             close()
         }
-        canvas.save()
-        canvas.rotate(bearing, arrowCenterX, centerY)
-        canvas.drawPath(
-            arrowPath,
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = DIRECTION_MARKER_STROKE_COLOR
-                style = Paint.Style.FILL
-            }
-        )
-        canvas.restore()
+        canvas.withRotation(bearing, arrowCenterX, centerY) {
+            drawPath(
+                arrowPath,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = DIRECTION_MARKER_STROKE_COLOR
+                    style = Paint.Style.FILL
+                }
+            )
+        }
     }
 
-    return BitmapDrawable(context.resources, bitmap)
+    return bitmap.toDrawable(context.resources)
 }
 
 private fun vehicleMarkerAnchorX(selected: Boolean): Float {
@@ -952,29 +1024,12 @@ internal fun stopMarkerSizeDp(zoomLevel: Double, selected: Boolean): Float {
         (STOP_MARKER_FULL_SIZE_DP - STOP_MARKER_SMALL_SIZE_DP) * progress
 }
 
-private fun updateStopMarkerIcons(
-    context: Context,
-    markers: List<Pair<Marker, Boolean>>,
-    zoomLevel: Double
-) {
-    val density = context.resources.displayMetrics.density
-    markers.forEach { (marker, selected) ->
-        val sizePixels = (stopMarkerSizeDp(zoomLevel, selected) * density)
-            .roundToInt().coerceAtLeast(1)
-        if (marker.icon.intrinsicWidth != sizePixels) {
-            marker.icon = createStopMarkerIcon(context, selected, zoomLevel)
-        }
-    }
-}
-
 private fun createStopMarkerIcon(
-    context: Context,
+    density: Float,
     selected: Boolean,
-    zoomLevel: Double
+    sizeDp: Float,
+    sizePixels: Int
 ): GradientDrawable {
-    val density = context.resources.displayMetrics.density
-    val sizeDp = stopMarkerSizeDp(zoomLevel, selected)
-    val sizePixels = (sizeDp * density).roundToInt().coerceAtLeast(1)
     val strokeScale = (sizeDp / STOP_MARKER_FULL_SIZE_DP).coerceAtMost(1f)
     return GradientDrawable().apply {
         shape = GradientDrawable.OVAL
@@ -984,8 +1039,7 @@ private fun createStopMarkerIcon(
     }
 }
 
-private fun createUserLocationMarkerIcon(context: Context): GradientDrawable {
-    val density = context.resources.displayMetrics.density
+private fun createUserLocationMarkerIcon(density: Float): GradientDrawable {
     return GradientDrawable().apply {
         shape = GradientDrawable.OVAL
         setColor(USER_LOCATION_MARKER_COLOR)
@@ -1003,6 +1057,8 @@ private fun hasValidCoordinates(stop: StopEntity): Boolean =
         (stop.stopLat != 0.0 || stop.stopLon != 0.0)
 
 private const val VEHICLE_REFRESH_INTERVAL_MILLIS = 30_000L
+private const val TRIP_CLOCK_REFRESH_INTERVAL_MILLIS = 5_000L
+private const val MAX_VEHICLE_ICON_CACHE_SIZE = 512
 private const val MAX_TRIP_STOPS_PANEL_HEIGHT_DP = 240
 private const val DEFAULT_MAP_ZOOM = 12.0
 private const val USER_LOCATION_MAP_ZOOM = 14.5
@@ -1030,3 +1086,5 @@ private const val SELECTED_MARKER_COLOR = 0xFFFFA000.toInt()
 private const val USER_LOCATION_MARKER_COLOR = 0xFF1565C0.toInt()
 private const val DIRECTION_MARKER_STROKE_COLOR = 0xFF263238.toInt()
 private val UPDATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss")
+private val STOP_TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm")
+private val SERVICE_DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy")

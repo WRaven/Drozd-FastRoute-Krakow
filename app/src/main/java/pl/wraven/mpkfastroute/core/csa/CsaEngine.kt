@@ -1,6 +1,5 @@
 package pl.wraven.mpkfastroute.core.csa
 
-import java.util.ArrayDeque
 import javax.inject.Inject
 
 data class CsaJourney(
@@ -104,15 +103,21 @@ class CsaEngine @Inject constructor() {
         require(connections.all { it.departureTime >= 0 && it.arrivalTime >= it.departureTime }) {
             "Connections must have non-negative, ordered times."
         }
-        require(footpaths.all { it.durationSeconds >= 0 }) {
-            "Footpath durations must not be negative."
+        require(footpaths.all {
+            it.durationSeconds >= 0 && it.distanceMeters.isFinite() && it.distanceMeters >= 0.0
+        }) {
+            "Footpath durations and distances must be finite and non-negative."
         }
 
         val uniqueOrigins = bestAccessByStop(originAccesses)
         val uniqueDestinations = bestAccessByStop(destinationAccesses)
+        val minOriginReadyTime = uniqueOrigins.minOf {
+            Math.addExact(startTime, it.walkingDurationSeconds)
+        }
 
         val labelsByStop = mutableMapOf<String, MutableMap<String?, MutableList<JourneyState>>>()
         val footpathsByStop = footpaths.groupBy(Footpath::fromStopId)
+        val preferLatestDeparture = arrivalDeadline != null
         var scannedConnections = 0
         var propagatedStates = 0
 
@@ -130,69 +135,74 @@ class CsaEngine @Inject constructor() {
         fun addLabel(candidate: JourneyState): Boolean {
             val labelsByTrip = labelsByStop.getOrPut(candidate.stopId) { mutableMapOf() }
             val labels = labelsByTrip.getOrPut(candidate.lastTripId) { mutableListOf() }
-            if (labels.any { it.dominates(candidate, arrivalDeadline != null) }) {
-                return false
+            for (existing in labels) {
+                if (existing.dominates(candidate, preferLatestDeparture)) {
+                    return false
+                }
             }
-            labels.removeAll { candidate.dominates(it, arrivalDeadline != null) }
+            var writeIndex = 0
+            for (index in labels.indices) {
+                val existing = labels[index]
+                if (!candidate.dominates(existing, preferLatestDeparture)) {
+                    labels[writeIndex++] = existing
+                }
+            }
+            while (labels.size > writeIndex) {
+                labels.removeAt(labels.lastIndex)
+            }
             labels += candidate
             return true
         }
 
         fun propagateFootpaths(initial: JourneyState) {
-            val pending = ArrayDeque<JourneyState>()
-            if (addLabel(initial)) {
-                pending.addLast(initial)
+            if (!addLabel(initial)) {
+                return
+            }
+            propagatedStates += 1
+            if (propagatedStates % FOOTPATH_PROGRESS_INTERVAL == 0) {
+                reportProgress()
+            }
+            // Direct links already cover transfers up to 500 m; chaining them is unbounded.
+            if (initial.hasWalkedSinceTransit) {
+                return
             }
 
-            while (pending.isNotEmpty()) {
-                val current = pending.removeFirst()
-                propagatedStates += 1
-                if (propagatedStates % FOOTPATH_PROGRESS_INTERVAL == 0) {
-                    reportProgress()
-                }
-                if (labelsByStop[current.stopId]?.get(current.lastTripId)?.contains(current) != true) {
-                    continue
-                }
-
-                // Direct links already cover transfers up to 500 m; chaining them is unbounded.
-                if (current.hasWalkedSinceTransit) {
-                    continue
-                }
-
-                for (footpath in footpathsByStop[current.stopId].orEmpty()) {
-                    val arrivalTime = Math.addExact(current.arrivalTime, footpath.durationSeconds)
-                    val startingTransferWalk = current.lastTripId != null &&
-                        !current.hasWalkedSinceTransit
-                    val readyTime = Math.addExact(
-                        Math.addExact(current.readyTime, footpath.durationSeconds),
-                        if (startingTransferWalk) TRANSFER_PENALTY_SECONDS else 0
-                    )
-                    val walked = JourneyState(
-                        stopId = footpath.toStopId,
-                        arrivalTime = arrivalTime,
-                        readyTime = readyTime,
-                        transferCount = current.transferCount,
-                        lastTripId = current.lastTripId,
-                        hasWalkedSinceTransit = true,
-                        originAccess = current.originAccess,
-                        walkedDistanceMeters = current.walkedDistanceMeters +
-                            footpath.distanceMeters,
-                        transferWalkingDistanceMeters = current.transferWalkingDistanceMeters +
-                            footpath.distanceMeters,
-                        originDepartureTime = current.originDepartureTime,
-                        initialFootpathDurationSeconds = if (current.originDepartureTime == null) {
-                            Math.addExact(
-                                current.initialFootpathDurationSeconds,
-                                footpath.durationSeconds
-                            )
-                        } else {
-                            current.initialFootpathDurationSeconds
-                        },
-                        previous = current,
-                        step = JourneyStep.Walk(footpath)
-                    )
-                    if (addLabel(walked)) {
-                        pending.addLast(walked)
+            val outgoingFootpaths = footpathsByStop[initial.stopId] ?: return
+            val startingTransferWalk = initial.lastTripId != null
+            for (footpath in outgoingFootpaths) {
+                val arrivalTime = Math.addExact(initial.arrivalTime, footpath.durationSeconds)
+                val readyTime = Math.addExact(
+                    Math.addExact(initial.readyTime, footpath.durationSeconds),
+                    if (startingTransferWalk) TRANSFER_PENALTY_SECONDS else 0
+                )
+                val walked = JourneyState(
+                    stopId = footpath.toStopId,
+                    arrivalTime = arrivalTime,
+                    readyTime = readyTime,
+                    transferCount = initial.transferCount,
+                    lastTripId = initial.lastTripId,
+                    hasWalkedSinceTransit = true,
+                    originAccess = initial.originAccess,
+                    walkedDistanceMeters = initial.walkedDistanceMeters +
+                        footpath.distanceMeters,
+                    transferWalkingDistanceMeters = initial.transferWalkingDistanceMeters +
+                        footpath.distanceMeters,
+                    originDepartureTime = initial.originDepartureTime,
+                    initialFootpathDurationSeconds = if (initial.originDepartureTime == null) {
+                        Math.addExact(
+                            initial.initialFootpathDurationSeconds,
+                            footpath.durationSeconds
+                        )
+                    } else {
+                        initial.initialFootpathDurationSeconds
+                    },
+                    previous = initial,
+                    step = JourneyStep.Walk(footpath)
+                )
+                if (addLabel(walked)) {
+                    propagatedStates += 1
+                    if (propagatedStates % FOOTPATH_PROGRESS_INTERVAL == 0) {
+                        reportProgress()
                     }
                 }
             }
@@ -228,17 +238,26 @@ class CsaEngine @Inject constructor() {
                     .thenBy { it.tripId }
             )
         }
+        val sourceBuffer = ArrayList<JourneyState>()
         for (connection in sortedConnections) {
+            if (arrivalDeadline != null && connection.departureTime > arrivalDeadline) {
+                break
+            }
             scannedConnections += 1
             if (scannedConnections % CONNECTION_PROGRESS_INTERVAL == 0) {
                 reportProgress()
             }
-            val sourceLabels = labelsByStop[connection.departureStopId]
-                ?.values
-                ?.flatMap { it }
-                .orEmpty()
+            if (connection.departureTime < minOriginReadyTime) {
+                continue
+            }
+            val labelsByTrip = labelsByStop[connection.departureStopId] ?: continue
+            sourceBuffer.clear()
+            for (tripLabels in labelsByTrip.values) {
+                sourceBuffer.addAll(tripLabels)
+            }
 
-            for (label in sourceLabels) {
+            for (index in sourceBuffer.indices) {
+                val label = sourceBuffer[index]
                 val changedTrip = label.lastTripId != null &&
                     label.lastTripId != connection.tripId
                 val transferCount = label.transferCount + if (changedTrip) 1 else 0
@@ -291,6 +310,8 @@ class CsaEngine @Inject constructor() {
                     JourneyCandidate(
                         state = state,
                         destinationAccess = destinationAccess,
+                        actualArrivalTime = state.arrivalTime.toLong() +
+                            destinationAccess.walkingDurationSeconds,
                         estimatedArrivalTime = state.generalizedArrivalTime +
                             destinationAccess.walkingDurationSeconds,
                         departureFromOriginTime = state.originDepartureTime ?: startTime,
@@ -301,7 +322,7 @@ class CsaEngine @Inject constructor() {
         }
         val eligibleCandidates = candidates.filter { candidate ->
             arrivalDeadline == null ||
-                candidate.estimatedArrivalTime <= arrivalDeadline.toLong()
+                candidate.actualArrivalTime <= arrivalDeadline.toLong()
         }
         val candidateComparator: Comparator<JourneyCandidate> =
             if (arrivalDeadline == null) {
@@ -323,11 +344,17 @@ class CsaEngine @Inject constructor() {
         }
 
         val selectedCandidates = orderedCandidates.take(maxResults).toMutableList()
-        val leastWalkingCandidate = eligibleCandidates.minWithOrNull(
+        val leastWalkingComparator = if (arrivalDeadline == null) {
             compareBy<JourneyCandidate> { it.totalWalkingDistanceMeters }
                 .thenBy { it.estimatedArrivalTime }
                 .thenBy { it.state.transferCount }
-        )
+        } else {
+            compareBy<JourneyCandidate> { it.totalWalkingDistanceMeters }
+                .thenByDescending { it.departureFromOriginTime }
+                .thenBy { it.estimatedArrivalTime - it.departureFromOriginTime }
+                .thenBy { it.state.transferCount }
+        }
+        val leastWalkingCandidate = eligibleCandidates.minWithOrNull(leastWalkingComparator)
         if (
             maxResults > 1 &&
             leastWalkingCandidate != null &&
@@ -386,6 +413,7 @@ class CsaEngine @Inject constructor() {
     private data class JourneyCandidate(
         val state: JourneyState,
         val destinationAccess: StopAccess,
+        val actualArrivalTime: Long,
         val estimatedArrivalTime: Long,
         val departureFromOriginTime: Int,
         val totalWalkingDistanceMeters: Double
@@ -414,6 +442,7 @@ class CsaEngine @Inject constructor() {
                 readyTime <= other.readyTime &&
                 transferCount <= other.transferCount &&
                 walkedDistanceMeters <= other.walkedDistanceMeters &&
+                (!hasWalkedSinceTransit || other.hasWalkedSinceTransit) &&
                 (!preferLatestDeparture ||
                     (originDepartureTime ?: Int.MIN_VALUE) >=
                     (other.originDepartureTime ?: Int.MIN_VALUE))

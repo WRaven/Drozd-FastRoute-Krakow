@@ -1,5 +1,6 @@
 package pl.wraven.mpkfastroute.core.live
 
+import androidx.room.withTransaction
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import javax.inject.Inject
@@ -18,31 +19,33 @@ class TtssDepartureRepository @Inject constructor(
     ): LiveDeparturesResult {
         require(startTimeSeconds >= 0) { "Start time must not be negative." }
         val endTimeSeconds = Math.addExact(startTimeSeconds, SEARCH_WINDOW_SECONDS)
-        val stop = database.stopDao().getById(stopId)
-            ?: throw IllegalStateException("The selected departure stop no longer exists.")
         val dateString = serviceDate.format(DateTimeFormatter.BASIC_ISO_DATE)
-        val calendarDao = database.serviceCalendarDao()
-        val activeServiceIds = ServiceCalendarResolver.activeServiceIds(
-            date = serviceDate,
-            calendars = calendarDao.getForDate(dateString),
-            exceptions = calendarDao.getExceptionsForDate(dateString)
-        )
-        if (activeServiceIds.isEmpty()) {
-            return LiveDeparturesResult(emptyList(), null)
-        }
-
-        val staticDepartures = database.stopTimeDao()
-            .getDeparturesAtStopBetween(stopId, startTimeSeconds, endTimeSeconds)
-            .asSequence()
-            .filter { it.serviceId in activeServiceIds }
-            .map {
-                StaticDeparture(
-                    routeShortName = it.routeShortName,
-                    direction = it.direction.orEmpty(),
-                    departureTime = it.departureTime
-                )
+        val (stop, staticDepartures) = database.withTransaction {
+            val stop = database.stopDao().getById(stopId)
+                ?: throw IllegalStateException("The selected departure stop no longer exists.")
+            val calendarDao = database.serviceCalendarDao()
+            val activeServiceIds = ServiceCalendarResolver.activeServiceIds(
+                date = serviceDate,
+                calendars = calendarDao.getForDate(dateString),
+                exceptions = calendarDao.getExceptionsForDate(dateString)
+            )
+            if (activeServiceIds.isEmpty()) {
+                return@withTransaction stop to emptyList()
             }
-            .toList()
+            val departures = database.stopTimeDao()
+                .getDeparturesAtStopBetween(stopId, startTimeSeconds, endTimeSeconds)
+                .asSequence()
+                .filter { it.serviceId in activeServiceIds }
+                .map {
+                    StaticDeparture(
+                        routeShortName = it.routeShortName,
+                        direction = it.direction.orEmpty(),
+                        departureTime = it.departureTime
+                    )
+                }
+                .toList()
+            stop to departures
+        }
         if (staticDepartures.isEmpty()) {
             return LiveDeparturesResult(emptyList(), null)
         }

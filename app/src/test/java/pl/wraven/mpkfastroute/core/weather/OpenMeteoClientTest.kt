@@ -126,6 +126,37 @@ class OpenMeteoClientTest {
         assertEquals("🌧️", rainyNight.symbol)
     }
 
+    @Test
+    fun fallsBackToUtcOnUnknownTimezoneAndRefreshesCacheOnBackwardClockSkew() = runBlocking {
+        val fallbackMoon = weatherConditionForTime(
+            code = 0,
+            isDay = false,
+            time = java.time.LocalDateTime.parse("2024-04-08T18:21"),
+            timezone = "Invalid/Timezone"
+        )
+        assertEquals("🌑", fallbackMoon.symbol)
+
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount += 1
+                respond(
+                    content = FORECAST_RESPONSE,
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            }
+        )
+        try {
+            val weatherClient = OpenMeteoClient(client, Json { ignoreUnknownKeys = true })
+            weatherClient.getForecast(50.0614, 19.9366, nowMillis = 10_000L)
+            weatherClient.getForecast(50.0614, 19.9366, nowMillis = 5_000L)
+            assertEquals(2, requestCount)
+        } finally {
+            client.close()
+        }
+    }
+
     private companion object {
         const val FORECAST_RESPONSE = """
             {

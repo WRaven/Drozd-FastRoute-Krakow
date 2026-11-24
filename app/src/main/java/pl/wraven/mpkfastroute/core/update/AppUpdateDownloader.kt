@@ -7,13 +7,15 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.withContext
-import pl.wraven.mpkfastroute.core.update.UpdateDownloadCandidate
 
 data class DownloadedAppUpdate(
     val file: File,
@@ -66,6 +68,13 @@ class AppUpdateDownloader @Inject constructor(
         connection.connectTimeout = CONNECT_TIMEOUT_MILLIS
         connection.readTimeout = READ_TIMEOUT_MILLIS
         connection.instanceFollowRedirects = true
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        val coroutineContext = currentCoroutineContext()
+        val cancellationHandle = coroutineContext.job.invokeOnCompletion { cause ->
+            if (cause != null) {
+                connection.disconnect()
+            }
+        }
         return try {
             val statusCode = connection.responseCode
             if (statusCode !in 200..299) {
@@ -89,7 +98,6 @@ class AppUpdateDownloader @Inject constructor(
             try {
                 val contentLength = connection.contentLengthLong
                 if (contentLength <= 0) onProgress(null)
-                val coroutineContext = currentCoroutineContext()
                 var downloadedBytes = 0L
                 val sha256 = candidate.sha256?.let { MessageDigest.getInstance("SHA-256") }
                 connection.inputStream.use { input ->
@@ -131,12 +139,12 @@ class AppUpdateDownloader @Inject constructor(
                 if (packageName != context.packageName) {
                     throw IOException("Pobrany plik nie jest aktualizacją tej aplikacji.")
                 }
-                if (targetFile.exists() && !targetFile.delete()) {
-                    throw IOException("Nie można zastąpić poprzednio pobranego pliku APK.")
-                }
-                if (!temporaryFile.renameTo(targetFile)) {
-                    throw IOException("Nie można zapisać pobranego pliku APK.")
-                }
+                Files.move(
+                    temporaryFile.toPath(),
+                    targetFile.toPath(),
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+                pruneStaleUpdates(updateDirectory, keepFile = targetFile)
                 completed = true
                 onProgress(100)
                 targetFile
@@ -144,8 +152,15 @@ class AppUpdateDownloader @Inject constructor(
                 if (!completed) temporaryFile.delete()
             }
         } finally {
+            cancellationHandle.dispose()
             connection.disconnect()
         }
+    }
+
+    private fun pruneStaleUpdates(updateDirectory: File, keepFile: File) {
+        updateDirectory.listFiles { file ->
+            file.isFile && file.absolutePath != keepFile.absolutePath
+        }?.forEach { staleFile -> staleFile.delete() }
     }
 
     private fun safeFileVersion(version: String): String =
@@ -153,6 +168,7 @@ class AppUpdateDownloader @Inject constructor(
 
     private companion object {
         const val UPDATE_DIRECTORY = "updates"
+        const val USER_AGENT = "Drozd-FastRoute"
         const val CONNECT_TIMEOUT_MILLIS = 30_000
         const val READ_TIMEOUT_MILLIS = 120_000
         const val BUFFER_SIZE = 32 * 1024

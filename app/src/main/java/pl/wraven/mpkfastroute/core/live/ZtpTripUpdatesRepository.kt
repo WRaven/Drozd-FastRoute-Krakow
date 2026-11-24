@@ -47,18 +47,17 @@ class ZtpTripUpdatesRepository @Inject constructor(
         serviceDate: LocalDate? = null
     ): LiveTripUpdate? {
         val feed = fetchFeed(mode)
-        return mapTripUpdate(feed, tripId)?.takeIf {
-            serviceDate == null || it.serviceDate == null || it.serviceDate == serviceDate
-        }
+        return mapTripUpdate(feed, tripId, serviceDate)
     }
 
     suspend fun getTripUpdates(
         mode: TransitVehicleMode,
-        tripIds: Set<String>
+        tripIds: Set<String>,
+        serviceDate: LocalDate? = null
     ): Map<String, LiveTripUpdate> = if (tripIds.isEmpty()) {
         emptyMap()
     } else {
-        mapTripUpdates(fetchFeed(mode), tripIds)
+        mapTripUpdates(fetchFeed(mode), tripIds, serviceDate)
     }
 
     private suspend fun fetchFeed(mode: TransitVehicleMode): GtfsRealtime.FeedMessage {
@@ -101,12 +100,14 @@ internal fun transitVehicleModeForGtfsRouteType(routeType: Int?): TransitVehicle
 
 internal fun mapTripUpdate(
     feed: GtfsRealtime.FeedMessage,
-    tripId: String
-): LiveTripUpdate? = mapTripUpdates(feed, setOf(tripId))[tripId]
+    tripId: String,
+    serviceDate: LocalDate? = null
+): LiveTripUpdate? = mapTripUpdates(feed, setOf(tripId), serviceDate)[tripId]
 
 internal fun mapTripUpdates(
     feed: GtfsRealtime.FeedMessage,
-    tripIds: Set<String>
+    tripIds: Set<String>,
+    serviceDate: LocalDate? = null
 ): Map<String, LiveTripUpdate> {
     val sourceTimestamp = feed.header.timestamp.takeIf {
         feed.header.hasTimestamp() && it > 0
@@ -116,11 +117,12 @@ internal fun mapTripUpdates(
         .filter { it.hasTripUpdate() && it.tripUpdate.hasTrip() }
         .map { it.tripUpdate }
         .filter { update -> update.trip.hasTripId() && update.trip.tripId in tripIds }
-        .distinctBy { it.trip.tripId }
-        .associate { update ->
-            val tripId = update.trip.tripId
-            tripId to mapTripUpdate(update, tripId, sourceTimestamp)
+        .map { update -> mapTripUpdate(update, update.trip.tripId, sourceTimestamp) }
+        .filter { mapped ->
+            serviceDate == null || mapped.serviceDate == null || mapped.serviceDate == serviceDate
         }
+        .distinctBy(LiveTripUpdate::tripId)
+        .associateBy(LiveTripUpdate::tripId)
 }
 
 private fun mapTripUpdate(

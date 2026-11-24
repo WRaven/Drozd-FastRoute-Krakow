@@ -2,24 +2,29 @@ package pl.wraven.mpkfastroute.core.settings
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.IOException
 import javax.inject.Inject
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
 import kotlin.math.roundToInt
 import pl.wraven.mpkfastroute.core.audio.RadioStation
 import pl.wraven.mpkfastroute.core.location.GeoPlace
 
 private val Context.appPreferencesDataStore by preferencesDataStore(
-    name = "mpk_fastroute_preferences"
+    name = "mpk_fastroute_preferences",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
 )
 
 class AppPreferences internal constructor(
@@ -32,74 +37,88 @@ class AppPreferences internal constructor(
         json: Json
     ) : this(context.appPreferencesDataStore, json)
 
-    val destinationShortcutNames: Flow<DestinationShortcutNames> = dataStore.data.map { preferences ->
-        val defaults = DestinationShortcutNames()
-        DestinationShortcutNames(
-            home = preferences[HOME_SHORTCUT_NAME] ?: defaults.home,
-            work = preferences[WORK_SHORTCUT_NAME] ?: defaults.work
-        )
+    private val safeData: Flow<Preferences> = dataStore.data.catch { exception ->
+        if (exception is IOException) {
+            emit(emptyPreferences())
+        } else {
+            throw exception
+        }
     }
 
-    val homeStopId: Flow<String?> = dataStore.data.map { preferences ->
+    val destinationShortcutNames: Flow<DestinationShortcutNames> = safeData.map { preferences ->
+        val defaults = DestinationShortcutNames()
+        runCatching {
+            DestinationShortcutNames(
+                home = preferences[HOME_SHORTCUT_NAME] ?: defaults.home,
+                work = preferences[WORK_SHORTCUT_NAME] ?: defaults.work
+            )
+        }.getOrDefault(defaults)
+    }
+
+    val homeStopId: Flow<String?> = safeData.map { preferences ->
         preferences[HOME_STOP_ID]
     }
 
-    val workStopId: Flow<String?> = dataStore.data.map { preferences ->
+    val workStopId: Flow<String?> = safeData.map { preferences ->
         preferences[WORK_STOP_ID]
     }
 
-    val homePlace: Flow<GeoPlace?> = dataStore.data.map { preferences ->
+    val homePlace: Flow<GeoPlace?> = safeData.map { preferences ->
         readPlace(preferences, HOME_PLACE_LABEL, HOME_LATITUDE, HOME_LONGITUDE)
     }
 
-    val workPlace: Flow<GeoPlace?> = dataStore.data.map { preferences ->
+    val workPlace: Flow<GeoPlace?> = safeData.map { preferences ->
         readPlace(preferences, WORK_PLACE_LABEL, WORK_LATITUDE, WORK_LONGITUDE)
     }
 
-    val homeSchedule: Flow<DestinationSchedule?> = dataStore.data.map { preferences ->
-        DestinationSchedule.decode(preferences[HOME_SCHEDULE])
+    val homeSchedule: Flow<DestinationSchedule?> = safeData.map { preferences ->
+        runCatching { DestinationSchedule.decode(preferences[HOME_SCHEDULE]) }.getOrNull()
     }
 
-    val workSchedule: Flow<DestinationSchedule?> = dataStore.data.map { preferences ->
-        DestinationSchedule.decode(preferences[WORK_SCHEDULE])
+    val workSchedule: Flow<DestinationSchedule?> = safeData.map { preferences ->
+        runCatching { DestinationSchedule.decode(preferences[WORK_SCHEDULE]) }.getOrNull()
     }
 
-    val homeCommuteNotificationOccurrence: Flow<String?> = dataStore.data.map { preferences ->
+    val homeCommuteNotificationOccurrence: Flow<String?> = safeData.map { preferences ->
         preferences[HOME_COMMUTE_NOTIFICATION_OCCURRENCE]
     }
 
-    val workCommuteNotificationOccurrence: Flow<String?> = dataStore.data.map { preferences ->
+    val workCommuteNotificationOccurrence: Flow<String?> = safeData.map { preferences ->
         preferences[WORK_COMMUTE_NOTIFICATION_OCCURRENCE]
     }
 
-    val skippedUpdateVersion: Flow<String?> = dataStore.data.map { preferences ->
+    val skippedUpdateVersion: Flow<String?> = safeData.map { preferences ->
         preferences[SKIPPED_UPDATE_VERSION]
     }
 
-    val customRoute: Flow<SavedRoute?> = dataStore.data.map { preferences ->
-        preferences[CUSTOM_ROUTE]?.let { json.decodeFromString<SavedRoute>(it) }
+    val customRoute: Flow<SavedRoute?> = safeData.map { preferences ->
+        preferences[CUSTOM_ROUTE]?.let { encoded ->
+            runCatching { json.decodeFromString<SavedRoute>(encoded) }.getOrNull()
+        }
     }
 
-    val recentAddressPlaces: Flow<List<GeoPlace>> = dataStore.data.map { preferences ->
+    val recentAddressPlaces: Flow<List<GeoPlace>> = safeData.map { preferences ->
         preferences[RECENT_ADDRESS_PLACES]
-            ?.let { json.decodeFromString<List<GeoPlace>>(it) }
+            ?.let { encoded ->
+                runCatching { json.decodeFromString<List<GeoPlace>>(encoded) }.getOrNull()
+            }
             .orEmpty()
             .take(MAX_RECENT_ADDRESS_PLACES)
     }
 
-    val radioStationsJson: Flow<String?> = dataStore.data.map { preferences ->
+    val radioStationsJson: Flow<String?> = safeData.map { preferences ->
         preferences[RADIO_STATIONS]
     }
 
-    val lastSelectedRadioId: Flow<String?> = dataStore.data.map { preferences ->
+    val lastSelectedRadioId: Flow<String?> = safeData.map { preferences ->
         preferences[LAST_SELECTED_RADIO_ID]
     }
 
-    val lastSelectedRadioIndex: Flow<Int> = dataStore.data.map { preferences ->
+    val lastSelectedRadioIndex: Flow<Int> = safeData.map { preferences ->
         preferences[LAST_SELECTED_RADIO_INDEX] ?: DEFAULT_RADIO_INDEX
     }
 
-    val recentStopSearches: Flow<List<String>> = dataStore.data.map { preferences ->
+    val recentStopSearches: Flow<List<String>> = safeData.map { preferences ->
         preferences[RECENT_STOP_SEARCHES]
             .orEmpty()
             .split(RECENT_STOP_DELIMITER)
@@ -182,7 +201,9 @@ class AppPreferences internal constructor(
     suspend fun recordAddressPlace(place: GeoPlace) {
         dataStore.edit { preferences ->
             val previousPlaces = preferences[RECENT_ADDRESS_PLACES]
-                ?.let { json.decodeFromString<List<GeoPlace>>(it) }
+                ?.let { encoded ->
+                    runCatching { json.decodeFromString<List<GeoPlace>>(encoded) }.getOrNull()
+                }
                 .orEmpty()
                 .filterNot {
                     it.label.equals(place.label, ignoreCase = true) &&

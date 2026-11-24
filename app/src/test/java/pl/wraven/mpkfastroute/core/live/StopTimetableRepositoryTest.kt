@@ -64,4 +64,18 @@ class StopTimetableRepositoryTest {
         assertEquals(TimetableDayType.SATURDAY, timetableDayType(LocalDate.of(2026, 11, 7)))
         assertEquals(TimetableDayType.WORKDAY, timetableDayType(LocalDate.of(2026, 11, 9)))
     }
+
+    @Test
+    fun fallsBackToRecentPastServiceDateWhenNoFutureDateMatchesDayType() {
+        val today = LocalDate.of(2026, 11, 9) // Monday
+        val timetable = buildStopTimetable(
+            rows = listOf(GtfsDepartureRow("52", "Os. Piastów", 8 * 3_600, "sat")),
+            calendars = emptyList(),
+            exceptions = listOf(CalendarDateEntity("sat", "20261107", 1)), // previous Saturday
+            today = today
+        )
+
+        assertEquals(LocalDate.of(2026, 11, 7), timetable.days[TimetableDayType.SATURDAY]?.date)
+        assertEquals(1, timetable.days[TimetableDayType.SATURDAY]?.departures?.size)
+    }
 }

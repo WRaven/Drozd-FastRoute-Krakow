@@ -40,10 +40,11 @@ internal fun buildStopTimetable(
 ): StopTimetable {
     val servicesAtStop = rows.mapTo(mutableSetOf(), GtfsDepartureRow::serviceId)
     val days = TimetableDayType.entries.associateWith { type ->
-        val date = (0L..35L).asSequence().map(today::plusDays)
+        val date = ((0L..35L).asSequence().map(today::plusDays) +
+            (1L..35L).asSequence().map(today::minusDays))
             .filter { timetableDayType(it) == type }
-            .firstOrNull { date ->
-                ServiceCalendarResolver.activeServiceIds(date, calendars, exceptions)
+            .firstOrNull { candidateDate ->
+                ServiceCalendarResolver.activeServiceIds(candidateDate, calendars, exceptions)
                     .any { it in servicesAtStop }
             }
         val activeServices = date?.let {

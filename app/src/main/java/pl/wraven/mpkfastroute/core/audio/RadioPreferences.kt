@@ -16,8 +16,9 @@ class RadioPreferences @Inject constructor(
     private val json: Json
 ) {
     val stations: Flow<List<RadioStation>> = appPreferences.radioStationsJson.map { encoded ->
-        val configuredStations =
-            encoded?.let { json.decodeFromString<List<RadioStation>>(it) } ?: RadioStations.all
+        val configuredStations = encoded?.let {
+            runCatching { json.decodeFromString<List<RadioStation>>(it) }.getOrNull()
+        } ?: RadioStations.all
         filterUnavailableRadioStations(configuredStations).ifEmpty { RadioStations.all }
     }
 

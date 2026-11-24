@@ -59,15 +59,22 @@ class ConnectionIndexBuilder @Inject constructor(
                 val stopId = cursor.getString(3)
                 val departureTime = cursor.getInt(4)
 
-                if (tripId == previousTripId) {
+                val arrivalTime = cursor.getInt(5)
+                if (
+                    tripId == previousTripId &&
+                    previousStopId != null &&
+                    previousStopId != stopId &&
+                    previousDepartureTime >= 0 &&
+                    arrivalTime >= previousDepartureTime
+                ) {
                     batch += ConnectionEntity(
                         tripId = tripId,
                         serviceId = previousServiceId,
                         routeShortName = previousRouteShortName,
-                        departureStopId = checkNotNull(previousStopId),
+                        departureStopId = previousStopId,
                         arrivalStopId = stopId,
                         departureTime = previousDepartureTime,
-                        arrivalTime = cursor.getInt(5)
+                        arrivalTime = arrivalTime
                     )
                 }
 

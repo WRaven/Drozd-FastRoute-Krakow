@@ -1,13 +1,13 @@
 package pl.wraven.mpkfastroute
 
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.drawable.toDrawable
 import androidx.core.view.WindowCompat
 import dagger.hilt.android.AndroidEntryPoint
 import pl.wraven.mpkfastroute.feature.search.FastRouteScreen
@@ -21,8 +21,8 @@ class MainActivity : ComponentActivity() {
             val darkTheme = isSystemInDarkTheme()
             FastRouteTheme(darkTheme = darkTheme) {
                 val backgroundColor = MaterialTheme.colorScheme.background.toArgb()
-                SideEffect {
-                    window.setBackgroundDrawable(ColorDrawable(backgroundColor))
+                LaunchedEffect(backgroundColor, darkTheme) {
+                    window.setBackgroundDrawable(backgroundColor.toDrawable())
                     WindowCompat.getInsetsController(window, window.decorView).apply {
                         isAppearanceLightStatusBars = !darkTheme
                         isAppearanceLightNavigationBars = !darkTheme
